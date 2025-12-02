@@ -400,7 +400,9 @@ Respond with JSON:
 				jsonEnd := strings.LastIndex(response, "}")
 				if jsonStart >= 0 && jsonEnd > jsonStart {
 					jsonStr := response[jsonStart : jsonEnd+1]
-					json.Unmarshal([]byte(jsonStr), &ollamaResp)
+					if err := json.Unmarshal([]byte(jsonStr), &ollamaResp); err != nil {
+						// Ignore unmarshal error, use original response
+					}
 				}
 			}
 			if ollamaResp.Explanation != "" {
@@ -491,6 +493,7 @@ func (r *Recommender) findOptimalInstanceTypesWithCapacityType(requiredCPU, requ
 
 // findOptimalInstanceTypes finds the best instance type combination to match required capacity at lowest cost
 // Deprecated: Use findOptimalInstanceTypesWithCapacityType instead
+//nolint:unused // Kept for backward compatibility
 func (r *Recommender) findOptimalInstanceTypes(requiredCPU, requiredMemory float64, architecture, capacityType string) ([]string, int, float64) {
 	types, nodes, cost, _ := r.findOptimalInstanceTypesWithCapacityType(requiredCPU, requiredMemory, architecture, capacityType == "spot", capacityType != "spot")
 	return types, nodes, cost

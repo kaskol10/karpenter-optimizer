@@ -437,6 +437,8 @@ func (c *Client) ListNodePools(ctx context.Context) ([]NodePoolInfo, error) {
 }
 
 // getAllNodes gets all nodes from the cluster with their NodePool and instance type information
+// Deprecated: Use GetAllNodesWithUsage instead
+//nolint:unused // Kept for potential future use
 func (c *Client) getAllNodes(ctx context.Context) ([]NodeInfo, error) {
 	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -1646,6 +1648,8 @@ func parseTime(timeStr string) time.Time {
 }
 
 // sortDisruptionsByTime sorts disruptions by LastSeen time (most recent first)
+// Deprecated: Not currently used, kept for potential future use
+//nolint:unused // Kept for potential future use
 func sortDisruptionsByTime(disruptions []NodeDisruptionInfo) {
 	// Simple insertion sort by LastSeen
 	for i := 1; i < len(disruptions); i++ {

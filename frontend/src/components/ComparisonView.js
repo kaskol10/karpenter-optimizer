@@ -13,13 +13,6 @@ function ComparisonView({ recommendations }) {
   const totalRecommendedCost = recommendations.reduce((sum, rec) => 
     sum + (rec.estimatedCost || 0), 0
   );
-  const totalCurrentNodes = recommendations.reduce((sum, rec) => 
-    sum + (rec.currentState?.totalNodes || 0), 0
-  );
-  const totalRecommendedNodes = recommendations.reduce((sum, rec) => {
-    const avgNodes = rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0;
-    return sum + avgNodes;
-  }, 0);
 
   const costSavings = totalCurrentCost - totalRecommendedCost;
   const costSavingsPercent = totalCurrentCost > 0 

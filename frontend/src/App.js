@@ -10,7 +10,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 function App() {
   const [recommendations, setRecommendations] = useState([]);
-  const [error, setError] = useState(null);
+  const [error] = useState(null); // Reserved for future error handling
   const [showSettings, setShowSettings] = useState(false);
   const [clusterCost, setClusterCost] = useState(null);
   const [config, setConfig] = useState(null);

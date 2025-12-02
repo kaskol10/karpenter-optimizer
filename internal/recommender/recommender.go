@@ -200,7 +200,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 		// Get actual nodes for this NodePool from node usage data
 		// Explicitly check if the NodePool exists in the map to avoid nil slice issues
 		actualNodes, exists := nodesByNodePool[np.Name]
-		if !exists || actualNodes == nil {
+		if !exists {
 			actualNodes = []kubernetes.NodeInfo{} // Ensure it's an empty slice, not nil
 		}
 		actualNodeCount := len(actualNodes)
@@ -1206,16 +1206,6 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 	totalMemory *= 1.3
 	fmt.Printf("DEBUG: Using resource requests for sizing: CPU=%.2f, Memory=%.2f\n", totalCPU, totalMemory)
 
-	// Calculate optimal instance types and node count
-	cpuPerNode := totalCPU / 4.0 // Rough estimate
-	memoryPerNode := totalMemory / 8.0
-	if cpuPerNode < 1 {
-		cpuPerNode = 1
-	}
-	if memoryPerNode < 1 {
-		memoryPerNode = 1
-	}
-
 	// Calculate current node capacity
 	currentCapacityCPU, currentCapacityMemory := r.calculateCurrentCapacity(np, currentNodeCount)
 
@@ -1241,14 +1231,8 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 	// Only recommend GPU if workloads actually need GPU
 	if maxGPU == 0 {
 		// No GPU needed - use regular instances
-		cpuPerNode := totalCPU / 4.0 // Rough estimate for general purpose nodes
-		memoryPerNode := totalMemory / 8.0
-		if cpuPerNode < 1 {
-			cpuPerNode = 1
-		}
-		if memoryPerNode < 1 {
-			memoryPerNode = 1
-		}
+		cpuPerNode := math.Max(totalCPU/4.0, 1.0) // Rough estimate for general purpose nodes, minimum 1
+		memoryPerNode := math.Max(totalMemory/8.0, 1.0) // Minimum 1
 
 		recommendedInstanceTypes := r.selectInstanceTypes(cpuPerNode, memoryPerNode, 0) // Explicitly 0 GPU
 		recommendedCapacityType := r.selectCapacityType(workloads, isOverprovisioned)
@@ -1362,14 +1346,8 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 	} else {
 		// GPU workloads - handle separately
 		// Calculate instance types based on actual CPU/memory requirements, not hardcoded values
-		cpuPerNode := totalCPU / 4.0
-		memoryPerNode := totalMemory / 8.0
-		if cpuPerNode < 1 {
-			cpuPerNode = 1
-		}
-		if memoryPerNode < 1 {
-			memoryPerNode = 1
-		}
+		cpuPerNode := math.Max(totalCPU/4.0, 1.0) // Minimum 1
+		memoryPerNode := math.Max(totalMemory/8.0, 1.0) // Minimum 1
 
 		recommendedInstanceTypes := r.selectInstanceTypes(cpuPerNode, memoryPerNode, maxGPU)
 		recommendedCapacityType := r.selectCapacityType(workloads, false)
@@ -2357,7 +2335,7 @@ func (r *Recommender) parseMemory(memStr string) float64 {
 	var multiplier float64 = 1
 
 	if strings.HasSuffix(memStr, "ki") {
-		multiplier = 1024 / (1024 * 1024) // KiB to GiB
+		multiplier = 1024.0 / (1024.0 * 1024.0) // KiB to GiB
 		memStr = strings.TrimSuffix(memStr, "ki")
 	} else if strings.HasSuffix(memStr, "mi") {
 		multiplier = 1.0 / 1024.0 // MiB to GiB
@@ -2369,7 +2347,7 @@ func (r *Recommender) parseMemory(memStr string) float64 {
 		multiplier = 1024 // TiB to GiB
 		memStr = strings.TrimSuffix(memStr, "ti")
 	} else if strings.HasSuffix(memStr, "k") {
-		multiplier = 1000 / (1000 * 1000 * 1000) // KB to GB
+		multiplier = 1000.0 / (1000.0 * 1000.0 * 1000.0) // KB to GB
 		memStr = strings.TrimSuffix(memStr, "k")
 	} else if strings.HasSuffix(memStr, "m") {
 		multiplier = 1.0 / 1000.0 // MB to GB
