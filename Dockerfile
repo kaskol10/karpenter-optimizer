@@ -1,7 +1,12 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+# Using 1.23 as base, toolchain will automatically download 1.24 if needed
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
+
+# Enable toolchain to automatically download required Go version if needed
+# This allows go.mod to require Go 1.24 even if base image is 1.23
+ENV GOTOOLCHAIN=auto
 
 # Copy go mod files
 COPY go.mod go.sum ./
