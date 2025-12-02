@@ -5,5 +5,5 @@ frontend/
 *.md
 examples/
 Makefile
-go.sum
+# Note: go.sum is needed for Docker builds, so don't ignore it
 
