@@ -32,9 +32,38 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        continue-on-error: true
         uses: metcalfc/changelog-generator@v4.4.0
         with:
           myToken: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Read CHANGELOG.md as fallback
+        id: changelog-fallback
+        if: steps.changelog.outcome == 'failure' || steps.changelog.outputs.changelog == ''
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if [ -f CHANGELOG.md ]; then
+            # Extract changelog for this version from CHANGELOG.md
+            # Look for the version section and extract until next version or end
+            awk -v version="$VERSION" '
+              /^## \[' version '\]/ { found=1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > /tmp/changelog.txt || echo "Initial release" > /tmp/changelog.txt
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            cat /tmp/changelog.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "changelog=Initial release" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install swag CLI
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate Swagger docs
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          swag init -g cmd/api/main.go -o ./docs/swagger
 
       - name: Build binaries
         run: |
@@ -52,7 +81,7 @@ jobs:
           name: Release ${{ steps.version.outputs.version }}
           body: |
             ## Changes in this Release
-            ${{ steps.changelog.outputs.changelog }}
+            ${{ steps.changelog.outputs.changelog || steps.changelog-fallback.outputs.changelog || 'See CHANGELOG.md for details' }}
             
             ## Docker Images
             - `ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}`
