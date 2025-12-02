@@ -1,0 +1,190 @@
+# Default values for karpenter-optimizer
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/kaskol10/karpenter-optimizer
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  # For IRSA (IAM Roles for Service Accounts) on EKS, use:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/karpenter-optimizer-role
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  # When frontend is enabled as sidecar, service targets frontend (port 80)
+  # When frontend is disabled, service targets backend directly (port 8080)
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: karpenter-optimizer.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: karpenter-optimizer-tls
+  #    hosts:
+  #      - karpenter-optimizer.local
+  # Note: When frontend is enabled:
+  #   - Frontend: https://your-host/ (root path)
+  #   - Backend API: https://your-host/api/* (all API endpoints)
+  #   - Swagger: https://your-host/api/swagger/index.html
+
+resources:
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Configuration for Karpenter Optimizer
+config:
+  # Kubernetes configuration
+  # Note: When running inside Kubernetes (in-cluster), leave these empty.
+  # The application will automatically use in-cluster configuration.
+  # Only set these if running outside the cluster (e.g., local development).
+  kubeconfigPath: ""  # Path to kubeconfig file (only for out-of-cluster)
+  kubeContext: ""     # Kubernetes context name (only for out-of-cluster)
+  
+  # LLM Configuration (supports Ollama or LiteLLM)
+  # Set llm.provider to "ollama" or "litellm"
+  llm:
+    # Provider: "ollama" or "litellm" (default: "ollama" for backward compatibility)
+    provider: "ollama"
+    # Base URL for LLM service
+    # For Ollama: http://ollama-service:11434
+    # For LiteLLM: http://litellm-service:4000
+    url: ""
+    # Model name
+    # For Ollama: e.g., "granite4:latest", "gemma2:2b"
+    # For LiteLLM: e.g., "gpt-3.5-turbo", "claude-3-sonnet"
+    model: ""
+    # API key (optional, mainly for LiteLLM with authentication)
+    apiKey: ""
+    # Set to true to enable LLM features
+    enabled: false
+  
+  # Legacy Ollama configuration (for backward compatibility)
+  # If llm.provider is not set, these will be used
+  ollama:
+    enabled: false
+    url: ""
+    model: "granite4:latest"
+  
+  # AWS Pricing API configuration
+  # Note: The AWS Pricing API uses a public endpoint and doesn't require authentication.
+  # However, IRSA (IAM Roles for Service Accounts) is recommended for EKS clusters
+  # to follow AWS security best practices and enable future enhancements.
+  # To use IRSA, configure the serviceAccount.annotations above with your IAM role ARN.
+  aws:
+    region: "us-east-1"
+    # IAM role ARN for IRSA (optional, set via serviceAccount.annotations instead)
+    # This is here for documentation purposes - use serviceAccount.annotations for IRSA
+    # roleArn: ""
+  
+  # Server configuration
+  port: 8080
+  logLevel: "info"
+
+# Environment variables
+env: []
+  # - name: CUSTOM_VAR
+  #   value: "custom-value"
+
+# Additional volumes
+volumes: []
+  # - name: config
+  #   configMap:
+  #     name: custom-config
+
+# Additional volume mounts
+volumeMounts: []
+  # - name: config
+  #   mountPath: /etc/config
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# ServiceMonitor for Prometheus (if using Prometheus Operator)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# Frontend configuration (deployed as sidecar container)
+frontend:
+  enabled: true
+  image:
+    repository: ghcr.io/kaskol10/karpenter-optimizer-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Enable nginx ConfigMap to proxy /api/* requests to backend service
+  # When enabled, creates a ConfigMap with nginx config that proxies to the Kubernetes Service
+  nginxConfig: true
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+

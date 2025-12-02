@@ -1,0 +1,187 @@
+name: Helm Chart CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-chart-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-chart-ci.yml'
+
+jobs:
+  lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: helm/helm-action@v1.0.0
+        with:
+          version: '3.13.0'
+
+      - name: Run Helm Lint
+        run: |
+          helm lint charts/karpenter-optimizer
+
+      - name: Validate Chart Schema
+        run: |
+          helm lint charts/karpenter-optimizer --strict
+
+  test:
+    name: Test Helm Chart Installation
+    runs-on: ubuntu-latest
+    # Optional: Uncomment to enable full Kubernetes testing with kind
+    # This job tests actual chart installation in a real Kubernetes cluster
+    if: false  # Set to true to enable (slower but more thorough)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: helm/helm-action@v1.0.0
+        with:
+          version: '3.13.0'
+
+      - name: Set up Kubernetes (kind)
+        uses: helm/kind-action@v1.8.0
+        with:
+          version: 'v0.20.0'
+
+      - name: Create Kubernetes cluster
+        run: |
+          kind create cluster --name karpenter-optimizer-test --wait 60s
+
+      - name: Test Chart Installation (Default Values)
+        run: |
+          helm install karpenter-optimizer-test charts/karpenter-optimizer \
+            --namespace karpenter-optimizer \
+            --create-namespace \
+            --wait \
+            --timeout 5m \
+            --debug
+
+      - name: Test Chart Upgrade
+        run: |
+          helm upgrade karpenter-optimizer-test charts/karpenter-optimizer \
+            --namespace karpenter-optimizer \
+            --wait \
+            --timeout 5m \
+            --debug
+
+      - name: Test Chart Uninstall
+        run: |
+          helm uninstall karpenter-optimizer-test \
+            --namespace karpenter-optimizer
+
+      - name: Cleanup Kubernetes cluster
+        if: always()
+        run: |
+          kind delete cluster --name karpenter-optimizer-test
+
+  package:
+    name: Package Helm Chart
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: helm/helm-action@v1.0.0
+        with:
+          version: '3.13.0'
+
+      - name: Package Chart
+        run: |
+          helm package charts/karpenter-optimizer --destination ./charts
+
+      - name: Check Chart Package
+        run: |
+          ls -lh charts/*.tgz
+          helm show chart charts/karpenter-optimizer-*.tgz
+
+      - name: Upload Chart Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: helm-chart-package
+          path: charts/*.tgz
+          retention-days: 7
+
+  validate-values:
+    name: Validate Chart Values
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: helm/helm-action@v1.0.0
+        with:
+          version: '3.13.0'
+
+      - name: Validate Default Values
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer > /dev/null
+
+      - name: Validate Ollama Configuration
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set config.ollama.enabled=true \
+            --set config.ollama.url=http://ollama:11434 \
+            --set config.ollama.model=granite4:latest > /dev/null
+
+      - name: Validate LiteLLM Configuration
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set config.llm.enabled=true \
+            --set config.llm.provider=litellm \
+            --set config.llm.url=http://litellm:4000 \
+            --set config.llm.model=gpt-3.5-turbo \
+            --set config.llm.apiKey=test-key > /dev/null
+
+      - name: Validate Kubernetes Configuration
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set config.kubeconfigPath=/path/to/kubeconfig \
+            --set config.kubeContext=my-context > /dev/null
+
+      - name: Validate Ingress Configuration
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            --set ingress.hosts[0].host=karpenter-optimizer.example.com > /dev/null
+
+      - name: Validate Autoscaling Configuration
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set autoscaling.enabled=true \
+            --set autoscaling.minReplicas=2 \
+            --set autoscaling.maxReplicas=5 > /dev/null
+
+      - name: Validate Resource Limits
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set resources.limits.cpu=1000m \
+            --set resources.limits.memory=1Gi \
+            --set resources.requests.cpu=500m \
+            --set resources.requests.memory=512Mi > /dev/null
+
+      - name: Validate All Values Together
+        run: |
+          helm template karpenter-optimizer charts/karpenter-optimizer \
+            --set config.llm.enabled=true \
+            --set config.llm.provider=litellm \
+            --set config.llm.url=http://litellm:4000 \
+            --set config.llm.model=gpt-3.5-turbo \
+            --set ingress.enabled=true \
+            --set autoscaling.enabled=true \
+            --set resources.limits.cpu=1000m \
+            --set resources.limits.memory=1Gi > /dev/null
+

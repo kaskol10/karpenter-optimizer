@@ -35,10 +35,11 @@
       "Work" shall mean the work of authorship, whether in Source or
       Object form, made available under the License, as indicated by a
       copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
+      (which shall not include Communications that are clearly marked or
+      otherwise designated in writing by the copyright owner as "Not a Work").
 
       "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
+      form, that is based upon (or derived from) the Work and for which the
       editorial revisions, annotations, elaborations, or other modifications
       represent, as a whole, an original work of authorship. For the purposes
       of this License, Derivative Works shall not include works that remain
@@ -121,11 +122,11 @@
           as modifying the License.
 
       You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
+      may provide additional or different license terms and conditions for
+      use, reproduction, or distribution of Your modifications, or for any
+      such Derivative Works as a whole, provided Your use, reproduction,
+      and distribution of the Work otherwise complies with the conditions
+      stated in this License.
 
    5. Submission of Contributions. Unless You explicitly state otherwise,
       any Contribution intentionally submitted for inclusion in the Work
@@ -182,7 +183,7 @@
       replaced with your own identifying information. (Don't include
       the brackets!)  The text should be enclosed in the appropriate
       comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
+      file or class name and description of purpose be included in the
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
@@ -196,6 +197,7 @@
 
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied. See the License for the specific language governing
+   permissions and limitations under the License.
+

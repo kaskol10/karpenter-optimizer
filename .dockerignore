@@ -1,0 +1,9 @@
+bin/
+frontend/
+.git/
+.gitignore
+*.md
+examples/
+Makefile
+go.sum
+

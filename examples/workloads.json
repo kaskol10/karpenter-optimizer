@@ -1,0 +1,46 @@
+[
+  {
+    "name": "web-app",
+    "namespace": "default",
+    "cpu": "500m",
+    "memory": "512Mi",
+    "gpu": 0,
+    "labels": {
+      "app": "web",
+      "tier": "frontend"
+    }
+  },
+  {
+    "name": "api-server",
+    "namespace": "default",
+    "cpu": "2",
+    "memory": "4Gi",
+    "gpu": 0,
+    "labels": {
+      "app": "api",
+      "tier": "backend"
+    }
+  },
+  {
+    "name": "ml-training",
+    "namespace": "ml",
+    "cpu": "8",
+    "memory": "32Gi",
+    "gpu": 1,
+    "labels": {
+      "karpenter.sh/capacity-type": "on-demand",
+      "workload-type": "gpu"
+    }
+  },
+  {
+    "name": "batch-processor",
+    "namespace": "batch",
+    "cpu": "4",
+    "memory": "16Gi",
+    "gpu": 0,
+    "labels": {
+      "workload-type": "batch"
+    }
+  }
+]
+
