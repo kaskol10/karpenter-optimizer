@@ -46,6 +46,9 @@ service:
   # When frontend is disabled, service targets backend directly (port 8080)
   port: 8080
   targetPort: 8080
+  # Backend port (only used when frontend.enabled is true)
+  # This port is used for internal backend API access
+  backendPort: 8081
 
 ingress:
   enabled: false

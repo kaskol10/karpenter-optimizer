@@ -12,7 +12,7 @@ spec:
       targetPort: http-frontend
       protocol: TCP
       name: http
-    - port: {{ .Values.config.port }}
+    - port: {{ .Values.service.backendPort | default .Values.config.port }}
       targetPort: http
       protocol: TCP
       name: http-backend

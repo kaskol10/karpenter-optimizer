@@ -36,7 +36,7 @@ spec:
               service:
                 name: {{ include "karpenter-optimizer.fullname" $ }}
                 port:
-                  number: {{ $.Values.config.port }}
+                  number: {{ $.Values.service.backendPort | default $.Values.config.port }}
           # Frontend routes - root path
           - path: /
             pathType: Prefix
