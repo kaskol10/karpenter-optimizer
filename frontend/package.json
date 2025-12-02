@@ -1,6 +1,6 @@
 {
   "name": "karpenter-optimizer-frontend",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
