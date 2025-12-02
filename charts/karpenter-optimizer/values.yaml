@@ -136,7 +136,7 @@ config:
   # to follow AWS security best practices and enable future enhancements.
   # To use IRSA, configure the serviceAccount.annotations above with your IAM role ARN.
   aws:
-    region: "us-east-1"
+    region: "eu-west-1"
     # IAM role ARN for IRSA (optional, set via serviceAccount.annotations instead)
     # This is here for documentation purposes - use serviceAccount.annotations for IRSA
     # roleArn: ""
@@ -177,6 +177,7 @@ serviceMonitor:
 # Frontend configuration (deployed as sidecar container)
 frontend:
   enabled: true
+  port: 80
   image:
     repository: ghcr.io/kaskol10/karpenter-optimizer-frontend
     tag: ""
@@ -184,6 +185,14 @@ frontend:
   # Enable nginx ConfigMap to proxy /api/* requests to backend service
   # When enabled, creates a ConfigMap with nginx config that proxies to the Kubernetes Service
   nginxConfig: true
+  # Security context for frontend container (overrides pod-level securityContext)
+  # Set to {} to use pod-level securityContext, or specify custom values
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: false
   resources:
     limits:
       cpu: 100m

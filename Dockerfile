@@ -34,11 +34,23 @@ FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /root/
+# Create a non-root user
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
+
+# Create app directory with proper permissions
+WORKDIR /app
+RUN chown appuser:appuser /app
 
 # Copy binaries from builder
-COPY --from=builder /app/bin/karpenter-optimizer-api .
-COPY --from=builder /app/bin/karpenter-optimizer .
+COPY --from=builder --chown=appuser:appuser /app/bin/karpenter-optimizer-api /app/karpenter-optimizer-api
+COPY --from=builder --chown=appuser:appuser /app/bin/karpenter-optimizer /app/karpenter-optimizer
+
+# Ensure binaries are executable
+RUN chmod +x /app/karpenter-optimizer-api /app/karpenter-optimizer
+
+# Switch to non-root user
+USER appuser
 
 EXPOSE 8080
 

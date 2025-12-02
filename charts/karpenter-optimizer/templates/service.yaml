@@ -8,7 +8,7 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     {{- if .Values.frontend.enabled }}
-    - port: {{ .Values.service.port }}
+    - port: {{ .Values.frontend.port }}
       targetPort: http-frontend
       protocol: TCP
       name: http
