@@ -107,7 +107,7 @@ jobs:
           helm show chart charts/karpenter-optimizer-*.tgz
 
       - name: Upload Chart Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: helm-chart-package
           path: charts/*.tgz
