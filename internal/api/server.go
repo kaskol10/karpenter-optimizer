@@ -50,6 +50,13 @@ import (
 	"github.com/karpenter-optimizer/docs/swagger" // Swagger docs
 )
 
+// debugLog prints debug messages only if debug logging is enabled
+func debugLog(debug bool, format string, args ...interface{}) {
+	if debug {
+		fmt.Printf(format, args...)
+	}
+}
+
 type Server struct {
 	router      *gin.Engine
 	config      *config.Config
@@ -82,23 +89,23 @@ func NewServer(cfg *config.Config) *Server {
 	// Initialize Kubernetes client
 	// Always try to initialize (will use provided kubeconfig, context, or default locations)
 	var k8sClient *kubernetes.Client
-	k8sClient, err := kubernetes.NewClient(cfg.KubeconfigPath, cfg.KubeContext)
+	k8sClient, err := kubernetes.NewClientWithDebug(cfg.KubeconfigPath, cfg.KubeContext, cfg.Debug)
 	if err != nil {
 		// Log error but continue without Kubernetes client
 		// This allows the server to start without cluster access
-		fmt.Printf("Warning: Failed to initialize Kubernetes client: %v\n", err)
-		fmt.Printf("Kubernetes features will be disabled. Check KUBECONFIG and KUBE_CONTEXT settings.\n")
+		debugLog(cfg.Debug, "Warning: Failed to initialize Kubernetes client: %v\n", err)
+		debugLog(cfg.Debug, "Kubernetes features will be disabled. Check KUBECONFIG and KUBE_CONTEXT settings.\n")
 		if cfg.KubeconfigPath != "" {
-			fmt.Printf("  Attempted kubeconfig path: %s\n", cfg.KubeconfigPath)
+			debugLog(cfg.Debug, "  Attempted kubeconfig path: %s\n", cfg.KubeconfigPath)
 		}
 		if cfg.KubeContext != "" {
-			fmt.Printf("  Attempted context: %s\n", cfg.KubeContext)
+			debugLog(cfg.Debug, "  Attempted context: %s\n", cfg.KubeContext)
 		}
 		k8sClient = nil
 	} else {
-		fmt.Printf("Successfully connected to Kubernetes cluster\n")
+		debugLog(cfg.Debug, "Successfully connected to Kubernetes cluster\n")
 		if cfg.KubeContext != "" {
-			fmt.Printf("  Using context: %s\n", cfg.KubeContext)
+			debugLog(cfg.Debug, "  Using context: %s\n", cfg.KubeContext)
 		}
 	}
 
@@ -900,10 +907,13 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		totalNodes++
 
 		// Count by capacity type
-		if node.CapacityType == "spot" {
+		switch node.CapacityType {
+		case "spot":
 			spotNodes++
-		} else if node.CapacityType == "on-demand" || node.CapacityType == "" {
+		case "on-demand", "":
 			onDemandNodes++
+		default:
+			onDemandNodes++ // Default to on-demand for unknown types
 		}
 
 		// Sum pod counts

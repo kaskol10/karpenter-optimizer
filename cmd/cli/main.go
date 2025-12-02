@@ -76,7 +76,12 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to open file: %w", err)
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				// Log error but don't fail the command
+				fmt.Fprintf(os.Stderr, "Warning: failed to close file: %v\n", err)
+			}
+		}()
 
 		data, err := io.ReadAll(file)
 		if err != nil {
@@ -116,7 +121,12 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to call API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the command
+			fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -152,7 +162,12 @@ func runRecommendations(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to call API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the command
+			fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -190,7 +205,12 @@ func runMetrics(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to call API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the command
+			fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -50,6 +50,10 @@ spec:
             - name: KUBE_CONTEXT
               value: {{ .Values.config.kubeContext | quote }}
             {{- end }}
+            {{- if .Values.config.debug }}
+            - name: DEBUG
+              value: "true"
+            {{- end }}
             {{- if .Values.config.llm.enabled }}
             # LLM Provider Configuration (supports Ollama or LiteLLM)
             - name: LLM_PROVIDER

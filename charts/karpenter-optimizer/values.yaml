@@ -101,6 +101,10 @@ config:
   kubeconfigPath: ""  # Path to kubeconfig file (only for out-of-cluster)
   kubeContext: ""     # Kubernetes context name (only for out-of-cluster)
   
+  # Debug logging
+  # Set to true to enable verbose debug logging
+  debug: false
+  
   # LLM Configuration (supports Ollama or LiteLLM)
   # Set llm.provider to "ollama" or "litellm"
   llm:

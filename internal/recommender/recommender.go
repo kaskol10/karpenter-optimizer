@@ -257,11 +257,12 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 		for _, disruption := range disruptions {
 			if disruption.NodePool == np.Name {
 				// Count disruptions for this NodePool
-				if disruption.Reason == "Consolidation" {
+				switch disruption.Reason {
+				case "Consolidation":
 					npDisruptionInsights.ConsolidationCount++
-				} else if disruption.Reason == "Expiration" || disruption.Reason == "Drift" {
+				case "Expiration", "Drift":
 					npDisruptionInsights.ExpirationCount++
-				} else if disruption.Reason == "Termination" {
+				case "Termination":
 					npDisruptionInsights.TerminationCount++
 				}
 				npDisruptionInsights.TotalDisruptions++
@@ -399,11 +400,12 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 				capacityType = np.CapacityType
 			}
 			// Normalize capacity type
-			if capacityType == "on-demand" || capacityType == "onDemand" || capacityType == "ondemand" {
+			switch capacityType {
+			case "on-demand", "onDemand", "ondemand", "":
 				onDemandNodeCount++
-			} else if capacityType == "spot" {
+			case "spot":
 				spotNodeCount++
-			} else {
+			default:
 				// Unknown, default to on-demand
 				onDemandNodeCount++
 			}
@@ -520,11 +522,12 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 					}
 
 					// Normalize capacity type values
-					if capacityType == "on-demand" || capacityType == "onDemand" || capacityType == "ondemand" {
+					switch capacityType {
+					case "on-demand", "onDemand", "ondemand":
 						capacityType = "on-demand"
-					} else if capacityType == "spot" {
+					case "spot":
 						capacityType = "spot"
-					} else {
+					default:
 						// Unknown value, default to on-demand
 						capacityType = "on-demand"
 					}
@@ -802,7 +805,7 @@ Return JSON only:
 // optimizations for existing Karpenter NodePools
 func (r *Recommender) GenerateClusterRecommendations() ([]NodePoolRecommendation, error) {
 	if r.k8sClient == nil {
-		return nil, fmt.Errorf("Kubernetes client not configured")
+		return nil, fmt.Errorf("kubernetes client not configured")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1831,7 +1834,7 @@ func (r *Recommender) estimateInstanceCapacity(instanceType string) (float64, fl
 	it := strings.ToLower(instanceType)
 
 	// Extract size multiplier
-	var multiplier float64 = 1.0
+	multiplier := 1.0
 	if strings.Contains(it, ".2xlarge") {
 		multiplier = 2.0
 	} else if strings.Contains(it, ".4xlarge") {
@@ -2100,7 +2103,7 @@ func (r *Recommender) estimateCostFromFamily(instanceType string) float64 {
 	it := strings.ToLower(instanceType)
 
 	// Extract size multiplier (relative to xlarge = 1.0)
-	var multiplier float64 = 1.0
+	multiplier := 1.0
 	if strings.Contains(it, ".8xlarge") {
 		multiplier = 8.0
 	} else if strings.Contains(it, ".4xlarge") {

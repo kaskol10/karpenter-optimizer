@@ -382,10 +382,10 @@ func (r *Recommender) parseMemory(memStr string) float64 {
 	var multiplier float64 = 1
 	
 	if strings.HasSuffix(memStr, "ki") {
-		multiplier = 1024 / (1024 * 1024) // KiB to GiB
+		multiplier = 1024.0 / (1024.0 * 1024.0) // KiB to GiB
 		memStr = strings.TrimSuffix(memStr, "ki")
 	} else if strings.HasSuffix(memStr, "mi") {
-		multiplier = 1 / 1024 // MiB to GiB
+		multiplier = 1.0 / 1024.0 // MiB to GiB
 		memStr = strings.TrimSuffix(memStr, "mi")
 	} else if strings.HasSuffix(memStr, "gi") {
 		multiplier = 1 // Already GiB
@@ -394,10 +394,10 @@ func (r *Recommender) parseMemory(memStr string) float64 {
 		multiplier = 1024 // TiB to GiB
 		memStr = strings.TrimSuffix(memStr, "ti")
 	} else if strings.HasSuffix(memStr, "k") {
-		multiplier = 1000 / (1000 * 1000 * 1000) // KB to GB
+		multiplier = 1000.0 / (1000.0 * 1000.0 * 1000.0) // KB to GB
 		memStr = strings.TrimSuffix(memStr, "k")
 	} else if strings.HasSuffix(memStr, "m") {
-		multiplier = 1 / 1000 // MB to GB
+		multiplier = 1.0 / 1000.0 // MB to GB
 		memStr = strings.TrimSuffix(memStr, "m")
 	} else if strings.HasSuffix(memStr, "g") {
 		multiplier = 1 // Already GB

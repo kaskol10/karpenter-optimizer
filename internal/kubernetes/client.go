@@ -27,6 +27,7 @@ type Client struct {
 	clientset       *kubernetes.Clientset
 	dynamicClient   dynamic.Interface
 	discoveryClient discovery.DiscoveryInterface
+	debug           bool
 }
 
 type WorkloadInfo struct {
@@ -43,6 +44,10 @@ type WorkloadInfo struct {
 }
 
 func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
+	return NewClientWithDebug(kubeconfigPath, kubeContext, false)
+}
+
+func NewClientWithDebug(kubeconfigPath, kubeContext string, debug bool) (*Client, error) {
 	var config *rest.Config
 	var err error
 
@@ -114,7 +119,15 @@ func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
 		clientset:       clientset,
 		dynamicClient:   dynamicClient,
 		discoveryClient: discoveryClient,
+		debug:           debug,
 	}, nil
+}
+
+// debugLog prints debug messages only if debug logging is enabled
+func (c *Client) debugLog(format string, args ...interface{}) {
+	if c.debug {
+		fmt.Printf(format, args...)
+	}
 }
 
 func (c *Client) ListNamespaces(ctx context.Context) ([]string, error) {
@@ -432,7 +445,7 @@ func (c *Client) ListNodePools(ctx context.Context) ([]NodePoolInfo, error) {
 		}
 	}
 
-	fmt.Printf("Successfully parsed %d out of %d NodePools\n", len(result), len(nodePools.Items))
+	c.debugLog("Successfully parsed %d out of %d NodePools\n", len(result), len(nodePools.Items))
 	return result, nil
 }
 
@@ -572,13 +585,14 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				fmt.Printf("Warning: Error fetching pods for node %s after retries: %v\n", node.Name, err)
 			}
 			pods = &corev1.PodList{Items: []corev1.Pod{}}
-		} else if pods != nil && len(pods.Items) > 20 {
-			fmt.Printf("Debug: Node %s has %d pods\n", node.Name, len(pods.Items))
+		} else if len(pods.Items) > 20 {
+			c.debugLog("Debug: Node %s has %d pods\n", node.Name, len(pods.Items))
 		}
 
 		// Process pods if we have any
 		// Following eks-node-viewer approach: only count scheduled pod resource requests (not limits, not init containers)
-		if pods != nil && len(pods.Items) > 0 {
+		// pods is guaranteed to be non-nil after error handling above
+		if len(pods.Items) > 0 {
 			for _, pod := range pods.Items {
 				// Skip pods that are being terminated
 				if pod.DeletionTimestamp != nil {
@@ -644,7 +658,8 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 
 		// Count pods on this node (excluding terminated and terminal pods)
 		podCount := 0
-		if pods != nil && len(pods.Items) > 0 {
+		// pods is guaranteed to be non-nil after error handling above
+		if len(pods.Items) > 0 {
 			for _, pod := range pods.Items {
 				if pod.DeletionTimestamp == nil &&
 					pod.Status.Phase != corev1.PodSucceeded &&
@@ -716,7 +731,8 @@ func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) 
 
 			// Try to get workload from owner references
 			for _, owner := range pod.OwnerReferences {
-				if owner.Kind == "ReplicaSet" {
+				switch owner.Kind {
+				case "ReplicaSet":
 					// ReplicaSet name format: workloadname-randomstring
 					// Extract workload name
 					parts := strings.Split(owner.Name, "-")
@@ -725,7 +741,7 @@ func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) 
 						workloadName = strings.Join(parts[:len(parts)-1], "-")
 					}
 					workloadType = "deployment"
-				} else if owner.Kind == "StatefulSet" {
+				case "StatefulSet":
 					// StatefulSet pod name format: workloadname-ordinal
 					parts := strings.Split(pod.Name, "-")
 					if len(parts) > 1 {
@@ -733,7 +749,7 @@ func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) 
 						workloadName = strings.Join(parts[:len(parts)-1], "-")
 					}
 					workloadType = "statefulset"
-				} else if owner.Kind == "DaemonSet" {
+				case "DaemonSet":
 					workloadName = pod.Name
 					workloadType = "daemonset"
 				}
@@ -887,27 +903,26 @@ func (c *Client) parseNodePool(item *unstructured.Unstructured) (*NodePoolInfo, 
 	if requirements == nil {
 		requirements, _, _ = unstructured.NestedSlice(spec, "requirements")
 	}
-	if requirements != nil {
-		for _, req := range requirements {
-			if reqMap, ok := req.(map[string]interface{}); ok {
-				key, _ := reqMap["key"].(string)
-				operator, _ := reqMap["operator"].(string)
-				values, _ := reqMap["values"].([]interface{})
+	// Range over requirements (safe even if nil - will just not iterate)
+	for _, req := range requirements {
+		if reqMap, ok := req.(map[string]interface{}); ok {
+			key, _ := reqMap["key"].(string)
+			operator, _ := reqMap["operator"].(string)
+			values, _ := reqMap["values"].([]interface{})
 
-				if operator == "In" && len(values) > 0 {
-					if val, ok := values[0].(string); ok {
-						switch key {
-						case "karpenter.k8s.aws/instance-family":
-							// Instance family
-						case "karpenter.sh/capacity-type":
-							np.CapacityType = val
-						case "kubernetes.io/arch":
-							np.Architecture = val
-						case "karpenter.k8s.aws/instance-size":
-							// Instance size
-						default:
-							np.Requirements[key] = val
-						}
+			if operator == "In" && len(values) > 0 {
+				if val, ok := values[0].(string); ok {
+					switch key {
+					case "karpenter.k8s.aws/instance-family":
+						// Instance family
+					case "karpenter.sh/capacity-type":
+						np.CapacityType = val
+					case "kubernetes.io/arch":
+						np.Architecture = val
+					case "karpenter.k8s.aws/instance-size":
+						// Instance size
+					default:
+						np.Requirements[key] = val
 					}
 				}
 			}

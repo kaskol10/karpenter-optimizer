@@ -96,7 +96,9 @@ func (c *Client) queryPricingAPI(ctx context.Context, instanceType, capacityType
 	if err != nil {
 		return 0, fmt.Errorf("failed to query pricing API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore close errors
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -218,7 +220,9 @@ func (c *Client) QueryPricingAPIWithFilters(ctx context.Context, instanceType st
 	if err != nil {
 		return 0, fmt.Errorf("failed to query pricing API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore close errors
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -274,7 +278,9 @@ func (c *Client) GetAvailableEC2InstanceTypes(ctx context.Context, architecture 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pricing API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore close errors
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

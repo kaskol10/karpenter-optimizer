@@ -400,9 +400,7 @@ Respond with JSON:
 				jsonEnd := strings.LastIndex(response, "}")
 				if jsonStart >= 0 && jsonEnd > jsonStart {
 					jsonStr := response[jsonStart : jsonEnd+1]
-					if err := json.Unmarshal([]byte(jsonStr), &ollamaResp); err != nil {
-						// Ignore unmarshal error, use original response
-					}
+					_ = json.Unmarshal([]byte(jsonStr), &ollamaResp) // Ignore unmarshal error, use original response
 				}
 			}
 			if ollamaResp.Explanation != "" {

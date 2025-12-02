@@ -28,6 +28,7 @@ func main() {
 	// Log configuration
 	log.Printf("Starting Karpenter Optimizer API")
 	log.Printf("  Port: %s", cfg.APIPort)
+	log.Printf("  Debug: %v", cfg.Debug)
 	if cfg.KubeconfigPath != "" {
 		log.Printf("  Kubeconfig: %s", cfg.KubeconfigPath)
 	}
