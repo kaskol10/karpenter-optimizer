@@ -70,7 +70,7 @@ jobs:
           swag init -g cmd/api/main.go -o ./docs/swagger
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: --timeout=5m
