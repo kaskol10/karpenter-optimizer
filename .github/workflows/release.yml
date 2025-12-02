@@ -87,6 +87,13 @@ jobs:
             - `ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}`
             - `ghcr.io/${{ github.repository }}-frontend:${{ steps.version.outputs.version }}`
             
+            ## Helm Chart
+            ```bash
+            helm repo add karpenter-optimizer https://kaskol10.github.io/karpenter-optimizer
+            helm repo update
+            helm install karpenter-optimizer karpenter-optimizer/karpenter-optimizer --version ${{ steps.version.outputs.version }}
+            ```
+            
             ## Binaries
             Pre-built binaries are available in the assets below for Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64).
           files: |
@@ -97,4 +104,89 @@ jobs:
             dist/karpenter-optimizer-api-windows-amd64.exe
           draft: false
           prerelease: false
+
+  publish-helm-chart:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+    needs: [release]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.13.0'
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Update Chart.yaml version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/^version:.*/version: $VERSION/" charts/karpenter-optimizer/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/karpenter-optimizer/Chart.yaml
+          echo "Updated Chart.yaml:"
+          cat charts/karpenter-optimizer/Chart.yaml
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit Chart.yaml changes
+        run: |
+          git add charts/karpenter-optimizer/Chart.yaml
+          if git diff --staged --quiet; then
+            echo "No changes to Chart.yaml"
+          else
+            git commit -m "chore: bump Helm chart version to ${{ steps.version.outputs.version }}"
+            git push origin HEAD:main || echo "Failed to push Chart.yaml changes (may already be committed)"
+          fi
+
+      - name: Package Chart
+        run: |
+          helm package charts/karpenter-optimizer --destination ./charts
+          ls -lh charts/*.tgz
+          helm show chart charts/karpenter-optimizer-*.tgz
+
+      - name: Checkout gh-pages branch
+        run: |
+          git fetch origin gh-pages:gh-pages 2>/dev/null || echo "gh-pages branch does not exist yet"
+          git checkout gh-pages 2>/dev/null || git checkout -b gh-pages
+
+      - name: Generate Index
+        run: |
+          # Copy new chart package
+          cp charts/karpenter-optimizer-*.tgz . || true
+          
+          # Generate or update index.yaml
+          if [ -f index.yaml ]; then
+            helm repo index . --url https://kaskol10.github.io/karpenter-optimizer --merge index.yaml
+          else
+            helm repo index . --url https://kaskol10.github.io/karpenter-optimizer
+          fi
+          
+          # Show what was generated
+          echo "Generated index.yaml:"
+          cat index.yaml
+
+      - name: Commit and Push to gh-pages
+        run: |
+          git add index.yaml *.tgz 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit to gh-pages"
+          else
+            git commit -m "Add Helm chart version ${{ steps.version.outputs.version }}"
+            git push origin gh-pages
+            echo "✅ Published Helm chart version ${{ steps.version.outputs.version }}"
+          fi
 

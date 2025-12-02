@@ -99,7 +99,7 @@ We welcome community input! If you have ideas or feature requests, please:
 ### Using Helm (Recommended)
 
 ```bash
-helm repo add karpenter-optimizer https://charts.karpenter-optimizer.io
+helm repo add karpenter-optimizer https://kaskol10.github.io/karpenter-optimizer
 helm repo update
 helm install karpenter-optimizer karpenter-optimizer/karpenter-optimizer \
   --namespace karpenter-optimizer \

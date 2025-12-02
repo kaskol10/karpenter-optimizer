@@ -32,6 +32,9 @@ frontend/yarn-error.log*
 # Generated Swagger docs
 docs/swagger/
 
+# Helm chart packages (should be in gh-pages branch, not main)
+charts/*.tgz
+
 # IDE
 .idea/
 .vscode/
