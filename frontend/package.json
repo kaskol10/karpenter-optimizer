@@ -1,6 +1,6 @@
 {
   "name": "karpenter-optimizer-frontend",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "private": true,
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
@@ -37,4 +37,3 @@
   },
   "proxy": "http://localhost:8080"
 }
-
