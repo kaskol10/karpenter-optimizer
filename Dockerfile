@@ -12,8 +12,16 @@ ENV GOTOOLCHAIN=auto
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Install swag CLI for generating Swagger docs
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Copy source code
 COPY . .
+
+# Generate Swagger documentation before building
+# Ensure swag is in PATH (default GOPATH in golang image is /go)
+ENV PATH=$PATH:/go/bin
+RUN swag init -g cmd/api/main.go -o ./docs/swagger
 
 # Build the API server
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/karpenter-optimizer-api ./cmd/api
