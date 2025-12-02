@@ -223,34 +223,20 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 		actualInstanceTypes := []string{} // Initialize as empty slice
 		instanceTypeSet := make(map[string]bool)
 
-		if actualNodeCount > 0 {
-			// Use actual node data for this NodePool
-			for _, node := range actualNodes {
-				if node.CPUUsage != nil {
-					npCPUUsed += node.CPUUsage.Used
-					npCPUAllocatable += node.CPUUsage.Allocatable
-				}
-				if node.MemoryUsage != nil {
-					npMemoryUsed += node.MemoryUsage.Used
-					npMemoryAllocatable += node.MemoryUsage.Allocatable
-				}
-				// Collect unique instance types
-				if node.InstanceType != "" && !instanceTypeSet[node.InstanceType] {
-					actualInstanceTypes = append(actualInstanceTypes, node.InstanceType)
-					instanceTypeSet[node.InstanceType] = true
-				}
+		// Use actual node data for this NodePool (actualNodeCount > 0 already checked above)
+		for _, node := range actualNodes {
+			if node.CPUUsage != nil {
+				npCPUUsed += node.CPUUsage.Used
+				npCPUAllocatable += node.CPUUsage.Allocatable
 			}
-		} else {
-			// No actual nodes - ensure all usage is explicitly 0 (no usage data available)
-			// These should already be 0 from initialization, but explicitly set to be safe
-			npCPUUsed = 0.0
-			npMemoryUsed = 0.0
-			npCPUAllocatable = 0.0
-			npMemoryAllocatable = 0.0
-			// Reset instance types to NodePool's configured types (or empty if none)
-			actualInstanceTypes = make([]string, 0)
-			if len(np.InstanceTypes) > 0 {
-				actualInstanceTypes = append(actualInstanceTypes, np.InstanceTypes...)
+			if node.MemoryUsage != nil {
+				npMemoryUsed += node.MemoryUsage.Used
+				npMemoryAllocatable += node.MemoryUsage.Allocatable
+			}
+			// Collect unique instance types
+			if node.InstanceType != "" && !instanceTypeSet[node.InstanceType] {
+				actualInstanceTypes = append(actualInstanceTypes, node.InstanceType)
+				instanceTypeSet[node.InstanceType] = true
 			}
 		}
 
@@ -1222,9 +1208,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 		// High consolidation = nodes being frequently consolidated = over-provisioned
 		isOverprovisioned = true
 		// Be more aggressive - even 1.3x capacity might be too much
-		if currentCapacityCPU > totalCPU*1.3 || currentCapacityMemory > totalMemory*1.3 {
-			isOverprovisioned = true
-		}
+		// Additional check can be added here in the future if needed
 	}
 
 	// Calculate optimal instance types and node count based on actual needs
