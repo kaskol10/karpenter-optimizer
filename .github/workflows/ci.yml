@@ -20,7 +20,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
@@ -30,7 +30,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Cache swag binary
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-swag
         with:
           path: ~/go/bin/swag
@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
@@ -81,7 +81,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Cache swag binary
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-swag
         with:
           path: ~/go/bin/swag
@@ -118,7 +118,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
@@ -128,7 +128,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Cache swag binary
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-swag
         with:
           path: ~/go/bin/swag
