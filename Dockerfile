@@ -1,6 +1,6 @@
 # Build stage
-# Using 1.23 as base, toolchain will automatically download 1.24 if needed
-FROM golang:1.23-alpine AS builder
+# Using 1.25 as base, toolchain will automatically download newer versions if needed
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/karpenter-optimizer-api ./cmd/
     CGO_ENABLED=0 GOOS=linux go build -o /app/bin/karpenter-optimizer ./cmd/cli
 
 # Final stage
-FROM alpine:latest
+FROM alpine:3.19
 
 RUN apk --no-cache add ca-certificates
 
