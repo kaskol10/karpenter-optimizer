@@ -1,16 +1,14 @@
 # Build stage
-# Using 1.25 as base, toolchain will automatically download newer versions if needed
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Enable toolchain to automatically download required Go version if needed
-# This allows go.mod to require Go 1.24 even if base image is 1.23
-ENV GOTOOLCHAIN=auto
-
 # Copy go mod files first for better layer caching
 COPY go.mod go.sum ./
-RUN go mod download
+
+# Download dependencies with cache mount for faster subsequent builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Install swag CLI for generating Swagger docs (cache this layer separately)
 RUN go install github.com/swaggo/swag/cmd/swag@latest
@@ -22,9 +20,17 @@ COPY . .
 ENV PATH=$PATH:/go/bin
 RUN swag init -g cmd/api/main.go -o ./docs/swagger
 
-# Build both binaries in a single layer (faster than separate layers)
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/karpenter-optimizer-api ./cmd/api && \
-    CGO_ENABLED=0 GOOS=linux go build -o /app/bin/karpenter-optimizer ./cmd/cli
+# Build both binaries with BuildKit cache mounts for faster builds
+# Cache mounts persist Go build cache and module cache between builds
+# Using -ldflags="-s -w" strips debug info and reduces binary size
+# Using -trimpath removes file system paths from binaries
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /app/bin/karpenter-optimizer-api ./cmd/api
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /app/bin/karpenter-optimizer ./cmd/cli
 
 # Final stage
 FROM alpine:3.19

@@ -6,8 +6,11 @@ WORKDIR /app
 # Copy package files first for better layer caching
 COPY package*.json ./
 
-# Install dependencies (this layer is cached unless package files change)
-RUN npm ci --prefer-offline --no-audit
+# Install dependencies with cache mount for faster builds
+# Using npm install for better compatibility with lockfileVersion 3
+# The --prefer-offline flag uses cache when available
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --prefer-offline --no-audit
 
 # Copy source code
 COPY . .
