@@ -17,20 +17,31 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: go.sum
 
       - name: Cache Go modules
         uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Cache swag binary
+        uses: actions/cache@v3
+        id: cache-swag
+        with:
+          path: ~/go/bin/swag
+          key: swag-v1.16.6
 
       - name: Install swag CLI
+        if: steps.cache-swag.outputs.cache-hit != 'true'
         run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Generate Swagger docs
         run: |
@@ -57,12 +68,31 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: go.sum
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache swag binary
+        uses: actions/cache@v3
+        id: cache-swag
+        with:
+          path: ~/go/bin/swag
+          key: swag-v1.16.6
+
+      - name: Install swag CLI
+        if: steps.cache-swag.outputs.cache-hit != 'true'
+        run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Download dependencies
         run: go mod download
-
-      - name: Install swag CLI
-        run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Generate Swagger docs
         run: |
@@ -85,12 +115,31 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: go.sum
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache swag binary
+        uses: actions/cache@v3
+        id: cache-swag
+        with:
+          path: ~/go/bin/swag
+          key: swag-v1.16.6
+
+      - name: Install swag CLI
+        if: steps.cache-swag.outputs.cache-hit != 'true'
+        run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Download dependencies
         run: go mod download
-
-      - name: Install swag CLI
-        run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Generate Swagger docs
         run: |

@@ -100,11 +100,23 @@ func NewClientWithDebug(kubeconfigPath, kubeContext string, debug bool) (*Client
 		}
 	}
 
+	// Configure rate limiting to prevent throttling
+	// QPS: queries per second (default is 5, increase to 10)
+	// Burst: maximum burst of requests (default is 10, increase to 20)
+	// This helps prevent "client-side throttling" errors when querying many resources
+	if config.QPS == 0 {
+		config.QPS = 10
+	}
+	if config.Burst == 0 {
+		config.Burst = 20
+	}
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create clientset: %w", err)
 	}
 
+	// All clients created from the same config will use the same QPS/Burst settings
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)

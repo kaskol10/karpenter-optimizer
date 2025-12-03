@@ -57,8 +57,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=${{ github.ref }}
+            type=gha,scope=refs/heads/main
+          cache-to: type=gha,mode=max,scope=${{ github.ref }}
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
       - name: Extract metadata for frontend
         id: meta-frontend
@@ -82,6 +86,10 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=${{ github.ref }}
+            type=gha,scope=refs/heads/main
+          cache-to: type=gha,mode=max,scope=${{ github.ref }}
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 

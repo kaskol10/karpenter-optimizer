@@ -65,14 +65,25 @@ jobs:
           export PATH=$PATH:$(go env GOPATH)/bin
           swag init -g cmd/api/main.go -o ./docs/swagger
 
-      - name: Build binaries
+      - name: Cache Go build cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-build-
+
+      - name: Build binaries (parallel)
         run: |
           mkdir -p dist
-          GOOS=linux GOARCH=amd64 go build -o dist/karpenter-optimizer-api-linux-amd64 ./cmd/api
-          GOOS=linux GOARCH=arm64 go build -o dist/karpenter-optimizer-api-linux-arm64 ./cmd/api
-          GOOS=darwin GOARCH=amd64 go build -o dist/karpenter-optimizer-api-darwin-amd64 ./cmd/api
-          GOOS=darwin GOARCH=arm64 go build -o dist/karpenter-optimizer-api-darwin-arm64 ./cmd/api
-          GOOS=windows GOARCH=amd64 go build -o dist/karpenter-optimizer-api-windows-amd64.exe ./cmd/api
+          # Build all binaries in parallel using background jobs
+          GOOS=linux GOARCH=amd64 go build -o dist/karpenter-optimizer-api-linux-amd64 ./cmd/api &
+          GOOS=linux GOARCH=arm64 go build -o dist/karpenter-optimizer-api-linux-arm64 ./cmd/api &
+          GOOS=darwin GOARCH=amd64 go build -o dist/karpenter-optimizer-api-darwin-amd64 ./cmd/api &
+          GOOS=darwin GOARCH=arm64 go build -o dist/karpenter-optimizer-api-darwin-arm64 ./cmd/api &
+          GOOS=windows GOARCH=amd64 go build -o dist/karpenter-optimizer-api-windows-amd64.exe ./cmd/api &
+          wait
+          ls -lh dist/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
