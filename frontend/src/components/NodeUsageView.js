@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+// Use runtime configuration from window.ENV (set via config.js) or build-time env var
+const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
+  ? window.ENV.REACT_APP_API_URL 
+  : (process.env.REACT_APP_API_URL || '');
 
 function NodeUsageView() {
   const [nodes, setNodes] = useState([]);

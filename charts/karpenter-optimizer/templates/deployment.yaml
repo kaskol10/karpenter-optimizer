@@ -116,6 +116,9 @@ spec:
             - name: http-frontend
               containerPort: {{ .Values.frontend.port }}
               protocol: TCP
+          env:
+            - name: REACT_APP_API_URL
+              value: {{ .Values.frontend.apiUrl | quote }}
           volumeMounts:
             {{- if .Values.frontend.nginxConfig }}
             - name: nginx-config

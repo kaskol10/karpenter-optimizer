@@ -29,22 +29,22 @@ spec:
       http:
         paths:
           {{- if $.Values.frontend.enabled }}
-          # Backend API routes - /api/* path (must come before / to ensure correct matching)
-          - path: /api
-            pathType: Prefix
+          # Backend API routes - configurable path (must come before frontend path to ensure correct matching)
+          - path: {{ $.Values.ingress.apiPath | default "/api" }}
+            pathType: {{ $.Values.ingress.apiPathType | default "Prefix" }}
             backend:
               service:
                 name: {{ include "karpenter-optimizer.fullname" $ }}
                 port:
                   number: {{ $.Values.config.port }}
-          # Frontend routes - root path
-          - path: /
-            pathType: Prefix
+          # Frontend routes - configurable path
+          - path: {{ $.Values.ingress.frontendPath | default "/" }}
+            pathType: {{ $.Values.ingress.frontendPathType | default "Prefix" }}
             backend:
               service:
                 name: {{ include "karpenter-optimizer.fullname" $ }}
                 port:
-                  number: {{ $.Values.service.port }}
+                  number: {{ $.Values.frontend.port }}
           {{- else }}
           # Backend only - route everything to backend
           {{- range .paths }}

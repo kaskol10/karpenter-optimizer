@@ -58,6 +58,15 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # Ingress path configuration (only used when frontend is disabled)
+  # When frontend is enabled, paths are automatically configured:
+  #   - /api -> backend (config.port)
+  #   - / -> frontend (frontend.port)
+  # When frontend is disabled, use the paths defined in hosts[].paths above
+  apiPath: /api
+  apiPathType: Prefix
+  frontendPath: /
+  frontendPathType: Prefix
   tls: []
   #  - secretName: karpenter-optimizer-tls
   #    hosts:
@@ -182,9 +191,18 @@ frontend:
     repository: ghcr.io/kaskol10/karpenter-optimizer-frontend
     tag: ""
     pullPolicy: IfNotPresent
+  # API URL configuration for frontend
+  # Set to empty string (default) to use relative URLs (recommended when nginx proxy is enabled)
+  # Set to Kubernetes service DNS (e.g., "http://karpenter-optimizer:8080") to connect directly to backend
+  # Set to external URL if needed
+  apiUrl: ""
   # Enable nginx ConfigMap to proxy /api/* requests to backend service
   # When enabled, creates a ConfigMap with nginx config that proxies to the Kubernetes Service
   nginxConfig: true
+  # Backend connection method: "localhost" (same pod, recommended) or "service" (via Kubernetes service DNS)
+  # When using "localhost", nginx connects directly to the backend container in the same pod
+  # When using "service", nginx connects via the Kubernetes service (useful for debugging or if localhost doesn't work)
+  backendConnection: "localhost"
   # Security context for frontend container (overrides pod-level securityContext)
   # Set to {} to use pod-level securityContext, or specify custom values
   securityContext:

@@ -6,7 +6,23 @@ import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+// Use runtime configuration from window.ENV (set via config.js) or build-time env var
+// window.ENV is set at runtime from environment variables in Kubernetes
+// Check if window.ENV.REACT_APP_API_URL is explicitly defined (even if empty string)
+const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
+  ? window.ENV.REACT_APP_API_URL 
+  : (process.env.REACT_APP_API_URL || '');
+
+// Debug: Log API_URL to console (can be removed in production)
+if (typeof window !== 'undefined') {
+  console.log('=== Frontend API Configuration Debug ===');
+  console.log('API_URL configured as:', API_URL || '(empty - using relative URLs)');
+  console.log('window.ENV:', window.ENV);
+  console.log('window.ENV.REACT_APP_API_URL:', window.ENV?.REACT_APP_API_URL);
+  console.log('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+  console.log('Full API URL for requests:', API_URL || '(relative URLs - same origin)');
+  console.log('========================================');
+}
 
 function App() {
   const [recommendations, setRecommendations] = useState([]);
