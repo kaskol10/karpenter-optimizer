@@ -28,6 +28,10 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+# Make the html directory writable so entrypoint can write config.js
+# This allows runtime configuration without requiring root user
+RUN chmod -R 777 /usr/share/nginx/html || chmod 777 /usr/share/nginx/html
+
 EXPOSE 80
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

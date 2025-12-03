@@ -129,6 +129,8 @@ spec:
               mountPath: /var/cache/nginx
             - name: nginx-tmp
               mountPath: /var/run
+            - name: frontend-config
+              mountPath: /tmp/frontend-config
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
         {{- end }}
@@ -145,6 +147,8 @@ spec:
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-tmp
+          emptyDir: {}
+        - name: frontend-config
           emptyDir: {}
         {{- end }}
       {{- with .Values.nodeSelector }}
