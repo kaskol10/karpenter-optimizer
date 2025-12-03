@@ -3,7 +3,7 @@ name: karpenter-optimizer
 description: A Helm chart for Karpenter Optimizer - Cost optimization tool for Karpenter NodePools
 type: application
 version: 0.0.16
-appVersion: 0.0.16
+appVersion: "0.0.16"
 keywords:
   - karpenter
   - kubernetes
