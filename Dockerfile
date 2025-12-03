@@ -1,6 +1,6 @@
 # Build stage
 # Using 1.23 as base, toolchain will automatically download 1.24 if needed
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
