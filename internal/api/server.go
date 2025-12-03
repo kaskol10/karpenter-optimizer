@@ -262,10 +262,18 @@ func (s *Server) getConfig(c *gin.Context) {
 			"kubeconfigPath": s.config.KubeconfigPath,
 			"kubeContext":    s.config.KubeContext,
 		},
+		"llm": gin.H{
+			"provider":   s.config.LLMProvider,
+			"url":        s.config.LLMURL,
+			"model":      s.config.LLMModel,
+			"configured": s.config.LLMURL != "",
+			"hasApiKey":  s.config.LLMAPIKey != "",
+		},
 		"ollama": gin.H{
 			"url":        s.config.OllamaURL,
 			"model":      s.config.OllamaModel,
 			"configured": s.config.OllamaURL != "",
+			"note":       "Legacy configuration (for backward compatibility)",
 		},
 		"api": gin.H{
 			"port": s.config.APIPort,

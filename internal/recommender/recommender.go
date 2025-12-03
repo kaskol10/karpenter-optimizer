@@ -30,8 +30,19 @@ type Recommender struct {
 
 func NewRecommender(cfg *config.Config) *Recommender {
 	var ollamaClient *ollama.Client
-	if cfg.OllamaURL != "" {
-		ollamaClient = ollama.NewClient(cfg.OllamaURL, cfg.OllamaModel)
+	// Use new LLM config if available, otherwise fall back to legacy Ollama config
+	llmURL := cfg.LLMURL
+	llmModel := cfg.LLMModel
+	if llmURL == "" {
+		llmURL = cfg.OllamaURL
+		llmModel = cfg.OllamaModel
+	}
+	
+	if llmURL != "" {
+		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.Debug)
+		if cfg.Debug {
+			fmt.Printf("LLM client initialized: provider=%s, url=%s, model=%s\n", cfg.LLMProvider, llmURL, llmModel)
+		}
 	}
 
 	// Initialize AWS Pricing client (defaults to us-east-1)

@@ -540,7 +540,8 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
-	var nodeInfos []NodeInfo
+	// Pre-allocate slice with known capacity to reduce memory allocations
+	nodeInfos := make([]NodeInfo, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
 		// Skip nodes that are being deleted
 		if node.DeletionTimestamp != nil {
@@ -604,8 +605,10 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		// Process pods if we have any
 		// Following eks-node-viewer approach: only count scheduled pod resource requests (not limits, not init containers)
 		// pods is guaranteed to be non-nil after error handling above
+		podCount := 0
 		if len(pods.Items) > 0 {
-			for _, pod := range pods.Items {
+			for i := range pods.Items {
+				pod := &pods.Items[i] // Use pointer to avoid copying pod struct
 				// Skip pods that are being terminated
 				if pod.DeletionTimestamp != nil {
 					continue
@@ -622,9 +625,13 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 					continue // Pod not yet scheduled
 				}
 
+				// Count this pod (it's scheduled and not in terminal state)
+				podCount++
+
 				// Process only regular containers (exclude init containers per eks-node-viewer)
 				// Init containers are transient and don't contribute to steady-state resource usage
-				for _, container := range pod.Spec.Containers {
+				for j := range pod.Spec.Containers {
+					container := &pod.Spec.Containers[j] // Use pointer to avoid copying container struct
 					// Only use resource requests (not limits) - this matches eks-node-viewer exactly
 					// eks-node-viewer displays "scheduled pod resource requests vs allocatable capacity"
 					if cpuReq := container.Resources.Requests[corev1.ResourceCPU]; !cpuReq.IsZero() {
@@ -637,6 +644,10 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				}
 			}
 		}
+		
+		// Explicitly clear pods reference to help GC (pods can be large)
+		// This is important for large clusters where pods.Items can be large
+		pods = nil
 
 		// Always set CPU usage info if we have allocatable (even if usage is 0)
 		if cpuAllocatable > 0 {
@@ -668,18 +679,7 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			}
 		}
 
-		// Count pods on this node (excluding terminated and terminal pods)
-		podCount := 0
-		// pods is guaranteed to be non-nil after error handling above
-		if len(pods.Items) > 0 {
-			for _, pod := range pods.Items {
-				if pod.DeletionTimestamp == nil &&
-					pod.Status.Phase != corev1.PodSucceeded &&
-					pod.Status.Phase != corev1.PodFailed {
-					podCount++
-				}
-			}
-		}
+		// Set pod count (already calculated in the loop above)
 		nodeInfo.PodCount = podCount
 
 		// Add node creation time

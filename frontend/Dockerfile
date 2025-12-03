@@ -6,9 +6,13 @@ WORKDIR /app
 # Copy package files first for better layer caching
 COPY package*.json ./
 
+# Configure npm for better reliability with registry issues
+RUN npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000
+
 # Install dependencies with cache mount for faster builds
 # Using npm install for better compatibility with lockfileVersion 3
-# The --prefer-offline flag uses cache when available
 RUN --mount=type=cache,target=/root/.npm \
     npm install --prefer-offline --no-audit
 

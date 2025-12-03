@@ -180,41 +180,69 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Ollama Configuration */}
+                  {/* LLM Configuration (Ollama or LiteLLM) */}
                   <div>
                     <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem', color: '#111827' }}>
-                      Ollama (AI Explanations)
+                      LLM (AI Explanations)
                     </h3>
-                    <div style={{ 
-                      padding: '0.75rem', 
-                      background: config.ollama?.configured ? '#f0fdf4' : '#fef2f2',
-                      borderRadius: '6px',
-                      border: `1px solid ${config.ollama?.configured ? '#bbf7d0' : '#fecaca'}`
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                        <span style={{ 
-                          width: '8px', 
-                          height: '8px', 
-                          borderRadius: '50%', 
-                          background: config.ollama?.configured ? '#22c55e' : '#ef4444',
-                          display: 'inline-block'
-                        }}></span>
-                        <strong style={{ color: config.ollama?.configured ? '#166534' : '#991b1b' }}>
-                          {config.ollama?.configured ? 'Configured' : 'Not Configured'}
-                        </strong>
-                      </div>
-                      <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                        <strong>URL:</strong> {config.ollama?.url || 'Not set'}
-                      </div>
-                      <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                        <strong>Model:</strong> {config.ollama?.model || 'Not set'}
-                      </div>
-                      {!config.ollama?.configured && (
-                        <p style={{ fontSize: '0.875rem', color: '#991b1b', marginTop: '0.5rem', marginBottom: 0 }}>
-                          Set OLLAMA_URL and OLLAMA_MODEL environment variables to enable AI-enhanced explanations.
-                        </p>
-                      )}
-                    </div>
+                    {(() => {
+                      // Use new LLM config if available, otherwise fall back to legacy Ollama config
+                      const llmConfig = config.llm?.configured ? config.llm : config.ollama;
+                      const isConfigured = llmConfig?.configured || false;
+                      const provider = config.llm?.provider || (config.ollama?.configured ? 'ollama' : null);
+                      const url = llmConfig?.url || 'Not set';
+                      const model = llmConfig?.model || 'Not set';
+                      
+                      return (
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: isConfigured ? '#f0fdf4' : '#fef2f2',
+                          borderRadius: '6px',
+                          border: `1px solid ${isConfigured ? '#bbf7d0' : '#fecaca'}`
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                            <span style={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              background: isConfigured ? '#22c55e' : '#ef4444',
+                              display: 'inline-block'
+                            }}></span>
+                            <strong style={{ color: isConfigured ? '#166534' : '#991b1b' }}>
+                              {isConfigured ? 'Configured' : 'Not Configured'}
+                            </strong>
+                            {provider && (
+                              <span style={{ 
+                                fontSize: '0.75rem', 
+                                padding: '0.125rem 0.5rem', 
+                                borderRadius: '4px',
+                                background: '#e0e7ff',
+                                color: '#4338ca',
+                                marginLeft: '0.5rem'
+                              }}>
+                                {provider.toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                            <strong>URL:</strong> {url}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                            <strong>Model:</strong> {model}
+                          </div>
+                          {config.llm?.hasApiKey && (
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                              <strong>API Key:</strong> {'*'.repeat(20)} (configured)
+                            </div>
+                          )}
+                          {!isConfigured && (
+                            <p style={{ fontSize: '0.875rem', color: '#991b1b', marginTop: '0.5rem', marginBottom: 0 }}>
+                              Set LLM_URL and LLM_MODEL (or OLLAMA_URL and OLLAMA_MODEL for legacy) environment variables to enable AI-enhanced explanations.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* AWS Configuration */}
