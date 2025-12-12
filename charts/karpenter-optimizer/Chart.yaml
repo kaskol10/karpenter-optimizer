@@ -2,8 +2,8 @@ apiVersion: v2
 name: karpenter-optimizer
 description: A Helm chart for Karpenter Optimizer - Cost optimization tool for Karpenter NodePools
 type: application
-version: 0.0.22
-appVersion: "0.0.22"
+version: 0.0.23
+appVersion: "0.0.23"
 keywords:
   - karpenter
   - kubernetes
