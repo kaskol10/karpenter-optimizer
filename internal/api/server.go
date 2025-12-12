@@ -47,7 +47,7 @@ import (
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
 	
-	"github.com/karpenter-optimizer/docs/swagger" // Swagger docs
+	"github.com/karpenter-optimizer/internal/docs/swagger" // Swagger docs
 )
 
 // debugLog prints debug messages only if debug logging is enabled
@@ -422,7 +422,7 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 	c.Writer.Flush()
 
 	// Get NodePools with actual node data
-	c.SSEvent("progress", gin.H{"message": "Fetching NodePool data...", "progress": 2.0})
+	c.SSEvent("progress", gin.H{"message": "Fetching NodePool data...", "progress": 5.0})
 	c.Writer.Flush()
 
 	nodePools, err := s.k8sClient.ListNodePools(ctx)
@@ -432,9 +432,22 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 		return
 	}
 
-	// Create progress callback
+	if len(nodePools) == 0 {
+		c.SSEvent("error", gin.H{"error": "No NodePools found in cluster"})
+		c.Writer.Flush()
+		return
+	}
+
+	// Send progress update after fetching NodePools
+	c.SSEvent("progress", gin.H{"message": fmt.Sprintf("Found %d NodePool(s), starting analysis...", len(nodePools)), "progress": 10.0})
+	c.Writer.Flush()
+
+	// Create progress callback that maps progress from 10% to 90%
+	// This ensures progress never goes backwards and provides better visual feedback
 	progressCallback := func(message string, progress float64) {
-		c.SSEvent("progress", gin.H{"message": message, "progress": progress})
+		// Map progress from 0-100% to 10-90% range
+		mappedProgress := 10.0 + (progress * 0.8) // 10% to 90%
+		c.SSEvent("progress", gin.H{"message": message, "progress": mappedProgress})
 		c.Writer.Flush()
 	}
 
@@ -446,6 +459,10 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 		c.Writer.Flush()
 		return
 	}
+
+	// Send progress update before calculating final costs
+	c.SSEvent("progress", gin.H{"message": "Calculating cluster-wide costs...", "progress": 90.0})
+	c.Writer.Flush()
 
 	// Calculate cluster-wide costs from recommendations
 	// Since recommendations now includes all NodePools, we can sum directly
@@ -459,6 +476,10 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 		totalCurrentCost += rec.CurrentCost
 		totalCurrentNodes += rec.CurrentNodes
 	}
+
+	// Send final progress update
+	c.SSEvent("progress", gin.H{"message": "Finalizing recommendations...", "progress": 95.0})
+	c.Writer.Flush()
 
 	// Send final result
 	c.SSEvent("complete", gin.H{

@@ -1,13 +1,19 @@
 import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Separator } from './ui/separator';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
+import { Check, AlertTriangle } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 function NodePoolCard({ recommendation }) {
+  if (!recommendation) {
+    return <div>Error: No recommendation data</div>;
+  }
+  
   // Support both old format (NodePoolRecommendation) and new format (NodePoolCapacityRecommendation)
   const isNewFormat = recommendation.nodePoolName !== undefined;
-  
-  // Debug: Log AI reasoning availability
-  if (recommendation.aiReasoning !== undefined) {
-    console.log(`[NodePoolCard] ${recommendation.nodePoolName || recommendation.name}: aiReasoning=${!!recommendation.aiReasoning}, length=${recommendation.aiReasoning?.length || 0}, reasoning=${!!recommendation.reasoning}`);
-  }
   
   const nodePoolName = isNewFormat ? recommendation.nodePoolName : recommendation.name;
   const currentNodes = isNewFormat 
@@ -52,297 +58,241 @@ function NodePoolCard({ recommendation }) {
   
   const hasGPU = recommendation.requirements?.gpu > 0 || recommendedInstanceTypes.some(t => t.startsWith('g4') || t.startsWith('g5'));
 
-  return (
-    <div style={{ 
-      background: 'white', 
-      padding: '1.5rem', 
-      borderRadius: '8px',
-      border: hasChanges ? '2px solid #10b981' : '1px solid #e5e7eb',
-      fontSize: '0.875rem',
-      lineHeight: '1.5'
-    }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'start',
-        marginBottom: '1.25rem'
-      }}>
-        <div>
-          <h3 style={{ 
-            margin: 0, 
-            fontSize: '1.125rem', 
-            fontWeight: 600,
-            color: '#111827',
-            marginBottom: '0.375rem'
-          }}>
-            {nodePoolName}
-          </h3>
-          {hasChanges && (
-            <div style={{ fontSize: '0.875rem', color: '#10b981', fontWeight: 500 }}>
-              Changes recommended
-            </div>
-          )}
-        </div>
-        <div style={{ 
-          padding: '0.375rem 0.75rem', 
-          background: recommendedCapacityType === 'on-demand' ? '#fef3c7' : '#d1fae5',
-          color: recommendedCapacityType === 'on-demand' ? '#92400e' : '#065f46',
-          borderRadius: '4px',
-          fontSize: '0.875rem',
-          fontWeight: 600
-        }}>
-          {recommendedCapacityType === 'on-demand' ? 'On-Demand' : 'Spot'}
-        </div>
-      </div>
+  const costSavings = isNewFormat ? (recommendation.costSavings || 0) : (currentCost - recommendedCost);
+  const costSavingsPercent = isNewFormat ? (recommendation.costSavingsPercent || 0) : (currentCost > 0 ? ((costSavings / currentCost) * 100) : 0);
 
-      {/* Before/After Comparison */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '1fr 1fr', 
-        gap: '1.25rem',
-        marginBottom: '1.25rem',
-        padding: '1rem',
-        background: '#f9fafb',
-        borderRadius: '6px'
-      }}>
-        <div>
-          <div style={{ fontSize: '0.8125rem', color: '#374151', marginBottom: '0.625rem', fontWeight: 600 }}>
-            Current
-          </div>
-          <div style={{ fontSize: '1rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
-            {currentNodes} nodes
-          </div>
-          {currentInstanceTypes.length > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', fontFamily: 'monospace', marginTop: '0.375rem', lineHeight: '1.4' }}>
-              {currentInstanceTypes.slice(0, 2).map(type => typeof type === 'string' ? type : type).join(', ')}
-              {currentInstanceTypes.length > 2 && ` +${currentInstanceTypes.length - 2}`}
-            </div>
-          )}
-          {currentCPU > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginTop: '0.375rem' }}>
-              CPU: {currentCPU.toFixed(2)} cores
-            </div>
-          )}
-          {currentMemory > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginTop: '0.25rem' }}>
-              Memory: {currentMemory.toFixed(2)} GiB
-            </div>
-          )}
-          {currentCost > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginTop: '0.375rem', fontWeight: 500 }}>
-              ${currentCost.toFixed(2)}/hr
-            </div>
-          )}
-        </div>
-        <div>
-          <div style={{ fontSize: '0.8125rem', color: '#374151', marginBottom: '0.625rem', fontWeight: 600 }}>
-            Recommended
-          </div>
-          <div style={{ fontSize: '1rem', fontWeight: 600, color: '#10b981', marginBottom: '0.5rem' }}>
-            {recommendedNodes} nodes
-            {!isNewFormat && recommendation.minSize > 0 && recommendation.maxSize > 0 && (
-              <span style={{ fontSize: '0.8125rem', fontWeight: 400, color: '#6b7280', marginLeft: '0.25rem' }}>
-                ({recommendation.minSize}-{recommendation.maxSize})
-              </span>
+  // Get taints - handle both formats
+  const taints = recommendation?.taints || [];
+  const taintsArray = Array.isArray(taints) ? taints : [];
+
+  return (
+    <Card
+      className={cn(
+        "h-full",
+        hasChanges && "border-2 border-green-500"
+      )}
+    >
+      <CardHeader>
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <CardTitle>{nodePoolName}</CardTitle>
+            {hasChanges && (
+              <Badge variant="default" className="bg-green-500">
+                <Check className="h-3 w-3 mr-1" />
+                Changes recommended
+              </Badge>
             )}
           </div>
-          {recommendedInstanceTypes.length > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', fontFamily: 'monospace', marginTop: '0.375rem', lineHeight: '1.4' }}>
-              {recommendedInstanceTypes.slice(0, 2).join(', ')}
-              {recommendedInstanceTypes.length > 2 && ` +${recommendedInstanceTypes.length - 2}`}
-            </div>
-          )}
-          {recommendedCPU > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginTop: '0.375rem' }}>
-              CPU: {recommendedCPU.toFixed(2)} cores
-            </div>
-          )}
-          {recommendedMemory > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginTop: '0.25rem' }}>
-              Memory: {recommendedMemory.toFixed(2)} GiB
-            </div>
-          )}
-          {recommendedCost > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#10b981', marginTop: '0.375rem', fontWeight: 600 }}>
-              ${recommendedCost.toFixed(2)}/hr
-            </div>
-          )}
-          {isNewFormat && recommendation.costSavings > 0 && (
-            <div style={{ fontSize: '0.8125rem', color: '#10b981', marginTop: '0.375rem', fontWeight: 500 }}>
-              Savings: ${recommendation.costSavings.toFixed(2)}/hr ({recommendation.costSavingsPercent.toFixed(1)}%)
-            </div>
-          )}
+          <Badge variant={recommendedCapacityType === 'on-demand' ? 'default' : 'secondary'}>
+            {recommendedCapacityType === 'on-demand' ? 'On-Demand' : 'Spot'}
+          </Badge>
         </div>
-      </div>
-
-      {/* Instance Types - Show All */}
-      {recommendedInstanceTypes.length > 0 && (
-        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
-          <div style={{ fontSize: '0.875rem', color: '#374151', marginBottom: '0.75rem', fontWeight: 600 }}>
-            Recommended Instance Types ({recommendedInstanceTypes.length})
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {recommendedInstanceTypes.map((type, idx) => (
-              <span key={idx} style={{ 
-                padding: '0.5rem 0.75rem', 
-                background: hasGPU && (type.startsWith('g4') || type.startsWith('g5')) ? '#fee2e2' : '#e5e7eb',
-                color: hasGPU && (type.startsWith('g4') || type.startsWith('g5')) ? '#991b1b' : '#374151',
-                borderRadius: '4px',
-                fontSize: '0.8125rem',
-                fontFamily: 'monospace',
-                fontWeight: 500,
-                lineHeight: '1.2'
-              }}>
-                {type}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Current Instance Types for Comparison */}
-      {currentInstanceTypes.length > 0 && hasChanges && (
-        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
-          <div style={{ fontSize: '0.875rem', color: '#374151', marginBottom: '0.75rem', fontWeight: 600 }}>
-            Current Instance Types ({currentInstanceTypes.length})
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {currentInstanceTypes.map((type, idx) => (
-              <span key={idx} style={{ 
-                padding: '0.5rem 0.75rem', 
-                background: '#f3f4f6',
-                color: '#4b5563',
-                borderRadius: '4px',
-                fontSize: '0.8125rem',
-                fontFamily: 'monospace',
-                textDecoration: recommendedInstanceTypes.includes(type) ? 'none' : 'line-through',
-                opacity: recommendedInstanceTypes.includes(type) ? 1 : 0.6,
-                lineHeight: '1.2'
-              }}>
-                {type}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Reasoning/Explanation */}
-      {(recommendation.reasoning || recommendation.aiReasoning) && (
-        <div style={{ 
-          marginTop: '1rem',
-          padding: '1rem',
-          background: '#eff6ff',
-          borderRadius: '6px',
-          border: '1px solid #bfdbfe'
-        }}>
-          {/* AI-Enhanced Reasoning (if available) */}
-          {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== '' && (
-            <>
-              <div style={{ 
-                fontSize: '0.875rem', 
-                color: '#1e40af', 
-                marginBottom: '0.75rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <span>✨ AI-Enhanced Explanation</span>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          {/* Current State */}
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-semibold">Current</p>
+            <div className="space-y-1">
+              <p className="text-2xl font-semibold">{currentNodes}</p>
+              <p className="text-xs text-muted-foreground">nodes</p>
+            </div>
+            {currentInstanceTypes.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {currentInstanceTypes.slice(0, 2).map((type, idx) => (
+                  <Badge key={idx} variant="outline" className="font-mono text-xs">
+                    {typeof type === 'string' ? type : type}
+                  </Badge>
+                ))}
+                {currentInstanceTypes.length > 2 && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    +{currentInstanceTypes.length - 2}
+                  </Badge>
+                )}
               </div>
-              <div style={{ 
-                fontSize: '0.875rem', 
-                color: '#1e3a8a',
-                lineHeight: '1.6',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word',
-                overflowWrap: 'break-word',
-                marginBottom: recommendation.reasoning ? '1rem' : '0'
-              }}>
-                {recommendation.aiReasoning}
+            )}
+            {currentCPU > 0 && (
+              <p className="text-xs text-muted-foreground">CPU: {currentCPU.toFixed(2)} cores</p>
+            )}
+            {currentMemory > 0 && (
+              <p className="text-xs text-muted-foreground">Memory: {currentMemory.toFixed(2)} GiB</p>
+            )}
+            {currentCost > 0 && (
+              <div className="mt-2">
+                <p className="text-sm font-semibold">
+                  ${currentCost.toFixed(2)}/hr
+                </p>
               </div>
-            </>
-          )}
-          
-          {/* Original Reasoning (shown if AI reasoning is not available, or as details) */}
-          {recommendation.reasoning && (
-            <>
+            )}
+          </div>
+
+          {/* Recommended State */}
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-semibold">Recommended</p>
+            <div className="space-y-1">
+              <p className="text-2xl font-semibold text-green-600">{recommendedNodes}</p>
+              <p className="text-xs text-muted-foreground">
+                {!isNewFormat && recommendation.minSize > 0 && recommendation.maxSize > 0
+                  ? `nodes (${recommendation.minSize}-${recommendation.maxSize})`
+                  : 'nodes'}
+              </p>
+            </div>
+            {recommendedInstanceTypes.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {recommendedInstanceTypes.slice(0, 2).map((type, idx) => (
+                  <Badge key={idx} variant="outline" className="font-mono text-xs">
+                    {type}
+                  </Badge>
+                ))}
+                {recommendedInstanceTypes.length > 2 && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    +{recommendedInstanceTypes.length - 2}
+                  </Badge>
+                )}
+              </div>
+            )}
+            {recommendedCPU > 0 && (
+              <p className="text-xs text-muted-foreground">CPU: {recommendedCPU.toFixed(2)} cores</p>
+            )}
+            {recommendedMemory > 0 && (
+              <p className="text-xs text-muted-foreground">Memory: {recommendedMemory.toFixed(2)} GiB</p>
+            )}
+            {recommendedCost > 0 && (
+              <div className="mt-2">
+                <p className="text-sm font-semibold text-green-600">
+                  ${recommendedCost.toFixed(2)}/hr
+                </p>
+              </div>
+            )}
+            {costSavings > 0 && (
+              <p className="text-xs text-green-600 font-medium mt-2">
+                Savings: ${costSavings.toFixed(2)}/hr ({costSavingsPercent.toFixed(1)}%)
+              </p>
+            )}
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        {/* Taints */}
+        {taintsArray.length > 0 && (
+          <div className="mb-4 space-y-2 border-t pt-4">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold text-muted-foreground">Taints</p>
+              <Badge variant="secondary" className="text-xs">
+                {taintsArray.length} configured
+              </Badge>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {taintsArray.map((taint, idx) => {
+                const taintKey = taint?.key || taint?.Key || '';
+                const taintValue = taint?.value || taint?.Value || '';
+                const taintEffect = taint?.effect || taint?.Effect || '';
+                const taintString = `${taintKey}${taintValue ? `=${taintValue}` : ''}:${taintEffect}`;
+                return (
+                  <Badge
+                    key={idx}
+                    variant="outline"
+                    className="font-mono text-xs border-yellow-500 text-yellow-700 bg-yellow-50"
+                  >
+                    {taintString}
+                  </Badge>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Instance Types - Show All */}
+        {recommendedInstanceTypes.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-xs font-semibold">
+              Recommended Instance Types ({recommendedInstanceTypes.length})
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {recommendedInstanceTypes.map((type, idx) => (
+                <Badge
+                  key={idx}
+                  variant={hasGPU && (type.startsWith('g4') || type.startsWith('g5')) ? 'destructive' : 'secondary'}
+                  className="font-mono text-xs"
+                >
+                  {type}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Current Instance Types for Comparison */}
+        {currentInstanceTypes.length > 0 && hasChanges && (
+          <div className="mb-4 space-y-2">
+            <p className="text-xs font-semibold">
+              Current Instance Types ({currentInstanceTypes.length})
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {currentInstanceTypes.map((type, idx) => {
+                const isKept = recommendedInstanceTypes.includes(type);
+                return (
+                  <Badge
+                    key={idx}
+                    variant="outline"
+                    className={cn(
+                      "font-mono text-xs",
+                      !isKept && "line-through opacity-60"
+                    )}
+                  >
+                    {type}
+                  </Badge>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Reasoning/Explanation */}
+        {(recommendation.reasoning || recommendation.aiReasoning) && (
+          <Alert className="mt-4">
+            <AlertTitle>
+              {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== ''
+                ? '✨ AI-Enhanced Explanation'
+                : (isNewFormat ? 'Explanation' : 'Why these changes?')}
+            </AlertTitle>
+            <AlertDescription>
               {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== '' ? (
-                <details open={false} style={{ 
-                  marginTop: '0.5rem',
-                  display: 'block'
-                }}>
-                  <summary style={{ 
-                    fontSize: '0.75rem', 
-                    color: '#64748b',
-                    cursor: 'pointer',
-                    fontWeight: 500,
-                    userSelect: 'none',
-                    padding: '0.25rem 0',
-                    listStyle: 'none',
-                    display: 'list-item'
-                  }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <span style={{ fontSize: '0.6rem' }}>▼</span>
-                      <span>Show technical details</span>
-                    </span>
-                  </summary>
-                  <div style={{ 
-                    fontSize: '0.75rem', 
-                    color: '#64748b',
-                    lineHeight: '1.6',
-                    whiteSpace: 'pre-wrap',
-                    wordWrap: 'break-word',
-                    overflowWrap: 'break-word',
-                    marginTop: '0.5rem',
-                    paddingTop: '0.5rem',
-                    paddingLeft: '1rem',
-                    borderTop: '1px solid #cbd5e1'
-                  }}>
-                    {recommendation.reasoning}
-                  </div>
-                </details>
+                <div className="space-y-2">
+                  <p className="text-sm whitespace-pre-wrap">
+                    {recommendation.aiReasoning}
+                  </p>
+                  {recommendation.reasoning && (
+                    <Accordion type="single" collapsible>
+                      <AccordionItem value="details">
+                        <AccordionTrigger>Show technical details</AccordionTrigger>
+                        <AccordionContent>
+                          <p className="text-xs whitespace-pre-wrap">
+                            {recommendation.reasoning}
+                          </p>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  )}
+                </div>
               ) : (
-                <>
-                  <div style={{ 
-                    fontSize: '0.875rem', 
-                    color: '#1e40af', 
-                    marginBottom: '0.75rem',
-                    fontWeight: 600
-                  }}>
-                    {isNewFormat ? 'Explanation' : 'Why these changes?'}
-                  </div>
-                  <div style={{ 
-                    fontSize: '0.875rem', 
-                    color: '#1e3a8a',
-                    lineHeight: '1.6',
-                    whiteSpace: 'pre-wrap',
-                    wordWrap: 'break-word',
-                    overflowWrap: 'break-word'
-                  }}>
-                    {recommendation.reasoning}
-                  </div>
-                </>
+                <p className="text-sm whitespace-pre-wrap">
+                  {recommendation.reasoning}
+                </p>
               )}
-            </>
-          )}
-        </div>
-      )}
+            </AlertDescription>
+          </Alert>
+        )}
 
-
-      {hasGPU && (
-        <div style={{ 
-          marginTop: '1rem',
-          padding: '0.625rem 0.875rem',
-          background: '#fee2e2',
-          color: '#991b1b',
-          borderRadius: '4px',
-          fontSize: '0.875rem',
-          fontWeight: 500
-        }}>
-          ⚠️ GPU instances detected
-        </div>
-      )}
-    </div>
+        {hasGPU && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>GPU instances detected</AlertTitle>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -347,6 +347,7 @@ type NodeInfo struct {
 	CPUUsage     *NodeUsage `json:"cpuUsage,omitempty"`     // CPU usage information
 	MemoryUsage  *NodeUsage `json:"memoryUsage,omitempty"`  // Memory usage information
 	PodCount     int        `json:"podCount"`               // Number of pods scheduled on this node
+	PodNames     []string   `json:"podNames,omitempty"`     // Names of pods running on this node (namespace/name format)
 	CreationTime string     `json:"creationTime,omitempty"` // Node creation timestamp
 }
 
@@ -356,6 +357,13 @@ type NodeUsage struct {
 	Capacity    float64 `json:"capacity"`    // Total capacity
 	Allocatable float64 `json:"allocatable"` // Allocatable resources
 	Percent     float64 `json:"percent"`     // Usage percentage (0-100)
+}
+
+// Taint represents a Kubernetes taint
+type Taint struct {
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Effect string `json:"effect"` // NoSchedule, PreferNoSchedule, NoExecute
 }
 
 // NodePoolInfo represents a Karpenter NodePool configuration
@@ -368,6 +376,7 @@ type NodePoolInfo struct {
 	MaxSize       int               `json:"maxSize"`
 	Labels        map[string]string `json:"labels"`
 	Requirements  map[string]string `json:"requirements"`          // Node requirements
+	Taints        []Taint          `json:"taints,omitempty"`      // Node taints
 	EstimatedCost float64           `json:"estimatedCost"`         // Cost per hour per instance type
 	CurrentNodes  int               `json:"currentNodes"`          // Actual number of nodes in the cluster
 	PodCount      int               `json:"podCount"`              // Total number of pods across all nodes in this NodePool
@@ -606,6 +615,7 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		// Following eks-node-viewer approach: only count scheduled pod resource requests (not limits, not init containers)
 		// pods is guaranteed to be non-nil after error handling above
 		podCount := 0
+		podNames := make([]string, 0)
 		if len(pods.Items) > 0 {
 			for i := range pods.Items {
 				pod := &pods.Items[i] // Use pointer to avoid copying pod struct
@@ -627,6 +637,8 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 
 				// Count this pod (it's scheduled and not in terminal state)
 				podCount++
+				// Store pod name in namespace/name format
+				podNames = append(podNames, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
 
 				// Process only regular containers (exclude init containers per eks-node-viewer)
 				// Init containers are transient and don't contribute to steady-state resource usage
@@ -679,8 +691,9 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			}
 		}
 
-		// Set pod count (already calculated in the loop above)
+		// Set pod count and pod names (already calculated in the loop above)
 		nodeInfo.PodCount = podCount
+		nodeInfo.PodNames = podNames
 
 		// Add node creation time
 		if !node.CreationTimestamp.IsZero() {
@@ -997,6 +1010,44 @@ func (c *Client) parseNodePool(item *unstructured.Unstructured) (*NodePoolInfo, 
 				}
 			}
 		}
+	}
+
+	// Extract taints from template.spec.taints (v1) or spec.taints (v1alpha1)
+	var taints []interface{}
+	if templateSpec != nil {
+		taints, _, _ = unstructured.NestedSlice(templateSpec, "taints")
+	}
+	if taints == nil && template != nil {
+		taints, _, _ = unstructured.NestedSlice(template, "taints")
+	}
+	if taints == nil {
+		taints, _, _ = unstructured.NestedSlice(spec, "taints")
+	}
+	
+	// Parse taints
+	np.Taints = []Taint{}
+	for _, taintInterface := range taints {
+		if taintMap, ok := taintInterface.(map[string]interface{}); ok {
+			taint := Taint{}
+			if key, ok := taintMap["key"].(string); ok {
+				taint.Key = key
+			}
+			if value, ok := taintMap["value"].(string); ok {
+				taint.Value = value
+			}
+			if effect, ok := taintMap["effect"].(string); ok {
+				taint.Effect = effect
+			}
+			if taint.Key != "" {
+				np.Taints = append(np.Taints, taint)
+			}
+		}
+	}
+	// Debug: Log taints for this NodePool
+	if len(np.Taints) > 0 {
+		fmt.Printf("Debug: NodePool %s has %d taints: %+v\n", np.Name, len(np.Taints), np.Taints)
+	} else {
+		fmt.Printf("Debug: NodePool %s has no taints (found %d taint interfaces in spec)\n", np.Name, len(taints))
 	}
 
 	// Set defaults

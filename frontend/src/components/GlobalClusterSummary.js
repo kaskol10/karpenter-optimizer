@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
+import { Button } from './ui/button';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Progress } from './ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Switch } from './ui/switch';
+import { RefreshCw, Zap, Loader2 } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
@@ -11,9 +19,11 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(60); // Default 60 seconds
+  const [refreshInterval, setRefreshInterval] = useState(60);
   const [generatingRecommendations, setGeneratingRecommendations] = useState(false);
   const [clusterCost, setClusterCost] = useState(null);
+  const [progressMessage, setProgressMessage] = useState('');
+  const [progressPercent, setProgressPercent] = useState(0);
 
   useEffect(() => {
     fetchSummary();
@@ -53,9 +63,6 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
     }
   };
 
-  const [progressMessage, setProgressMessage] = useState('');
-  const [progressPercent, setProgressPercent] = useState(0);
-
   const handleGenerateRecommendations = async () => {
     if (!summary) {
       setError('Please wait for cluster summary to load');
@@ -68,27 +75,28 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
     setProgressPercent(0);
 
     try {
-      // Use EventSource for Server-Sent Events to get progress updates
       const eventSource = new EventSource(`${API_URL}/api/v1/recommendations/cluster-summary/stream`);
 
-      // Handle SSE event types (Gin sends events with specific event names)
       eventSource.addEventListener('progress', (event) => {
         try {
           const data = JSON.parse(event.data);
-          setProgressMessage(data.message || 'Processing...');
-          setProgressPercent(data.progress || 0);
+          const message = data.message || 'Processing...';
+          const progress = Math.max(0, Math.min(100, data.progress || 0));
+          console.log(`[Progress] ${progress.toFixed(1)}%: ${message}`);
+          setProgressMessage(message);
+          setProgressPercent(progress);
         } catch (err) {
-          console.error('Error parsing progress event:', err);
+          console.error('Error parsing progress event:', err, 'Raw data:', event.data);
         }
       });
 
       eventSource.addEventListener('complete', (event) => {
         try {
+          console.log('[SSE] Received complete event');
           const data = JSON.parse(event.data);
           if (onRecommendationsGenerated) {
             onRecommendationsGenerated(data.recommendations || []);
           }
-          // Store cluster cost information
           if (data.clusterCost) {
             const costData = {
               ...data.clusterCost,
@@ -97,7 +105,6 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               recommendedCount: data.count
             };
             setClusterCost(costData);
-            // Pass cluster cost to parent component
             if (onClusterCostUpdate) {
               onClusterCostUpdate(costData);
             }
@@ -111,7 +118,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
             setProgressPercent(0);
           }, 1000);
         } catch (err) {
-          console.error('Error parsing complete event:', err);
+          console.error('Error parsing complete event:', err, 'Raw data:', event.data);
           eventSource.close();
           setGeneratingRecommendations(false);
           setProgressMessage('');
@@ -121,9 +128,11 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
 
       eventSource.addEventListener('error', (event) => {
         try {
+          console.error('[SSE] Received error event:', event.data);
           const data = JSON.parse(event.data);
           setError(data.error || 'Failed to generate recommendations');
         } catch (err) {
+          console.error('[SSE] Error parsing error event:', err, 'Raw data:', event.data);
           setError('Failed to generate recommendations');
         }
         eventSource.close();
@@ -132,17 +141,15 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
         setProgressPercent(0);
       });
 
-      // Handle connection errors
       eventSource.onerror = (err) => {
         console.error('EventSource connection error:', err);
-        // Only show error if we haven't received a complete event
-        if (progressPercent < 100) {
+        if (eventSource.readyState === EventSource.CLOSED || (progressPercent < 100 && eventSource.readyState !== EventSource.OPEN)) {
           setError('Connection error. Please try again.');
+          eventSource.close();
+          setGeneratingRecommendations(false);
+          setProgressMessage('');
+          setProgressPercent(0);
         }
-        eventSource.close();
-        setGeneratingRecommendations(false);
-        setProgressMessage('');
-        setProgressPercent(0);
       };
 
     } catch (err) {
@@ -155,491 +162,215 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
   };
 
   const getUsageColor = (percent) => {
-    if (percent >= 90) return '#FF0000'; // red
-    if (percent >= 70) return '#FF8C00'; // orange (replaced yellow for better readability)
-    return '#04B575'; // green
+    if (percent >= 90) return 'text-red-600';
+    if (percent >= 70) return 'text-yellow-600';
+    return 'text-green-600';
   };
 
   if (error && !summary) {
     return (
-      <div style={{
-        background: 'white',
-        padding: '1.5rem',
-        borderRadius: '8px',
-        border: '1px solid #e5e7eb',
-        marginBottom: '2rem'
-      }}>
-        <div style={{
-          padding: '1rem',
-          background: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '6px',
-          color: '#dc2626',
-          fontSize: '0.875rem'
-        }}>
-          {error}
-        </div>
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
     );
   }
 
   if (!summary) {
     return (
-      <div style={{
-        background: 'white',
-        padding: '1.5rem',
-        borderRadius: '8px',
-        border: '1px solid #e5e7eb',
-        marginBottom: '2rem'
-      }}>
-        <div style={{
-          padding: '2rem',
-          textAlign: 'center',
-          color: '#6b7280'
-        }}>
-          {loading ? 'Loading cluster summary...' : 'No cluster data available'}
-        </div>
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Loading cluster summary...</p>
+            </div>
+          ) : (
+            <p className="text-center text-muted-foreground py-8">No cluster data available</p>
+          )}
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div style={{
-      background: 'white',
-      padding: '1.5rem',
-      borderRadius: '8px',
-      border: '1px solid #e5e7eb',
-      marginBottom: '2rem'
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '1.5rem'
-      }}>
-        <div>
-          <h2 style={{
-            margin: 0,
-            fontSize: '1.25rem',
-            fontWeight: 600,
-            color: '#111827'
-          }}>
-            Cluster Overview
-          </h2>
-          <p style={{
-            margin: '0.25rem 0 0 0',
-            fontSize: '0.875rem',
-            color: '#6b7280'
-          }}>
-            Global cluster statistics
-          </p>
+    <Card>
+      <CardHeader>
+        <div className="flex justify-between items-start">
+          <div>
+            <CardTitle>Cluster Overview</CardTitle>
+            <CardDescription>Global cluster statistics</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button onClick={fetchSummary} disabled={loading} size="sm" variant="outline">
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              Refresh
+            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Auto-refresh</span>
+              <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+            </div>
+            {autoRefresh && (
+              <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">Every 30s</SelectItem>
+                  <SelectItem value="60">Every 1m</SelectItem>
+                  <SelectItem value="120">Every 2m</SelectItem>
+                  <SelectItem value="300">Every 5m</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            onClick={fetchSummary}
-            disabled={loading}
-            style={{
-              padding: '0.5rem 1rem',
-              background: loading ? '#d1d5db' : '#111827',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
-          <button
-            onClick={handleGenerateRecommendations}
-            disabled={generatingRecommendations || !summary}
-            style={{
-              padding: '0.5rem 1rem',
-              background: generatingRecommendations || !summary ? '#d1d5db' : '#10b981',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: generatingRecommendations || !summary ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {generatingRecommendations ? 'Generating...' : 'Generate Recommendations'}
-          </button>
-          <label style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.875rem',
-            color: '#374151',
-            cursor: 'pointer'
-          }}>
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              style={{ cursor: 'pointer' }}
-            />
-            Auto-refresh
-          </label>
-          {autoRefresh && (
-            <select
-              value={refreshInterval}
-              onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              style={{
-                padding: '0.5rem 0.75rem',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '0.875rem',
-                background: 'white',
-                color: '#374151'
-              }}
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          {/* Generate Recommendations Button */}
+          <div className="flex justify-center p-4 bg-gradient-to-br from-purple-500 to-purple-700 rounded-lg">
+            <Button
+              onClick={handleGenerateRecommendations}
+              disabled={!summary || generatingRecommendations}
+              size="lg"
+              className="bg-white text-purple-600 hover:bg-white/90 font-bold min-w-[250px]"
             >
-              <option value={30}>Every 30s</option>
-              <option value={60}>Every 1m</option>
-              <option value={120}>Every 2m</option>
-              <option value={300}>Every 5m</option>
-            </select>
+              <Zap className="h-5 w-5 mr-2" />
+              Generate Recommendations
+            </Button>
+          </div>
+
+          {generatingRecommendations && progressMessage && (
+            <Alert>
+              <AlertTitle className="flex items-center justify-between">
+                <span>{progressMessage}</span>
+                <span className="font-bold">{Math.round(progressPercent)}%</span>
+              </AlertTitle>
+              <Progress value={progressPercent} className="mt-2" />
+            </Alert>
           )}
-        </div>
-      </div>
 
-      {generatingRecommendations && progressMessage && (
-        <div style={{
-          marginTop: '1rem',
-          padding: '1rem',
-          background: '#f0f9ff',
-          border: '1px solid #bae6fd',
-          borderRadius: '6px'
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '0.5rem'
-          }}>
-            <span style={{
-              fontSize: '0.875rem',
-              color: '#0369a1',
-              fontWeight: 500
-            }}>
-              {progressMessage}
-            </span>
-            <span style={{
-              fontSize: '0.875rem',
-              color: '#0369a1',
-              fontWeight: 600
-            }}>
-              {Math.round(progressPercent)}%
-            </span>
-          </div>
-          <div style={{
-            width: '100%',
-            height: '8px',
-            background: '#e0f2fe',
-            borderRadius: '4px',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              width: `${progressPercent}%`,
-              height: '100%',
-              background: '#0ea5e9',
-              transition: 'width 0.3s ease',
-              borderRadius: '4px'
-            }} />
-          </div>
-        </div>
-      )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-      {error && (
-        <div style={{
-          padding: '1rem',
-          background: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '6px',
-          color: '#dc2626',
-          fontSize: '0.875rem',
-          marginBottom: '1rem'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {/* Cluster Cost Summary */}
-      {clusterCost && (
-        <div style={{
-          padding: '1.25rem',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          borderRadius: '8px',
-          marginBottom: '1.5rem',
-          color: 'white'
-        }}>
-          <div style={{
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            marginBottom: '1rem',
-            opacity: 0.9
-          }}>
-            Cluster Cost Summary
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '1rem'
-          }}>
-            <div>
-              <div style={{
-                fontSize: '0.75rem',
-                opacity: 0.8,
-                marginBottom: '0.25rem'
-              }}>
-                Current Cost
-              </div>
-              <div style={{
-                fontSize: '1.75rem',
-                fontWeight: 700
-              }}>
-                ${clusterCost.current.toFixed(2)}/hr
-              </div>
-            </div>
-            <div>
-              <div style={{
-                fontSize: '0.75rem',
-                opacity: 0.8,
-                marginBottom: '0.25rem'
-              }}>
-                Recommended Cost
-              </div>
-              <div style={{
-                fontSize: '1.75rem',
-                fontWeight: 700
-              }}>
-                ${clusterCost.recommended.toFixed(2)}/hr
-              </div>
-            </div>
-            <div>
-              <div style={{
-                fontSize: '0.75rem',
-                opacity: 0.8,
-                marginBottom: '0.25rem'
-              }}>
-                Potential Savings
-              </div>
-              <div style={{
-                fontSize: '1.75rem',
-                fontWeight: 700,
-                color: clusterCost.savings > 0 ? '#10b981' : '#f59e0b'
-              }}>
-                {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
-              </div>
-              {clusterCost.current > 0 && (
-                <div style={{
-                  fontSize: '0.75rem',
-                  opacity: 0.8,
-                  marginTop: '0.25rem'
-                }}>
-                  {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+          {/* Cluster Cost Summary */}
+          {clusterCost && (
+            <Card className="bg-gradient-to-br from-purple-500 to-purple-700 border-0">
+              <CardHeader>
+                <CardTitle className="text-white text-sm">Cluster Cost Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-white/80 text-xs mb-1">Current Cost</p>
+                    <p className="text-white text-2xl font-bold">
+                      ${clusterCost.current.toFixed(2)}/hr
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/80 text-xs mb-1">Recommended Cost</p>
+                    <p className="text-white text-2xl font-bold">
+                      ${clusterCost.recommended.toFixed(2)}/hr
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/80 text-xs mb-1">Potential Savings</p>
+                    <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-300" : "text-yellow-300")}>
+                      {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
+                    </p>
+                    {clusterCost.current > 0 && (
+                      <p className="text-white/80 text-xs mt-1">
+                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '1rem'
-      }}>
-        {/* Total Nodes */}
-        <div style={{
-          padding: '1rem',
-          background: '#f9fafb',
-          borderRadius: '6px',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#6b7280',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            Total Nodes
-          </div>
-          <div style={{
-            fontSize: '2rem',
-            fontWeight: 700,
-            color: '#111827'
-          }}>
-            {summary.totalNodes}
-          </div>
-        </div>
-
-        {/* Spot Instances */}
-        <div style={{
-          padding: '1rem',
-          background: '#fef3c7',
-          borderRadius: '6px',
-          border: '1px solid #fbbf24'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#78350f',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            Spot Instances
-          </div>
-          <div style={{
-            fontSize: '2rem',
-            fontWeight: 700,
-            color: '#78350f'
-          }}>
-            {summary.spotNodes}
-          </div>
-          {summary.totalNodes > 0 && (
-            <div style={{
-              fontSize: '0.75rem',
-              color: '#78350f',
-              marginTop: '0.25rem'
-            }}>
-              {((summary.spotNodes / summary.totalNodes) * 100).toFixed(1)}%
-            </div>
+              </CardContent>
+            </Card>
           )}
-        </div>
 
-        {/* On-Demand Instances */}
-        <div style={{
-          padding: '1rem',
-          background: '#dbeafe',
-          borderRadius: '6px',
-          border: '1px solid #bfdbfe'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#1e40af',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            On-Demand Instances
-          </div>
-          <div style={{
-            fontSize: '2rem',
-            fontWeight: 700,
-            color: '#1e40af'
-          }}>
-            {summary.onDemandNodes}
-          </div>
-          {summary.totalNodes > 0 && (
-            <div style={{
-              fontSize: '0.75rem',
-              color: '#1e40af',
-              marginTop: '0.25rem'
-            }}>
-              {((summary.onDemandNodes / summary.totalNodes) * 100).toFixed(1)}%
-            </div>
-          )}
-        </div>
+          {/* Statistics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Total Nodes</p>
+                <p className="text-2xl font-bold">{summary.totalNodes}</p>
+              </CardContent>
+            </Card>
 
-        {/* Total Pods */}
-        <div style={{
-          padding: '1rem',
-          background: '#f3f4f6',
-          borderRadius: '6px',
-          border: '1px solid #d1d5db'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#374151',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            Total Pods
-          </div>
-          <div style={{
-            fontSize: '2rem',
-            fontWeight: 700,
-            color: '#111827'
-          }}>
-            {summary.totalPods}
-          </div>
-          {summary.totalNodes > 0 && (
-            <div style={{
-              fontSize: '0.75rem',
-              color: '#6b7280',
-              marginTop: '0.25rem'
-            }}>
-              {(summary.totalPods / summary.totalNodes).toFixed(1)} per node
-            </div>
-          )}
-        </div>
+            <Card className="bg-yellow-50 border-yellow-200">
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Spot Instances</p>
+                <p className="text-2xl font-bold text-yellow-600">{summary.spotNodes}</p>
+                {summary.totalNodes > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    ({((summary.spotNodes / summary.totalNodes) * 100).toFixed(1)}%)
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* CPU Usage */}
-        <div style={{
-          padding: '1rem',
-          background: '#f9fafb',
-          borderRadius: '6px',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#6b7280',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            CPU Usage
-          </div>
-          <div style={{
-            fontSize: '1.5rem',
-            fontWeight: 700,
-            color: getUsageColor(summary.cpuPercent)
-          }}>
-            {summary.cpuPercent.toFixed(1)}%
-          </div>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#6b7280',
-            marginTop: '0.25rem'
-          }}>
-            {formatResource(summary.cpuUsed, 'cpu')} / {formatResource(summary.cpuAllocatable, 'cpu')}
-          </div>
-        </div>
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">On-Demand Instances</p>
+                <p className="text-2xl font-bold text-blue-600">{summary.onDemandNodes}</p>
+                {summary.totalNodes > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    ({((summary.onDemandNodes / summary.totalNodes) * 100).toFixed(1)}%)
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* Memory Usage */}
-        <div style={{
-          padding: '1rem',
-          background: '#f9fafb',
-          borderRadius: '6px',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#6b7280',
-            marginBottom: '0.5rem',
-            fontWeight: 500
-          }}>
-            Memory Usage
-          </div>
-          <div style={{
-            fontSize: '1.5rem',
-            fontWeight: 700,
-            color: getUsageColor(summary.memoryPercent)
-          }}>
-            {summary.memoryPercent.toFixed(1)}%
-          </div>
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#6b7280',
-            marginTop: '0.25rem'
-          }}>
-            {formatResource(summary.memoryUsed, 'memory')} / {formatResource(summary.memoryAllocatable, 'memory')}
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Total Pods</p>
+                <p className="text-2xl font-bold">{summary.totalPods}</p>
+                {summary.totalNodes > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    ({(summary.totalPods / summary.totalNodes).toFixed(1)} per node)
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">CPU Usage</p>
+                <p className={cn("text-2xl font-bold", getUsageColor(summary.cpuPercent))}>
+                  {summary.cpuPercent.toFixed(1)}%
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatResource(summary.cpuUsed, 'cpu')} / {formatResource(summary.cpuAllocatable, 'cpu')}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Memory Usage</p>
+                <p className={cn("text-2xl font-bold", getUsageColor(summary.memoryPercent))}>
+                  {summary.memoryPercent.toFixed(1)}%
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatResource(summary.memoryUsed, 'memory')} / {formatResource(summary.memoryAllocatable, 'memory')}
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export default GlobalClusterSummary;
-

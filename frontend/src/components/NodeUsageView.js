@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
+import { Button } from './ui/button';
+import { Badge } from './ui/badge';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Progress } from './ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Switch } from './ui/switch';
+import { Separator } from './ui/separator';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { ChevronDown, RefreshCw, Loader2, Package } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
@@ -8,16 +19,19 @@ const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
 
 function NodeUsageView() {
   const [nodes, setNodes] = useState([]);
+  const [nodePools, setNodePools] = useState([]); // Store NodePools with taints
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(true); // Default to true for real-time updates
-  const [refreshInterval, setRefreshInterval] = useState(60); // Default to 60 seconds (1 minute)
-  const [groupBy, setGroupBy] = useState('nodepool'); // 'nodepool' or 'none'
-  const [sortBy, setSortBy] = useState('cpu'); // 'cpu', 'memory', 'pods', 'creation'
-  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState(60);
+  const [groupBy, setGroupBy] = useState('nodepool');
+  const [sortBy, setSortBy] = useState('cpu');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [podsFilter, setPodsFilter] = useState('all');
 
   useEffect(() => {
     fetchNodes();
+    fetchNodePools();
   }, []);
 
   useEffect(() => {
@@ -25,7 +39,7 @@ function NodeUsageView() {
     if (autoRefresh) {
       interval = setInterval(() => {
         fetchNodes();
-      }, refreshInterval * 1000); // Convert seconds to milliseconds
+      }, refreshInterval * 1000);
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -39,11 +53,28 @@ function NodeUsageView() {
       const response = await axios.get(`${API_URL}/api/v1/nodes`);
       const nodesData = response.data.nodes || [];
       setNodes(nodesData);
+      // Debug: Log pod names
+      nodesData.forEach(node => {
+        if (node.podNames && node.podNames.length > 0) {
+          console.log(`[NodeUsageView] Node ${node.name} has ${node.podNames.length} pods:`, node.podNames);
+        }
+      });
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch nodes');
       console.error('Nodes error:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNodePools = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/v1/nodepools`);
+      const nodePoolsData = response.data.nodepools || [];
+      setNodePools(nodePoolsData);
+    } catch (err) {
+      console.error('Failed to fetch NodePools:', err);
+      // Don't set error state, just log it - NodePools are optional
     }
   };
 
@@ -55,11 +86,10 @@ function NodeUsageView() {
     }
   };
 
-  // Color scheme similar to eks-node-viewer (green -> orange -> red gradient)
   const getUsageColor = (percent) => {
-    if (percent >= 90) return '#FF0000'; // red (bad)
-    if (percent >= 70) return '#FF8C00'; // orange (ok - more readable than yellow)
-    return '#04B575'; // green (good)
+    if (percent >= 90) return 'bg-red-500';
+    if (percent >= 70) return 'bg-yellow-500';
+    return 'bg-green-500';
   };
 
   const getNodeAge = (creationTime) => {
@@ -145,11 +175,33 @@ function NodeUsageView() {
     };
   };
 
+  const filterNodesByPods = (nodeList) => {
+    if (podsFilter === 'all') {
+      return nodeList;
+    }
+    return nodeList.filter(node => {
+      const podCount = node.podCount || 0;
+      switch (podsFilter) {
+        case '0':
+          return podCount === 0;
+        case '1-10':
+          return podCount >= 1 && podCount <= 10;
+        case '11-50':
+          return podCount >= 11 && podCount <= 50;
+        case '50+':
+          return podCount > 50;
+        default:
+          return true;
+      }
+    });
+  };
+
   const groupedNodes = () => {
     const sortedNodes = sortNodes(nodes);
+    const filteredNodes = filterNodesByPods(sortedNodes);
     if (groupBy === 'nodepool') {
       const grouped = {};
-      sortedNodes.forEach(node => {
+      filteredNodes.forEach(node => {
         const key = node.nodePool || 'No NodePool';
         if (!grouped[key]) {
           grouped[key] = [];
@@ -158,78 +210,20 @@ function NodeUsageView() {
       });
       return grouped;
     }
-    return { 'All Nodes': sortedNodes };
+    return { 'All Nodes': filteredNodes };
   };
 
   const BarGauge = ({ label, used, capacity, allocatable, percent, type }) => {
-    const gradientColor = getUsageColor(percent);
-    
     return (
-      <div style={{ marginBottom: '0.75rem' }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '0.25rem',
-          fontSize: '0.75rem'
-        }}>
-          <span style={{ fontWeight: 500, color: '#374151' }}>{label}</span>
-          <span style={{ fontWeight: 600, color: gradientColor }}>
+      <div className="space-y-2">
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-semibold">{label}</span>
+          <span className={cn("font-semibold", percent >= 90 ? "text-red-600" : percent >= 70 ? "text-yellow-600" : "text-green-600")}>
             {percent.toFixed(1)}% ({formatResource(used, type)} / {formatResource(allocatable, type)})
           </span>
         </div>
-        <div style={{
-          width: '100%',
-          height: '24px',
-          background: '#e5e7eb',
-          borderRadius: '4px',
-          overflow: 'hidden',
-          position: 'relative',
-          border: '1px solid #d1d5db'
-        }}>
-          <div style={{
-            width: `${Math.min(percent, 100)}%`,
-            height: '100%',
-            background: gradientColor,
-            transition: 'width 0.5s ease, background 0.5s ease',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            paddingRight: '6px',
-            boxShadow: percent > 0 ? 'inset 0 1px 2px rgba(0,0,0,0.1)' : 'none'
-          }}>
-            {percent > 12 && (
-              <span style={{
-                color: percent >= 70 ? '#000' : '#fff',
-                fontSize: '0.6875rem',
-                fontWeight: 700,
-                textShadow: percent >= 70 ? 'none' : '0 1px 2px rgba(0,0,0,0.3)'
-              }}>
-                {percent.toFixed(0)}%
-              </span>
-            )}
-          </div>
-          {percent <= 12 && (
-            <span style={{
-              position: 'absolute',
-              left: '6px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-              color: '#6b7280'
-            }}>
-              {percent.toFixed(0)}%
-            </span>
-          )}
-        </div>
-        <div style={{
-          fontSize: '0.6875rem',
-          color: '#6b7280',
-          marginTop: '0.125rem',
-          display: 'flex',
-          justifyContent: 'space-between'
-        }}>
+        <Progress value={Math.min(percent, 100)} className="h-2" />
+        <div className="flex justify-between text-xs text-muted-foreground">
           <span>Capacity: {formatResource(capacity, type)}</span>
           <span>Allocatable: {formatResource(allocatable, type)}</span>
         </div>
@@ -240,401 +234,307 @@ function NodeUsageView() {
   const grouped = groupedNodes();
 
   return (
-    <div style={{
-      background: 'white',
-      padding: '1.5rem',
-      borderRadius: '8px',
-      border: '1px solid #e5e7eb',
-      marginBottom: '2rem'
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '1.5rem'
-      }}>
-        <div>
-          <h2 style={{
-            margin: 0,
-            fontSize: '1.25rem',
-            fontWeight: 600,
-            color: '#111827'
-          }}>
-            Node Resource Usage
-          </h2>
-          <p style={{
-            margin: '0.25rem 0 0 0',
-            fontSize: '0.875rem',
-            color: '#6b7280'
-          }}>
-            Real-time CPU and memory usage per node (based on pod resource requests)
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value)}
-            style={{
-              padding: '0.5rem 0.75rem',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              background: 'white',
-              color: '#374151'
-            }}
-          >
-            <option value="nodepool">Group by NodePool</option>
-            <option value="none">All Nodes</option>
-          </select>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            style={{
-              padding: '0.5rem 0.75rem',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              background: 'white',
-              color: '#374151'
-            }}
-          >
-            <option value="cpu">Sort by CPU</option>
-            <option value="memory">Sort by Memory</option>
-            <option value="pods">Sort by Pods</option>
-            <option value="creation">Sort by Creation</option>
-          </select>
-          <select
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value)}
-            style={{
-              padding: '0.5rem 0.75rem',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              background: 'white',
-              color: '#374151'
-            }}
-          >
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
-          </select>
-          <button
-            onClick={fetchNodes}
-            disabled={loading}
-            style={{
-              padding: '0.5rem 1rem',
-              background: loading ? '#d1d5db' : '#111827',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
-          <label style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.875rem',
-            color: '#374151',
-            cursor: 'pointer'
-          }}>
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              style={{ cursor: 'pointer' }}
-            />
-            Auto-refresh
-          </label>
-          {autoRefresh && (
-            <select
-              value={refreshInterval}
-              onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              style={{
-                padding: '0.5rem 0.75rem',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '0.875rem',
-                background: 'white',
-                color: '#374151'
-              }}
-            >
-              <option value={10}>Every 10s</option>
-              <option value={30}>Every 30s</option>
-              <option value={60}>Every 1m</option>
-              <option value={120}>Every 2m</option>
-              <option value={300}>Every 5m</option>
-            </select>
-          )}
-        </div>
-      </div>
-
-      {error && (
-        <div style={{
-          padding: '1rem',
-          background: '#fef2f2',
-          border: '1px solid #fecaca',
-          borderRadius: '6px',
-          color: '#dc2626',
-          fontSize: '0.875rem',
-          marginBottom: '1rem'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {loading && nodes.length === 0 ? (
-        <div style={{
-          padding: '2rem',
-          textAlign: 'center',
-          color: '#6b7280'
-        }}>
-          Loading nodes...
-        </div>
-      ) : nodes.length === 0 ? (
-        <div style={{
-          padding: '2rem',
-          textAlign: 'center',
-          color: '#6b7280'
-        }}>
-          No nodes found
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {Object.entries(grouped).map(([groupName, groupNodes]) => {
-            const summary = groupBy === 'nodepool' ? calculateNodePoolSummary(groupNodes) : null;
-            
-            return (
-              <div key={groupName}>
-                <h3 style={{
-                  margin: '0 0 1rem 0',
-                  fontSize: '1rem',
-                  fontWeight: 600,
-                  color: '#374151',
-                  paddingBottom: '0.5rem',
-                  borderBottom: '2px solid #e5e7eb'
-                }}>
-                  {groupName} ({groupNodes.length} node{groupNodes.length !== 1 ? 's' : ''})
-                </h3>
-                
-                {/* NodePool Summary Card */}
-                {summary && summary.cpuAllocatable > 0 && (
-                  <div style={{
-                    marginBottom: '1.5rem',
-                    padding: '1.25rem',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    borderRadius: '8px',
-                    border: '1px solid #e5e7eb',
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '1rem'
-                    }}>
-                      <h4 style={{
-                        margin: 0,
-                        fontSize: '0.875rem',
-                        fontWeight: 600,
-                        color: 'white',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em'
-                      }}>
-                        📊 NodePool Overall Usage
-                      </h4>
-                      <span style={{
-                        padding: '0.25rem 0.75rem',
-                        background: 'rgba(255,255,255,0.25)',
-                        color: 'white',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        backdropFilter: 'blur(4px)'
-                      }}>
-                        {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} • {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '1rem',
-                      background: 'rgba(255,255,255,0.95)',
-                      padding: '1rem',
-                      borderRadius: '6px'
-                    }}>
-                      <div>
-                        <BarGauge
-                          label="Total CPU"
-                          used={summary.cpuUsed}
-                          capacity={summary.cpuAllocatable}
-                          allocatable={summary.cpuAllocatable}
-                          percent={summary.cpuPercent}
-                          type="cpu"
-                        />
-                      </div>
-                      <div>
-                        <BarGauge
-                          label="Total Memory"
-                          used={summary.memoryUsed}
-                          capacity={summary.memoryAllocatable}
-                          allocatable={summary.memoryAllocatable}
-                          percent={summary.memoryPercent}
-                          type="memory"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-                  gap: '1rem'
-                }}>
-                {groupNodes.map((node) => (
-                  <div
-                    key={node.name}
-                    style={{
-                      padding: '1rem',
-                      background: '#f9fafb',
-                      borderRadius: '6px',
-                      border: '1px solid #e5e7eb'
-                    }}
-                  >
-                    <div style={{
-                      marginBottom: '0.75rem',
-                      paddingBottom: '0.75rem',
-                      borderBottom: '1px solid #e5e7eb'
-                    }}>
-                      <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '0.25rem'
-                      }}>
-                        <div style={{
-                          fontWeight: 600,
-                          color: '#111827',
-                          fontFamily: 'monospace',
-                          fontSize: '0.875rem'
-                        }}>
-                          {node.name}
-                        </div>
-                        {node.podCount !== undefined && (
-                          <span style={{
-                            padding: '0.125rem 0.5rem',
-                            background: '#e0e7ff',
-                            color: '#4338ca',
-                            borderRadius: '12px',
-                            fontSize: '0.75rem',
-                            fontWeight: 600
-                          }}>
-                            {node.podCount} pod{node.podCount !== 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{
-                        display: 'flex',
-                        gap: '0.5rem',
-                        flexWrap: 'wrap',
-                        fontSize: '0.75rem',
-                        alignItems: 'center'
-                      }}>
-                        {node.nodePool && (
-                          <span style={{
-                            padding: '0.125rem 0.375rem',
-                            background: '#e0e7ff',
-                            color: '#4338ca',
-                            borderRadius: '3px',
-                            fontWeight: 500
-                          }}>
-                            📦 {node.nodePool}
-                          </span>
-                        )}
-                        {node.instanceType && (
-                          <span style={{
-                            padding: '0.125rem 0.375rem',
-                            background: '#f3f4f6',
-                            color: '#374151',
-                            borderRadius: '3px',
-                            fontFamily: 'monospace'
-                          }}>
-                            {node.instanceType}
-                          </span>
-                        )}
-                        {node.capacityType && (
-                          <span style={{
-                            padding: '0.125rem 0.375rem',
-                            background: node.capacityType === 'spot' ? '#fef3c7' : '#dbeafe',
-                            color: node.capacityType === 'spot' ? '#92400e' : '#1e40af',
-                            borderRadius: '3px',
-                            fontWeight: 500,
-                            textTransform: 'capitalize'
-                          }}>
-                            {node.capacityType}
-                          </span>
-                        )}
-                        {node.creationTime && (
-                          <span style={{
-                            padding: '0.125rem 0.375rem',
-                            background: '#f9fafb',
-                            color: '#6b7280',
-                            borderRadius: '3px',
-                            fontSize: '0.6875rem'
-                          }}>
-                            Age: {getNodeAge(node.creationTime)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {node.cpuUsage && (
-                      <BarGauge
-                        label="CPU"
-                        used={node.cpuUsage.used}
-                        capacity={node.cpuUsage.capacity}
-                        allocatable={node.cpuUsage.allocatable}
-                        percent={node.cpuUsage.percent}
-                        type="cpu"
-                      />
-                    )}
-
-                    {node.memoryUsage && (
-                      <BarGauge
-                        label="Memory"
-                        used={node.memoryUsage.used}
-                        capacity={node.memoryUsage.capacity}
-                        allocatable={node.memoryUsage.allocatable}
-                        percent={node.memoryUsage.percent}
-                        type="memory"
-                      />
-                    )}
-
-                    {(!node.cpuUsage && !node.memoryUsage) && (
-                      <div style={{
-                        fontSize: '0.75rem',
-                        color: '#6b7280',
-                        fontStyle: 'italic'
-                      }}>
-                        No usage data available
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+    <Card>
+      <CardHeader>
+        <div className="flex justify-between items-start">
+          <div>
+            <CardTitle>Node Resource Usage</CardTitle>
+            <CardDescription>
+              Real-time CPU and memory usage per node (based on pod resource requests)
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Select value={groupBy} onValueChange={setGroupBy}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="nodepool">Group by NodePool</SelectItem>
+                <SelectItem value="none">All Nodes</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cpu">Sort by CPU</SelectItem>
+                <SelectItem value="memory">Sort by Memory</SelectItem>
+                <SelectItem value="pods">Sort by Pods</SelectItem>
+                <SelectItem value="creation">Sort by Creation</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortOrder} onValueChange={setSortOrder}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc">Descending</SelectItem>
+                <SelectItem value="asc">Ascending</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={podsFilter} onValueChange={setPodsFilter}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Pods</SelectItem>
+                <SelectItem value="0">0 pods</SelectItem>
+                <SelectItem value="1-10">1-10 pods</SelectItem>
+                <SelectItem value="11-50">11-50 pods</SelectItem>
+                <SelectItem value="50+">50+ pods</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={fetchNodes} disabled={loading} size="sm" variant="outline">
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              Refresh
+            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Auto-refresh</span>
+              <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
             </div>
-            );
-          })}
+            {autoRefresh && (
+              <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">Every 10s</SelectItem>
+                  <SelectItem value="30">Every 30s</SelectItem>
+                  <SelectItem value="60">Every 1m</SelectItem>
+                  <SelectItem value="120">Every 2m</SelectItem>
+                  <SelectItem value="300">Every 5m</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
-      )}
-    </div>
+      </CardHeader>
+      <CardContent>
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading && nodes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">Loading nodes...</p>
+          </div>
+        ) : nodes.length === 0 ? (
+          <p className="text-center text-muted-foreground py-8">No nodes found</p>
+        ) : (
+          <div className="space-y-6">
+            {Object.entries(grouped).map(([groupName, groupNodes]) => {
+              const summary = groupBy === 'nodepool' ? calculateNodePoolSummary(groupNodes) : null;
+              
+              return (
+                <div key={groupName}>
+                  <h3 className="text-lg font-semibold mb-4">
+                    {groupName} ({groupNodes.length} node{groupNodes.length !== 1 ? 's' : ''})
+                  </h3>
+                  
+                  {summary && summary.cpuAllocatable > 0 && (() => {
+                    // Find NodePool info to get taints
+                    const nodePoolInfo = nodePools.find(np => np.name === groupName);
+                    const taints = nodePoolInfo?.taints || [];
+                    
+                    return (
+                      <Card className="mb-4 bg-gradient-to-br from-purple-500 to-purple-700 border-0">
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <CardTitle className="text-white text-sm uppercase tracking-wide">
+                              📊 NodePool Overall Usage
+                            </CardTitle>
+                            <Badge variant="secondary" className="bg-white/25 text-white">
+                              {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} • {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-4 mb-4">
+                            <Card className="bg-white/95">
+                              <CardContent className="pt-6">
+                                <BarGauge
+                                  label="Total CPU"
+                                  used={summary.cpuUsed}
+                                  capacity={summary.cpuAllocatable}
+                                  allocatable={summary.cpuAllocatable}
+                                  percent={summary.cpuPercent}
+                                  type="cpu"
+                                />
+                              </CardContent>
+                            </Card>
+                            <Card className="bg-white/95">
+                              <CardContent className="pt-6">
+                                <BarGauge
+                                  label="Total Memory"
+                                  used={summary.memoryUsed}
+                                  capacity={summary.memoryAllocatable}
+                                  allocatable={summary.memoryAllocatable}
+                                  percent={summary.memoryPercent}
+                                  type="memory"
+                                />
+                              </CardContent>
+                            </Card>
+                          </div>
+                          
+                          {/* Taints Section */}
+                          {taints.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-white/20">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-white text-xs font-semibold">Taints:</span>
+                                <Badge variant="secondary" className="bg-white/25 text-white text-xs">
+                                  {taints.length} configured
+                                </Badge>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {taints.map((taint, idx) => {
+                                  const taintKey = taint?.key || taint?.Key || '';
+                                  const taintValue = taint?.value || taint?.Value || '';
+                                  const taintEffect = taint?.effect || taint?.Effect || '';
+                                  const taintString = `${taintKey}${taintValue ? `=${taintValue}` : ''}:${taintEffect}`;
+                                  return (
+                                    <Badge
+                                      key={idx}
+                                      variant="outline"
+                                      className="font-mono text-xs border-yellow-300 text-yellow-100 bg-yellow-500/20"
+                                    >
+                                      {taintString}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {groupNodes.map((node) => (
+                      <Card key={node.name}>
+                        <CardHeader className="pb-3 border-b">
+                          <div className="flex justify-between items-center">
+                            <code className="text-sm font-semibold">{node.name}</code>
+                            {node.podCount !== undefined && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80 transition-colors">
+                                    <Package className="h-3 w-3 mr-1" />
+                                    {node.podCount} pod{node.podCount !== 1 ? 's' : ''}
+                                    <ChevronDown className="ml-1 h-3 w-3" />
+                                  </Badge>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[400px] max-h-[500px] overflow-y-auto" align="end">
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                      <Package className="h-4 w-4 text-primary" />
+                                      <h4 className="font-semibold text-sm">Pods on {node.name}</h4>
+                                      <Badge variant="secondary" className="ml-auto text-xs">
+                                        {node.podCount} total
+                                      </Badge>
+                                    </div>
+                                    <Separator />
+                                    {node.podNames && node.podNames.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {node.podNames.map((podName, idx) => {
+                                          const [namespace, name] = podName.split('/');
+                                          return (
+                                            <div
+                                              key={idx}
+                                              className="flex items-center gap-2 p-2 rounded-md border bg-card hover:bg-accent transition-colors"
+                                            >
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                  <code className="text-xs font-semibold truncate">{name}</code>
+                                                  <Badge variant="outline" className="text-xs shrink-0">
+                                                    {namespace}
+                                                  </Badge>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground text-center py-4">
+                                        No pods found on this node
+                                      </p>
+                                    )}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {node.nodePool && (
+                              <Badge variant="outline">📦 {node.nodePool}</Badge>
+                            )}
+                            {node.instanceType && (
+                              <Badge variant="secondary" className="font-mono text-xs">
+                                {node.instanceType}
+                              </Badge>
+                            )}
+                            {node.capacityType && (
+                              <Badge variant={node.capacityType === 'spot' ? 'default' : 'secondary'}>
+                                {node.capacityType}
+                              </Badge>
+                            )}
+                            {node.architecture && (
+                              <Badge variant="outline" className={node.architecture === 'arm64' ? 'border-green-500 text-green-700' : 'border-indigo-500 text-indigo-700'}>
+                                {node.architecture.toUpperCase()}
+                              </Badge>
+                            )}
+                            {node.creationTime && (
+                              <Badge variant="outline">Age: {getNodeAge(node.creationTime)}</Badge>
+                            )}
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-4 space-y-4">
+                          {node.cpuUsage && (
+                            <BarGauge
+                              label="CPU"
+                              used={node.cpuUsage.used}
+                              capacity={node.cpuUsage.capacity}
+                              allocatable={node.cpuUsage.allocatable}
+                              percent={node.cpuUsage.percent}
+                              type="cpu"
+                            />
+                          )}
+
+                          {node.memoryUsage && (
+                            <BarGauge
+                              label="Memory"
+                              used={node.memoryUsage.used}
+                              capacity={node.memoryUsage.capacity}
+                              allocatable={node.memoryUsage.allocatable}
+                              percent={node.memoryUsage.percent}
+                              type="memory"
+                            />
+                          )}
+
+                          {(!node.cpuUsage && !node.memoryUsage) && (
+                            <p className="text-xs text-muted-foreground italic">
+                              No usage data available
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                  <Separator className="my-6" />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 export default NodeUsageView;
-

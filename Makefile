@@ -16,9 +16,9 @@ cli:
 # Generate Swagger documentation
 swagger:
 	@echo "Generating Swagger documentation..."
-	@export PATH=$$PATH:$$HOME/go/bin && swag init -g cmd/api/main.go -o ./docs/swagger
-	@echo "Swagger docs generated in ./docs/swagger"
-	@echo "Access Swagger UI at: http://localhost:8080/swagger/index.html"
+	@export PATH=$$PATH:$$HOME/go/bin && swag init -g cmd/api/main.go -o ./internal/docs/swagger
+	@echo "Swagger docs generated in ./internal/docs/swagger"
+	@echo "Access Swagger UI at: http://localhost:8080/api/swagger/index.html"
 
 # Build frontend
 frontend:

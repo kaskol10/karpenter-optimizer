@@ -19,7 +19,7 @@ type NodePoolCapacityRecommendation struct {
 	CurrentInstanceTypes     []string `json:"currentInstanceTypes"`
 	CurrentCPUUsed           float64  `json:"currentCPUUsed"`        // Total CPU used across all nodes
 	CurrentCPUCapacity       float64  `json:"currentCPUCapacity"`    // Total CPU allocatable across all nodes
-	CurrentMemoryUsed        float64  `json:"currentMemoryUsed"`     // Total Memory used across all nodes
+	CurrentMemoryUsed         float64  `json:"currentMemoryUsed"`     // Total Memory used across all nodes
 	CurrentMemoryCapacity    float64  `json:"currentMemoryCapacity"` // Total Memory allocatable across all nodes
 	CurrentCost              float64  `json:"currentCost"`           // Current hourly cost
 	RecommendedNodes         int      `json:"recommendedNodes"`
@@ -33,6 +33,7 @@ type NodePoolCapacityRecommendation struct {
 	AIReasoning              string   `json:"aiReasoning,omitempty"` // AI-enhanced explanation (if Ollama is available)
 	Architecture             string   `json:"architecture"`
 	CapacityType             string   `json:"capacityType"`
+	Taints                   []kubernetes.Taint `json:"taints,omitempty"` // Node taints
 	HasRecommendation        bool     `json:"hasRecommendation"` // true if a cost-saving recommendation exists
 }
 
@@ -43,7 +44,10 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 
 	for i, np := range nodePools {
 		if progressCallback != nil {
-			progressCallback(fmt.Sprintf("Analyzing NodePool '%s' (%d/%d)", np.Name, i+1, totalNodePools), float64(i)/float64(totalNodePools)*100.0)
+			// Calculate progress: map from 0% to 100% based on NodePool index
+			// Use (i+1) to ensure first NodePool shows some progress, and last shows 100%
+			progress := float64(i+1) / float64(totalNodePools) * 100.0
+			progressCallback(fmt.Sprintf("Analyzing NodePool '%s' (%d/%d)", np.Name, i+1, totalNodePools), progress)
 		}
 
 		if len(np.ActualNodes) == 0 {
@@ -67,10 +71,13 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 				Reasoning:                "No nodes currently exist in this NodePool.",
 				Architecture:             np.Architecture,
 				CapacityType:             np.CapacityType,
+				Taints:                   np.Taints,
 				HasRecommendation:        false,
 			})
 			if progressCallback != nil {
-				progressCallback(fmt.Sprintf("NodePool '%s' has no nodes", np.Name), float64(i+1)/float64(totalNodePools)*100.0)
+				// Calculate progress: ensure it's based on completion, not just index
+				progress := float64(i+1) / float64(totalNodePools) * 100.0
+				progressCallback(fmt.Sprintf("NodePool '%s' has no nodes", np.Name), progress)
 			}
 			continue
 		}
@@ -207,7 +214,9 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 				costSavings, costSavingsPercent)
 
 			if progressCallback != nil {
-				progressCallback(fmt.Sprintf("Found recommendation for NodePool '%s': %d nodes -> %d nodes, savings: $%.2f/hr (%.1f%%)", np.Name, np.CurrentNodes, bestNodes, costSavings, costSavingsPercent), float64(i+1)/float64(totalNodePools)*100.0)
+				// Calculate progress: ensure it's based on completion
+				progress := float64(i+1) / float64(totalNodePools) * 100.0
+				progressCallback(fmt.Sprintf("Found recommendation for NodePool '%s': %d nodes -> %d nodes, savings: $%.2f/hr (%.1f%%)", np.Name, np.CurrentNodes, bestNodes, costSavings, costSavingsPercent), progress)
 			}
 		} else {
 			// No cost savings - use current values as recommended
@@ -226,7 +235,9 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 			reasoning += "No cost-saving recommendations available. Current configuration is already optimal."
 
 			if progressCallback != nil {
-				progressCallback(fmt.Sprintf("No recommendation for NodePool '%s' - current cost ($%.2f/hr) is already optimal", np.Name, currentCost), float64(i+1)/float64(totalNodePools)*100.0)
+				// Calculate progress: ensure it's based on completion
+				progress := float64(i+1) / float64(totalNodePools) * 100.0
+				progressCallback(fmt.Sprintf("No recommendation for NodePool '%s' - current cost ($%.2f/hr) is already optimal", np.Name, currentCost), progress)
 			}
 		}
 
@@ -249,6 +260,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 			Reasoning:                reasoning,
 			Architecture:             architecture,
 			CapacityType:             bestCapacityType,
+			Taints:                   np.Taints,
 			HasRecommendation:        hasRecommendation,
 		}
 
@@ -502,7 +514,8 @@ func (r *Recommender) findOptimalInstanceTypes(requiredCPU, requiredMemory float
 func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory float64) []string {
 	// Try to get instance types from AWS Pricing API
 	if r.awsPricing != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Increase timeout to 30 seconds - the pricing index file can be large
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		availableTypes, err := r.awsPricing.GetAvailableEC2InstanceTypes(ctx, architecture)
@@ -511,7 +524,11 @@ func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory
 			return r.filterInstanceTypesByRequirements(availableTypes, architecture, cpu, memory)
 		}
 		// If AWS API fails, fall back to hardcoded list
-		fmt.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.\n", err)
+		if err != nil {
+			fmt.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.\n", err)
+		} else if len(availableTypes) == 0 {
+			fmt.Printf("Warning: AWS API returned empty instance types list for architecture %s. Using fallback list.\n", architecture)
+		}
 	}
 
 	// Fallback to hardcoded list if AWS API is unavailable
