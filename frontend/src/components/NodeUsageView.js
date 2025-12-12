@@ -86,11 +86,6 @@ function NodeUsageView() {
     }
   };
 
-  const getUsageColor = (percent) => {
-    if (percent >= 90) return 'bg-red-500';
-    if (percent >= 70) return 'bg-yellow-500';
-    return 'bg-green-500';
-  };
 
   const getNodeAge = (creationTime) => {
     if (!creationTime) return 'N/A';
