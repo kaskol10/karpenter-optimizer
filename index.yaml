@@ -3,28 +3,7 @@ entries:
   karpenter-optimizer:
   - apiVersion: v2
     appVersion: 0.0.23
-    created: "2025-12-12T10:57:17.932680807Z"
-    description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
-      Karpenter NodePools
-    digest: 362649e639f17d75aa5b495247fdad6e41544c133deadc4a5af27a753977f9bc
-    home: https://github.com/kaskol10/karpenter-optimizer
-    icon: https://raw.githubusercontent.com/kaskol10/karpenter-optimizer/main/docs/logo.png
-    keywords:
-    - karpenter
-    - kubernetes
-    - cost-optimization
-    - aws
-    - ec2
-    name: karpenter-optimizer
-    sources:
-    - https://github.com/kaskol10/karpenter-optimizer
-    type: application
-    urls:
-    - https://kaskol10.github.io/karpenter-optimizer/charts/karpenter-optimizer-0.0.23.tgz
-    version: 0.0.23
-  - apiVersion: v2
-    appVersion: 0.0.23
-    created: "2025-12-12T10:57:17.932001127Z"
+    created: "2025-12-12T12:32:44.986366+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 362649e639f17d75aa5b495247fdad6e41544c133deadc4a5af27a753977f9bc
@@ -45,7 +24,7 @@ entries:
     version: 0.0.23
   - apiVersion: v2
     appVersion: 0.0.22
-    created: "2025-12-12T10:57:17.93133358Z"
+    created: "2025-12-12T12:32:44.985885+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: c9fdcbf29f842909ea07e68593bd1adc890b4d1c6c068fc7678e5f6aecee9ffc
@@ -66,7 +45,7 @@ entries:
     version: 0.0.22
   - apiVersion: v2
     appVersion: 0.0.21
-    created: "2025-12-12T10:57:17.92978234Z"
+    created: "2025-12-12T12:32:44.985513+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 2e3c8ef393dd228674015db03f1a3fe4f9d23ffeb1ca0513d8975818f0aa3017
@@ -87,7 +66,7 @@ entries:
     version: 0.0.21
   - apiVersion: v2
     appVersion: 0.0.19
-    created: "2025-12-12T10:57:17.929139328Z"
+    created: "2025-12-12T12:32:44.985128+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: b7ab861db42944e7f6eb9eb69dba799a1f1c23fb32b4364e47ff066dc0a17b05
@@ -108,7 +87,7 @@ entries:
     version: 0.0.19
   - apiVersion: v2
     appVersion: 0.0.18
-    created: "2025-12-12T10:57:17.928479566Z"
+    created: "2025-12-12T12:32:44.984737+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 54be8d2bf0250cdffaddf183a54cf9b7594365fdcfe3dd1b30daca8fb2bbe554
@@ -129,7 +108,7 @@ entries:
     version: 0.0.18
   - apiVersion: v2
     appVersion: 0.0.17
-    created: "2025-12-12T10:57:17.927806779Z"
+    created: "2025-12-12T12:32:44.984331+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 833cf0988d568525a51f9d289956c45573bf9b2ad7613a55baf77956869f6433
@@ -150,7 +129,7 @@ entries:
     version: 0.0.17
   - apiVersion: v2
     appVersion: 0.0.16
-    created: "2025-12-12T10:57:17.927168417Z"
+    created: "2025-12-12T12:32:44.983882+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 43fdc29e5d665a5809eac8725ca6d77c230eee60b73936627e3588b2b76c9218
@@ -171,7 +150,7 @@ entries:
     version: 0.0.16
   - apiVersion: v2
     appVersion: 0.0.15
-    created: "2025-12-12T10:57:17.926496402Z"
+    created: "2025-12-12T12:32:44.983437+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: d72ab8f747aa65f699afdaa04cfa9afa38b9acb301c01004c55ab7df71c2db67
@@ -192,7 +171,7 @@ entries:
     version: 0.0.15
   - apiVersion: v2
     appVersion: 0.0.14
-    created: "2025-12-12T10:57:17.925834695Z"
+    created: "2025-12-12T12:32:44.982981+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 2406369095cdcc07545c9a14a11ec09a309622b348dd9840380755a63fb317f0
@@ -213,7 +192,7 @@ entries:
     version: 0.0.14
   - apiVersion: v2
     appVersion: 0.0.13
-    created: "2025-12-12T10:57:17.925157771Z"
+    created: "2025-12-12T12:32:44.982535+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: e2e0ada7aed38fde1103ef4156d50b8cbf3edff2b0c690bb821f076ad80728e7
@@ -234,7 +213,7 @@ entries:
     version: 0.0.13
   - apiVersion: v2
     appVersion: 0.0.12
-    created: "2025-12-12T10:57:17.924496856Z"
+    created: "2025-12-12T12:32:44.981571+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: a4882721ff84c5ec73a92177483a00fe1c3708eb32deeaea9515571847b867df
@@ -255,7 +234,7 @@ entries:
     version: 0.0.12
   - apiVersion: v2
     appVersion: 0.0.11
-    created: "2025-12-12T10:57:17.923841823Z"
+    created: "2025-12-12T12:32:44.980994+01:00"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
     digest: 32a3e54cb48faf89f2c7a629fb4dc0e8b9d2fcb34c54ff15f98c82af3a168570
@@ -274,4 +253,4 @@ entries:
     urls:
     - https://kaskol10.github.io/karpenter-optimizer/karpenter-optimizer-0.0.11.tgz
     version: 0.0.11
-generated: "2025-12-12T10:57:17.922980684Z"
+generated: "2025-12-12T12:32:44.979977+01:00"
