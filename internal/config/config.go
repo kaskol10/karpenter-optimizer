@@ -61,6 +61,15 @@ func Load() *Config {
 		llmProvider = "ollama"
 	}
 
+	// Set legacy Ollama fields for backward compatibility
+	// If legacy env vars were provided, use them; otherwise use the LLM defaults
+	if ollamaURL == "" {
+		ollamaURL = llmURL
+	}
+	if ollamaModel == "" {
+		ollamaModel = llmModel
+	}
+
 	return &Config{
 		KubeconfigPath: getEnv("KUBECONFIG", ""),
 		KubeContext:    getEnv("KUBE_CONTEXT", ""),

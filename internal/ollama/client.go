@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -101,9 +102,9 @@ type LiteLLMChatResponse struct {
 	Created int64  `json:"created"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Index   int     `json:"index"`
-		Message Message `json:"message"`
-		FinishReason string `json:"finish_reason"`
+		Index        int     `json:"index"`
+		Message      Message `json:"message"`
+		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -170,7 +171,7 @@ func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Add API key for LiteLLM if provided
 	if c.provider == "litellm" && c.apiKey != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
@@ -182,7 +183,7 @@ func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
 	startTime := time.Now()
 	resp, err := c.httpClient.Do(req)
 	duration := time.Since(startTime)
-	
+
 	if err != nil {
 		if c.debug {
 			log.Printf("[LLM] Request failed after %v: %v", duration, err)
@@ -203,7 +204,7 @@ func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
 		if c.debug {
 			log.Printf("[LLM] %s", errorMsg)
 		}
-		return "", fmt.Errorf(errorMsg)
+		return "", errors.New(errorMsg)
 	}
 
 	// Read the response body first so we can log it if parsing fails
