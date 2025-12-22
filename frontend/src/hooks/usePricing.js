@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getPrice, getBulkPrices, getCachedPrice, getCacheStats } from '../lib/pricingCache';
+import { getPrice, getBulkPrices, getCacheStats } from '../lib/pricingCache';
 
 /**
  * React hook for managing AWS EC2 instance pricing

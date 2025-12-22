@@ -1566,16 +1566,18 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 						// Extract minAvailable or maxUnavailable from spec
 						// These can be either int values or percentage strings (e.g., "50%")
 						if pdb.Spec.MinAvailable != nil {
-							if pdb.Spec.MinAvailable.Type == intstr.Int {
+							switch pdb.Spec.MinAvailable.Type {
+							case intstr.Int:
 								pdbDetails.MinAvailable = fmt.Sprintf("%d", pdb.Spec.MinAvailable.IntVal)
-							} else if pdb.Spec.MinAvailable.Type == intstr.String {
+							case intstr.String:
 								pdbDetails.MinAvailable = pdb.Spec.MinAvailable.StrVal
 							}
 						}
 						if pdb.Spec.MaxUnavailable != nil {
-							if pdb.Spec.MaxUnavailable.Type == intstr.Int {
+							switch pdb.Spec.MaxUnavailable.Type {
+							case intstr.Int:
 								pdbDetails.MaxUnavailable = fmt.Sprintf("%d", pdb.Spec.MaxUnavailable.IntVal)
-							} else if pdb.Spec.MaxUnavailable.Type == intstr.String {
+							case intstr.String:
 								pdbDetails.MaxUnavailable = pdb.Spec.MaxUnavailable.StrVal
 							}
 						}

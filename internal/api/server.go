@@ -692,7 +692,7 @@ func (s *Server) listNodePools(c *gin.Context) {
 		for i := range nodePools {
 			np := &nodePools[i]
 			var totalCost float64
-			var overallPricingSource recommender.PricingSource = recommender.PricingSourceUnknown
+			var overallPricingSource = recommender.PricingSourceUnknown
 
 			// Calculate cost based on actual nodes if available
 			if len(np.ActualNodes) > 0 {
@@ -1036,7 +1036,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 
 	// Calculate cluster cost using AWS Pricing API if available
 	var totalClusterCost float64
-	var overallPricingSource recommender.PricingSource = recommender.PricingSourceUnknown
+	var overallPricingSource = recommender.PricingSourceUnknown
 	if s.recommender != nil {
 		fmt.Printf("Calculating cluster cost for %d nodes...\n", totalNodes)
 		for _, node := range nodes {

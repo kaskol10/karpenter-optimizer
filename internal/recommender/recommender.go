@@ -2101,13 +2101,13 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 
 	var totalCost float64
 	instanceTypeSources := make(map[string]PricingSource) // Track source per instance type
-	var overallSource PricingSource = PricingSourceUnknown
+	var overallSource = PricingSourceUnknown
 
 	for i, it := range instanceTypes {
 		itLower := strings.ToLower(it)
 		var instanceCost float64
 		var priceFound bool
-		var source PricingSource = PricingSourceUnknown
+		var source = PricingSourceUnknown
 
 		// First, check hardcoded prices (no API call needed)
 		// This reduces AWS Pricing API calls significantly for common instance types

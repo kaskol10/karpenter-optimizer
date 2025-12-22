@@ -19,13 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/pricing/types"
 )
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // getLocationForRegion maps AWS region to Pricing API location format
 func getLocationForRegion(region string) string {
 	locationMap := map[string]string{
@@ -65,12 +58,6 @@ type Client struct {
 	instanceTypesMu    sync.RWMutex                   // Mutex for instance types cache
 	pricingClient      *pricing.Client                // AWS SDK Pricing client (REQUIRED)
 	useGetProducts     bool                           // Always true - GetProducts API is the only option
-}
-
-type pricingIndexCache struct {
-	products  map[string]interface{}
-	terms     map[string]interface{}
-	expiresAt time.Time
 }
 
 type cachedInstanceTypes struct {
@@ -416,17 +403,6 @@ func (c *Client) getPricingIndex(ctx context.Context) (map[string]interface{}, m
 	return nil, nil, fmt.Errorf("getPricingIndex is deprecated - GetProducts API is the only option (requires AWS credentials)")
 }
 
-// productIDCache caches product IDs for instance types
-type productIDCache struct {
-	productIDs map[string]string // instanceType -> productID
-	expiresAt  time.Time
-}
-
-var (
-	productIDCacheMu  sync.RWMutex
-	productIDCacheMap = make(map[string]*productIDCache) // region -> cache
-)
-
 // DEPRECATED: findProductID and queryProductFile are no longer used - GetProducts API doesn't need product IDs
 // These functions are kept for reference but should never be called
 //
@@ -438,101 +414,6 @@ func (c *Client) findProductID(ctx context.Context, instanceType string) (string
 //nolint:unused,deadcode
 func (c *Client) queryProductFile(ctx context.Context, productID, capacityType string) (float64, error) {
 	return 0, fmt.Errorf("queryProductFile is deprecated - GetProducts API is the only option (requires AWS credentials)")
-}
-
-// queryPricingAPI queries the AWS Pricing API for instance pricing
-// First tries to query a specific product file, falls back to full index if needed
-func (c *Client) queryPricingAPI(ctx context.Context, instanceType, capacityType string) (float64, error) {
-	// Try to get product ID from cache or lightweight query first
-	productID, err := c.findProductID(ctx, instanceType)
-	if err == nil && productID != "" {
-		// Query the specific product file (much smaller than full index)
-		price, err := c.queryProductFile(ctx, productID, capacityType)
-		if err == nil && price > 0 {
-			return price, nil
-		}
-		// If product file query fails, fall back to full index
-	}
-
-	// Fallback: Get the pricing index (cached or downloaded)
-	products, terms, err := c.getPricingIndex(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	// Search for instance type and extract price
-	instanceTypeLower := strings.ToLower(instanceType)
-	var matchingProducts []string
-	var bestProductID string
-	var bestPrice float64
-	var bestErr error
-
-	// First pass: collect all matching products and prefer Linux/Shared
-	for productID, productData := range products {
-		productMap, ok := productData.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		attributes, ok := productMap["attributes"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if instType, ok := attributes["instanceType"].(string); ok {
-			if strings.ToLower(instType) == instanceTypeLower {
-				matchingProducts = append(matchingProducts, productID)
-
-				operatingSystem, _ := attributes["operatingSystem"].(string)
-				tenancy, _ := attributes["tenancy"].(string)
-
-				// Try to extract price
-				if capacityType == "spot" {
-					price, err := c.extractSpotPrice(terms, productID)
-					if err == nil && price > 0 {
-						// Prefer Linux/Shared instances
-						if operatingSystem == "Linux" && tenancy == "Shared" {
-							return price, nil
-						}
-						// Keep track of best match
-						if bestProductID == "" || (operatingSystem == "Linux" && tenancy == "Shared") {
-							bestProductID = productID
-							bestPrice = price
-						}
-					} else if bestErr == nil {
-						bestErr = err
-					}
-				} else {
-					price, err := c.extractPriceFromTerms(terms, productID, "OnDemand")
-					if err == nil && price > 0 {
-						// Prefer Linux/Shared instances
-						if operatingSystem == "Linux" && tenancy == "Shared" {
-							return price, nil
-						}
-						// Keep track of best match
-						if bestProductID == "" || (operatingSystem == "Linux" && tenancy == "Shared") {
-							bestProductID = productID
-							bestPrice = price
-						}
-					} else if bestErr == nil {
-						bestErr = err
-					}
-				}
-			}
-		}
-	}
-
-	// If we found a price, return it
-	if bestPrice > 0 {
-		return bestPrice, nil
-	}
-
-	// If we found matching products but couldn't extract prices, return detailed error
-	if len(matchingProducts) > 0 {
-		return 0, fmt.Errorf("found %d product(s) for instance type %s but could not extract price: %v (product IDs: %v)", len(matchingProducts), instanceType, bestErr, matchingProducts[:min(3, len(matchingProducts))])
-	}
-
-	return 0, fmt.Errorf("instance type %s not found in pricing index", instanceType)
 }
 
 // extractPriceFromTerms extracts the on-demand price from the terms structure
@@ -704,18 +585,6 @@ func (c *Client) extractPriceFromDimension(priceData interface{}) (float64, erro
 		currencies = append(currencies, k)
 	}
 	return 0, fmt.Errorf("USD not found in pricePerUnit, available currencies: %v", currencies)
-}
-
-// extractSpotPrice extracts the spot price (simplified - uses conservative estimate)
-func (c *Client) extractSpotPrice(terms map[string]interface{}, productID string) (float64, error) {
-	// Try to get on-demand price first
-	onDemandPrice, err := c.extractPriceFromTerms(terms, productID, "OnDemand")
-	if err != nil {
-		return 0, err
-	}
-
-	// Conservative estimate: spot is 25% of on-demand (75% discount)
-	return onDemandPrice * 0.25, nil
 }
 
 // QueryPricingAPIWithFilters queries AWS Pricing API with specific filters
