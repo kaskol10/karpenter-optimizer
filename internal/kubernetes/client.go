@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -378,6 +379,7 @@ type NodePoolInfo struct {
 	Requirements  map[string]string `json:"requirements"`          // Node requirements
 	Taints        []Taint          `json:"taints,omitempty"`      // Node taints
 	EstimatedCost float64           `json:"estimatedCost"`         // Cost per hour per instance type
+	PricingSource string            `json:"pricingSource,omitempty"` // Source of pricing data (aws-pricing-api, hardcoded, etc.)
 	CurrentNodes  int               `json:"currentNodes"`          // Actual number of nodes in the cluster
 	PodCount      int               `json:"podCount"`              // Total number of pods across all nodes in this NodePool
 	ActualNodes   []NodeInfo        `json:"actualNodes,omitempty"` // Actual node details
@@ -1111,6 +1113,19 @@ func (c *Client) estimateNodePoolCost(instanceTypes []string, capacityType strin
 	return avgCost
 }
 
+// PDBBlockingInfo represents detailed information about a PDB that's blocking pod eviction
+type PDBBlockingInfo struct {
+	PDBName            string   `json:"pdbName"`            // namespace/name format
+	Namespace          string   `json:"namespace"`          // PDB namespace
+	Name               string   `json:"name"`               // PDB name
+	BlockingPods       []string `json:"blockingPods"`       // Pods blocked by this PDB (namespace/name format)
+	MinAvailable       string   `json:"minAvailable,omitempty"`       // minAvailable value if set (can be int or percentage string)
+	MaxUnavailable     string   `json:"maxUnavailable,omitempty"`     // maxUnavailable value if set (can be int or percentage string)
+	CurrentHealthy     int32    `json:"currentHealthy"`     // Current healthy pods
+	DesiredHealthy     int32    `json:"desiredHealthy"`     // Desired healthy pods
+	DisruptionsAllowed int32    `json:"disruptionsAllowed"` // Current disruptions allowed (0 = blocking)
+}
+
 // NodeDisruptionInfo represents information about a node disruption event
 type NodeDisruptionInfo struct {
 	NodeName        string            `json:"nodeName"`
@@ -1127,7 +1142,8 @@ type NodeDisruptionInfo struct {
 	IsBlocked       bool              `json:"isBlocked"`                // True if node deletion is blocked
 	BlockingReason  string            `json:"blockingReason,omitempty"` // Why it's blocked (PDB, etc.)
 	BlockingPods    []string          `json:"blockingPods,omitempty"`   // Pods that are blocking eviction
-	BlockingPDBs    []string          `json:"blockingPDBs,omitempty"`   // PDBs that are blocking
+	BlockingPDBs    []string          `json:"blockingPDBs,omitempty"`   // PDBs that are blocking (deprecated, use BlockingPDBDetails)
+	BlockingPDBDetails []PDBBlockingInfo `json:"blockingPDBDetails,omitempty"` // Detailed PDB blocking information
 	NodeStillExists bool              `json:"nodeStillExists"`          // True if node still exists (might be blocked)
 	// Enhanced node information from Kubernetes API
 	NodeConditions      []NodeCondition `json:"nodeConditions,omitempty"`      // Node conditions (Ready, MemoryPressure, etc.)
@@ -1495,6 +1511,8 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 
 	var blockingPDBs []string
 	var blockingPods []string
+	// Map to track detailed PDB blocking information: pdbKey -> PDBBlockingInfo
+	pdbDetailsMap := make(map[string]*PDBBlockingInfo)
 
 	// Check each pod against PDBs
 	for _, podInfo := range pods {
@@ -1503,6 +1521,8 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 		if err != nil {
 			continue
 		}
+
+		podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 
 		// Check if pod has eviction issues
 		hasEvictionIssue := false
@@ -1524,10 +1544,54 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 
 			if selector.Matches(labels.Set(pod.Labels)) {
 				// Pod is protected by this PDB
+				pdbKey := fmt.Sprintf("%s/%s", pdb.Namespace, pdb.Name)
+				
 				// Check if PDB would block eviction
-				if pdb.Status.DisruptionsAllowed == 0 && pdb.Status.CurrentHealthy <= pdb.Status.DesiredHealthy {
-					blockingPDBs = append(blockingPDBs, fmt.Sprintf("%s/%s", pdb.Namespace, pdb.Name))
-					blockingPods = append(blockingPods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+				// A PDB blocks eviction when DisruptionsAllowed is 0 and we're at or below the desired healthy threshold
+				isBlocking := pdb.Status.DisruptionsAllowed == 0 && pdb.Status.CurrentHealthy <= pdb.Status.DesiredHealthy
+				
+				if isBlocking {
+					// Initialize PDB details if not already tracked
+					if _, exists := pdbDetailsMap[pdbKey]; !exists {
+						pdbDetails := &PDBBlockingInfo{
+							PDBName:            pdbKey,
+							Namespace:          pdb.Namespace,
+							Name:               pdb.Name,
+							BlockingPods:       []string{},
+							CurrentHealthy:     pdb.Status.CurrentHealthy,
+							DesiredHealthy:     pdb.Status.DesiredHealthy,
+							DisruptionsAllowed: pdb.Status.DisruptionsAllowed,
+						}
+						
+						// Extract minAvailable or maxUnavailable from spec
+						// These can be either int values or percentage strings (e.g., "50%")
+						if pdb.Spec.MinAvailable != nil {
+							if pdb.Spec.MinAvailable.Type == intstr.Int {
+								pdbDetails.MinAvailable = fmt.Sprintf("%d", pdb.Spec.MinAvailable.IntVal)
+							} else if pdb.Spec.MinAvailable.Type == intstr.String {
+								pdbDetails.MinAvailable = pdb.Spec.MinAvailable.StrVal
+							}
+						}
+						if pdb.Spec.MaxUnavailable != nil {
+							if pdb.Spec.MaxUnavailable.Type == intstr.Int {
+								pdbDetails.MaxUnavailable = fmt.Sprintf("%d", pdb.Spec.MaxUnavailable.IntVal)
+							} else if pdb.Spec.MaxUnavailable.Type == intstr.String {
+								pdbDetails.MaxUnavailable = pdb.Spec.MaxUnavailable.StrVal
+							}
+						}
+						
+						pdbDetailsMap[pdbKey] = pdbDetails
+						blockingPDBs = append(blockingPDBs, pdbKey)
+					}
+					
+					// Add this pod to the PDB's blocking pods list
+					if !contains(pdbDetailsMap[pdbKey].BlockingPods, podKey) {
+						pdbDetailsMap[pdbKey].BlockingPods = append(pdbDetailsMap[pdbKey].BlockingPods, podKey)
+					}
+					
+					if !contains(blockingPods, podKey) {
+						blockingPods = append(blockingPods, podKey)
+					}
 					hasEvictionIssue = true
 				}
 			}
@@ -1539,13 +1603,20 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 			hasEvictionIssue = true
 		}
 
-		if hasEvictionIssue && !contains(blockingPods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)) {
-			blockingPods = append(blockingPods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+		if hasEvictionIssue && !contains(blockingPods, podKey) {
+			blockingPods = append(blockingPods, podKey)
 		}
+	}
+
+	// Convert map to slice for JSON serialization
+	var blockingPDBDetails []PDBBlockingInfo
+	for _, details := range pdbDetailsMap {
+		blockingPDBDetails = append(blockingPDBDetails, *details)
 	}
 
 	if len(blockingPDBs) > 0 {
 		disruption.BlockingPDBs = blockingPDBs
+		disruption.BlockingPDBDetails = blockingPDBDetails
 		disruption.BlockingReason = fmt.Sprintf("Blocked by %d PDB(s)", len(blockingPDBs))
 		disruption.IsBlocked = true
 	}

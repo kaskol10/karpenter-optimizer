@@ -67,15 +67,39 @@ If you need to publish manually:
 # Package the chart
 helm package charts/karpenter-optimizer --destination ./charts
 
-# Create/update index (requires existing gh-pages branch)
-helm repo index ./charts --url https://kaskol10.github.io/karpenter-optimizer
+# Checkout gh-pages branch
+git fetch origin gh-pages:gh-pages 2>/dev/null || echo "gh-pages branch does not exist yet"
+git checkout gh-pages || git checkout -b gh-pages
+
+# Copy chart package to root (not in subdirectories)
+cp charts/karpenter-optimizer-*.tgz .
+
+# Remove any .tgz files from subdirectories to avoid incorrect URLs
+rm -f charts/*.tgz || true
+
+# Generate or update index (from root directory, not from charts/)
+helm repo index . --url https://kaskol10.github.io/karpenter-optimizer
 
 # Commit and push to gh-pages branch
-git checkout gh-pages
-cp charts/*.tgz .
-cp charts/index.yaml .
-git add .
+git add index.yaml *.tgz
 git commit -m "Add chart version X.Y.Z"
+git push origin gh-pages
+```
+
+## Fixing Index Issues
+
+If you encounter issues with duplicate entries or incorrect URLs in the index.yaml:
+
+```bash
+# Use the fix script
+./scripts/fix-helm-index.sh
+
+# Or manually regenerate the index
+git checkout gh-pages
+rm -f charts/*.tgz  # Remove .tgz files from subdirectories
+helm repo index . --url https://kaskol10.github.io/karpenter-optimizer
+git add index.yaml
+git commit -m "fix: regenerate Helm chart index"
 git push origin gh-pages
 ```
 

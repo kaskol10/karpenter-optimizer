@@ -115,7 +115,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 				if nodeCapacityType == "" {
 					nodeCapacityType = "on-demand" // Default
 				}
-				nodeCost := r.estimateCost([]string{node.InstanceType}, nodeCapacityType, 1)
+				nodeCost := r.estimateCost(ctx, []string{node.InstanceType}, nodeCapacityType, 1)
 				currentCost += nodeCost
 			}
 
@@ -152,7 +152,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 
 		// Try both spot and on-demand to find the best cost option
 		// If all nodes are already spot, prefer spot. If there are on-demand nodes, try converting to spot for savings.
-		bestTypes, bestNodes, bestCost, bestCapacityType := r.findOptimalInstanceTypesWithCapacityType(
+		bestTypes, bestNodes, bestCost, bestCapacityType := r.findOptimalInstanceTypesWithCapacityType(ctx,
 			currentCPUCapacity,
 			currentMemoryCapacity,
 			architecture,
@@ -426,7 +426,7 @@ Respond with JSON:
 
 // findOptimalInstanceTypesWithCapacityType finds the best instance type combination and capacity type
 // It tries both spot and on-demand to find the optimal cost
-func (r *Recommender) findOptimalInstanceTypesWithCapacityType(requiredCPU, requiredMemory float64, architecture string, preferSpot, hasOnDemand bool) ([]string, int, float64, string) {
+func (r *Recommender) findOptimalInstanceTypesWithCapacityType(ctx context.Context, requiredCPU, requiredMemory float64, architecture string, preferSpot, hasOnDemand bool) ([]string, int, float64, string) {
 	// Add 10% headroom for bin-packing efficiency
 	targetCPU := requiredCPU * 1.1
 	targetMemory := requiredMemory * 1.1
@@ -459,7 +459,7 @@ func (r *Recommender) findOptimalInstanceTypesWithCapacityType(requiredCPU, requ
 				continue
 			}
 			nodesNeeded := int(math.Ceil(math.Max(targetCPU/cpu, targetMemory/mem)))
-			cost := r.estimateCost([]string{it}, capType, nodesNeeded)
+			cost := r.estimateCost(ctx, []string{it}, capType, nodesNeeded)
 			if cost < bestCost {
 				bestCost = cost
 				bestTypes = []string{it}
@@ -487,7 +487,7 @@ func (r *Recommender) findOptimalInstanceTypesWithCapacityType(requiredCPU, requ
 				}
 
 				nodesNeeded := int(math.Ceil(math.Max(targetCPU/avgCPU, targetMemory/avgMemory)))
-				cost := r.estimateCost(combo, capType, nodesNeeded)
+				cost := r.estimateCost(ctx, combo, capType, nodesNeeded)
 				if cost < bestCost {
 					bestCost = cost
 					bestTypes = combo
@@ -505,7 +505,7 @@ func (r *Recommender) findOptimalInstanceTypesWithCapacityType(requiredCPU, requ
 // Deprecated: Use findOptimalInstanceTypesWithCapacityType instead
 //nolint:unused // Kept for backward compatibility
 func (r *Recommender) findOptimalInstanceTypes(requiredCPU, requiredMemory float64, architecture, capacityType string) ([]string, int, float64) {
-	types, nodes, cost, _ := r.findOptimalInstanceTypesWithCapacityType(requiredCPU, requiredMemory, architecture, capacityType == "spot", capacityType != "spot")
+	types, nodes, cost, _ := r.findOptimalInstanceTypesWithCapacityType(context.Background(), requiredCPU, requiredMemory, architecture, capacityType == "spot", capacityType != "spot")
 	return types, nodes, cost
 }
 
@@ -514,8 +514,9 @@ func (r *Recommender) findOptimalInstanceTypes(requiredCPU, requiredMemory float
 func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory float64) []string {
 	// Try to get instance types from AWS Pricing API
 	if r.awsPricing != nil {
-		// Increase timeout to 30 seconds - the pricing index file can be large
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Increase timeout to 60 seconds - the pricing index file can be very large (several MB)
+		// The AWS Pricing API client now uses a 60-second HTTP timeout and caches results
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		availableTypes, err := r.awsPricing.GetAvailableEC2InstanceTypes(ctx, architecture)
@@ -525,7 +526,12 @@ func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory
 		}
 		// If AWS API fails, fall back to hardcoded list
 		if err != nil {
-			fmt.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.\n", err)
+			// Only log if it's not a context timeout (which is expected on slow connections)
+			if !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "timeout") {
+				fmt.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.\n", err)
+			} else {
+				fmt.Printf("Info: AWS Pricing API timeout (index file is large). Using fallback instance types list. Subsequent requests will use cached data.\n")
+			}
 		} else if len(availableTypes) == 0 {
 			fmt.Printf("Warning: AWS API returned empty instance types list for architecture %s. Using fallback list.\n", architecture)
 		}
@@ -581,8 +587,8 @@ func (r *Recommender) filterInstanceTypesByRequirements(availableTypes []string,
 		sort.Slice(candidates, func(i, j int) bool {
 			cpuI, memI := r.estimateInstanceCapacity(candidates[i])
 			cpuJ, memJ := r.estimateInstanceCapacity(candidates[j])
-			costI := r.estimateCost([]string{candidates[i]}, "on-demand", 1)
-			costJ := r.estimateCost([]string{candidates[j]}, "on-demand", 1)
+			costI := r.estimateCost(context.Background(), []string{candidates[i]}, "on-demand", 1)
+			costJ := r.estimateCost(context.Background(), []string{candidates[j]}, "on-demand", 1)
 
 			efficiencyI := costI / (cpuI*0.7 + memI*0.3)
 			efficiencyJ := costJ / (cpuJ*0.7 + memJ*0.3)
@@ -594,8 +600,8 @@ func (r *Recommender) filterInstanceTypesByRequirements(availableTypes []string,
 		sort.Slice(candidates, func(i, j int) bool {
 			cpuI, memI := r.estimateInstanceCapacity(candidates[i])
 			cpuJ, memJ := r.estimateInstanceCapacity(candidates[j])
-			costI := r.estimateCost([]string{candidates[i]}, "on-demand", 1)
-			costJ := r.estimateCost([]string{candidates[j]}, "on-demand", 1)
+			costI := r.estimateCost(context.Background(), []string{candidates[i]}, "on-demand", 1)
+			costJ := r.estimateCost(context.Background(), []string{candidates[j]}, "on-demand", 1)
 
 			efficiencyI := costI / (cpuI*0.7 + memI*0.3)
 			efficiencyJ := costJ / (cpuJ*0.7 + memJ*0.3)
@@ -650,8 +656,8 @@ func (r *Recommender) getHardcodedCandidateInstanceTypes(architecture string, cp
 	sort.Slice(validCandidates, func(i, j int) bool {
 		cpuI, memI := r.estimateInstanceCapacity(validCandidates[i])
 		cpuJ, memJ := r.estimateInstanceCapacity(validCandidates[j])
-		costI := r.estimateCost([]string{validCandidates[i]}, "on-demand", 1)
-		costJ := r.estimateCost([]string{validCandidates[j]}, "on-demand", 1)
+		costI := r.estimateCost(context.Background(), []string{validCandidates[i]}, "on-demand", 1)
+		costJ := r.estimateCost(context.Background(), []string{validCandidates[j]}, "on-demand", 1)
 
 		// Cost per unit of capacity (weighted: 70% CPU, 30% Memory)
 		efficiencyI := costI / (cpuI*0.7 + memI*0.3)

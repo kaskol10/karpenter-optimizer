@@ -175,14 +175,45 @@ function DisruptionTracker() {
                       These nodes cannot be removed due to Pod Disruption Budgets or pod eviction constraints
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {blockedDisruptions.filter(d => d.blockingPDBs && d.blockingPDBs.length > 0).length > 0 && (
+                      {blockedDisruptions.filter(d => 
+                        (d.blockingPDBDetails && d.blockingPDBDetails.length > 0) || 
+                        (d.blockingPDBs && d.blockingPDBs.length > 0)
+                      ).length > 0 && (
                         <span className="text-sm">
-                          <strong>{blockedDisruptions.filter(d => d.blockingPDBs && d.blockingPDBs.length > 0).length}</strong> blocked by PDBs
+                          <strong>
+                            {blockedDisruptions.filter(d => 
+                              (d.blockingPDBDetails && d.blockingPDBDetails.length > 0) || 
+                              (d.blockingPDBs && d.blockingPDBs.length > 0)
+                            ).length}
+                          </strong> blocked by PDBs
+                        </span>
+                      )}
+                      {blockedDisruptions.reduce((sum, d) => {
+                        // Count blocking pods from detailed PDB info if available, otherwise from blockingPods
+                        if (d.blockingPDBDetails && d.blockingPDBDetails.length > 0) {
+                          return sum + d.blockingPDBDetails.reduce((pdbSum, pdb) => pdbSum + (pdb.blockingPods?.length || 0), 0);
+                        }
+                        return sum + (d.blockingPods?.length || 0);
+                      }, 0) > 0 && (
+                        <span className="text-sm">
+                          <strong>
+                            {blockedDisruptions.reduce((sum, d) => {
+                              if (d.blockingPDBDetails && d.blockingPDBDetails.length > 0) {
+                                return sum + d.blockingPDBDetails.reduce((pdbSum, pdb) => pdbSum + (pdb.blockingPods?.length || 0), 0);
+                              }
+                              return sum + (d.blockingPods?.length || 0);
+                            }, 0)}
+                          </strong> blocking pod{blockedDisruptions.reduce((sum, d) => {
+                            if (d.blockingPDBDetails && d.blockingPDBDetails.length > 0) {
+                              return sum + d.blockingPDBDetails.reduce((pdbSum, pdb) => pdbSum + (pdb.blockingPods?.length || 0), 0);
+                            }
+                            return sum + (d.blockingPods?.length || 0);
+                          }, 0) !== 1 ? 's' : ''}
                         </span>
                       )}
                       {blockedDisruptions.reduce((sum, d) => sum + (d.affectedPods?.length || 0), 0) > 0 && (
                         <span className="text-sm">
-                          <strong>{blockedDisruptions.reduce((sum, d) => sum + (d.affectedPods?.length || 0), 0)}</strong> pods affected
+                          <strong>{blockedDisruptions.reduce((sum, d) => sum + (d.affectedPods?.length || 0), 0)}</strong> total pods affected
                         </span>
                       )}
                       {new Set(blockedDisruptions.map(d => d.nodePool).filter(Boolean)).size > 0 && (
@@ -356,38 +387,96 @@ function DisruptionTracker() {
                               ⚠️ Blocked: {disruption.blockingReason || 'Cannot evict pods'}
                             </AlertTitle>
                             <AlertDescription>
-                              <div className="space-y-2 mt-2">
-                                {disruption.blockingPDBs && disruption.blockingPDBs.length > 0 && (
-                                  <div>
-                                    <p className="text-sm font-semibold">PDBs:</p>
-                                    <div className="flex flex-wrap gap-2 mt-1">
-                                      {disruption.blockingPDBs.map((pdb, idx) => (
-                                        <Badge key={idx} variant="outline" className="font-mono text-xs">
-                                          {pdb}
-                                        </Badge>
-                                      ))}
-                                    </div>
+                              <div className="space-y-3 mt-2">
+                                {/* Enhanced PDB Details */}
+                                {disruption.blockingPDBDetails && disruption.blockingPDBDetails.length > 0 ? (
+                                  <div className="space-y-3">
+                                    <p className="text-sm font-semibold">Pod Disruption Budgets Blocking Eviction:</p>
+                                    {disruption.blockingPDBDetails.map((pdbDetail, pdbIdx) => (
+                                      <div key={pdbIdx} className="border-l-2 border-red-400 pl-3 space-y-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Badge variant="destructive" className="font-mono text-xs">
+                                            {pdbDetail.pdbName}
+                                          </Badge>
+                                          <span className="text-xs text-muted-foreground">
+                                            {pdbDetail.currentHealthy}/{pdbDetail.desiredHealthy} healthy
+                                          </span>
+                                          <span className="text-xs text-muted-foreground">
+                                            {pdbDetail.disruptionsAllowed === 0 ? (
+                                              <span className="text-red-600 font-semibold">0 disruptions allowed</span>
+                                            ) : (
+                                              <span>{pdbDetail.disruptionsAllowed} disruptions allowed</span>
+                                            )}
+                                          </span>
+                                        </div>
+                                        {(pdbDetail.minAvailable || pdbDetail.maxUnavailable) && (
+                                          <div className="text-xs text-muted-foreground">
+                                            {pdbDetail.minAvailable && (
+                                              <span>minAvailable: <strong>{pdbDetail.minAvailable}</strong></span>
+                                            )}
+                                            {pdbDetail.minAvailable && pdbDetail.maxUnavailable && ' | '}
+                                            {pdbDetail.maxUnavailable && (
+                                              <span>maxUnavailable: <strong>{pdbDetail.maxUnavailable}</strong></span>
+                                            )}
+                                          </div>
+                                        )}
+                                        {pdbDetail.blockingPods && pdbDetail.blockingPods.length > 0 && (
+                                          <div>
+                                            <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                              Blocking {pdbDetail.blockingPods.length} pod{pdbDetail.blockingPods.length !== 1 ? 's' : ''}:
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                              {pdbDetail.blockingPods.map((pod, podIdx) => (
+                                                <Badge 
+                                                  key={podIdx} 
+                                                  variant="outline" 
+                                                  className="font-mono text-xs bg-red-50 border-red-300"
+                                                >
+                                                  {pod}
+                                                </Badge>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
+                                ) : (
+                                  /* Fallback to old format if blockingPDBDetails not available */
+                                  <>
+                                    {disruption.blockingPDBs && disruption.blockingPDBs.length > 0 && (
+                                      <div>
+                                        <p className="text-sm font-semibold">PDBs:</p>
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                          {disruption.blockingPDBs.map((pdb, idx) => (
+                                            <Badge key={idx} variant="outline" className="font-mono text-xs">
+                                              {pdb}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {disruption.blockingPods && disruption.blockingPods.length > 0 && (
+                                      <div>
+                                        <p className="text-sm font-semibold">Blocking Pods:</p>
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                          {disruption.blockingPods.slice(0, 3).map((pod, idx) => (
+                                            <Badge key={idx} variant="outline" className="font-mono text-xs">
+                                              {pod}
+                                            </Badge>
+                                          ))}
+                                          {disruption.blockingPods.length > 3 && (
+                                            <span className="text-xs text-muted-foreground">
+                                              +{disruption.blockingPods.length - 3} more
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
                                 )}
-                                {disruption.blockingPods && disruption.blockingPods.length > 0 && (
-                                  <div>
-                                    <p className="text-sm font-semibold">Blocking Pods:</p>
-                                    <div className="flex flex-wrap gap-2 mt-1">
-                                      {disruption.blockingPods.slice(0, 3).map((pod, idx) => (
-                                        <Badge key={idx} variant="outline" className="font-mono text-xs">
-                                          {pod}
-                                        </Badge>
-                                      ))}
-                                      {disruption.blockingPods.length > 3 && (
-                                        <span className="text-xs text-muted-foreground">
-                                          +{disruption.blockingPods.length - 3} more
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                                <p className="text-xs text-muted-foreground italic mt-2">
-                                  💡 Tip: Review PDB minAvailable/maxUnavailable settings or pod eviction policies
+                                <p className="text-xs text-muted-foreground italic mt-2 pt-2 border-t">
+                                  💡 Tip: Review PDB minAvailable/maxUnavailable settings or pod eviction policies to allow node disruption
                                 </p>
                               </div>
                             </AlertDescription>

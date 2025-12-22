@@ -332,9 +332,10 @@ function NodeUsageView() {
                   </h3>
                   
                   {summary && summary.cpuAllocatable > 0 && (() => {
-                    // Find NodePool info to get taints
+                    // Find NodePool info to get taints and cost
                     const nodePoolInfo = nodePools.find(np => np.name === groupName);
                     const taints = nodePoolInfo?.taints || [];
+                    const estimatedCost = nodePoolInfo?.estimatedCost || 0;
                     
                     return (
                       <Card className="mb-4 bg-gradient-to-br from-purple-500 to-purple-700 border-0">
@@ -343,13 +344,32 @@ function NodeUsageView() {
                             <CardTitle className="text-white text-sm uppercase tracking-wide">
                               📊 NodePool Overall Usage
                             </CardTitle>
-                            <Badge variant="secondary" className="bg-white/25 text-white">
-                              {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} • {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
-                            </Badge>
+                            <div className="flex items-center gap-2">
+                              {estimatedCost > 0 && (
+                                <Badge 
+                                  variant="secondary" 
+                                  className={cn(
+                                    "font-semibold",
+                                    nodePoolInfo?.pricingSource === "aws-pricing-api" 
+                                      ? "bg-green-500/80 text-white" 
+                                      : "bg-yellow-500/80 text-white"
+                                  )}
+                                  title={nodePoolInfo?.pricingSource === "aws-pricing-api" 
+                                    ? "Using AWS Pricing API" 
+                                    : `Using ${nodePoolInfo?.pricingSource || "estimated"} pricing`}
+                                >
+                                  ${estimatedCost.toFixed(2)}/hr
+                                  {nodePoolInfo?.pricingSource === "aws-pricing-api" && " ✓"}
+                                </Badge>
+                              )}
+                              <Badge variant="secondary" className="bg-white/25 text-white">
+                                {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} • {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div className={cn("grid gap-4 mb-4", estimatedCost > 0 ? "grid-cols-3" : "grid-cols-2")}>
                             <Card className="bg-white/95">
                               <CardContent className="pt-6">
                                 <BarGauge
@@ -374,6 +394,34 @@ function NodeUsageView() {
                                 />
                               </CardContent>
                             </Card>
+                            {estimatedCost > 0 && (
+                              <Card className="bg-white/95">
+                                <CardContent className="pt-6">
+                                  <p className="text-sm text-muted-foreground mb-2">Estimated Cost</p>
+                                  <p className="text-2xl font-bold text-green-600">
+                                    ${estimatedCost.toFixed(2)}/hr
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    ${(estimatedCost * 24).toFixed(2)}/day
+                                  </p>
+                                  {nodePoolInfo?.pricingSource && (
+                                    <p className="text-xs mt-1">
+                                      <span className={cn(
+                                        "font-semibold",
+                                        nodePoolInfo.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
+                                      )}>
+                                        {nodePoolInfo.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
+                                         nodePoolInfo.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
+                                         nodePoolInfo.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
+                                         nodePoolInfo.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
+                                         nodePoolInfo.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
+                                         "⚠ Estimated"}
+                                      </span>
+                                    </p>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            )}
                           </div>
                           
                           {/* Taints Section */}

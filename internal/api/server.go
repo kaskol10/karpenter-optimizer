@@ -678,13 +678,71 @@ func (s *Server) listNodePools(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for cost calculations
 	defer cancel()
 
 	nodePools, err := s.k8sClient.ListNodePools(ctx)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Calculate costs for each NodePool using AWS Pricing API if available
+	if s.recommender != nil {
+		for i := range nodePools {
+			np := &nodePools[i]
+			var totalCost float64
+			var overallPricingSource recommender.PricingSource = recommender.PricingSourceUnknown
+
+			// Calculate cost based on actual nodes if available
+			if len(np.ActualNodes) > 0 {
+				for _, node := range np.ActualNodes {
+					if node.InstanceType != "" {
+						capacityType := node.CapacityType
+						if capacityType == "" {
+							capacityType = np.CapacityType
+						}
+						if capacityType == "" {
+							capacityType = "on-demand"
+						}
+						// Normalize capacity type
+						if capacityType != "spot" {
+							capacityType = "on-demand"
+						}
+						// Calculate cost for this node using the recommender's EstimateCostWithSource method
+						pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{node.InstanceType}, capacityType, 1)
+						nodeCost := pricingResult.Cost
+						totalCost += nodeCost
+						// Prioritize AWS Pricing API as the overall source if any node used it
+						if pricingResult.Source == recommender.PricingSourceAWSPricingAPI {
+							overallPricingSource = recommender.PricingSourceAWSPricingAPI
+						} else if overallPricingSource == recommender.PricingSourceUnknown {
+							overallPricingSource = pricingResult.Source
+						}
+					}
+				}
+			} else if len(np.InstanceTypes) > 0 && np.CurrentNodes > 0 {
+				// Fallback: Use NodePool's instance types and current node count
+				capacityType := np.CapacityType
+				if capacityType == "" {
+					capacityType = "on-demand"
+				}
+				// Normalize capacity type
+				if capacityType != "spot" {
+					capacityType = "on-demand"
+				}
+				// Calculate cost for all nodes in this NodePool
+				pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, np.InstanceTypes, capacityType, np.CurrentNodes)
+				totalCost = pricingResult.Cost
+				overallPricingSource = pricingResult.Source
+			}
+
+			// Update NodePool with calculated cost
+			if totalCost > 0 {
+				np.EstimatedCost = totalCost
+				np.PricingSource = string(overallPricingSource)
+			}
+		}
 	}
 
 	c.JSON(200, gin.H{
@@ -976,19 +1034,59 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		}
 	}
 
+	// Calculate cluster cost using AWS Pricing API if available
+	var totalClusterCost float64
+	var overallPricingSource recommender.PricingSource = recommender.PricingSourceUnknown
+	if s.recommender != nil {
+		fmt.Printf("Calculating cluster cost for %d nodes...\n", totalNodes)
+		for _, node := range nodes {
+			if node.InstanceType != "" {
+				capacityType := node.CapacityType
+				if capacityType == "" {
+					capacityType = "on-demand"
+				}
+				// Normalize capacity type
+				if capacityType != "spot" {
+					capacityType = "on-demand"
+				}
+				// Calculate cost for this node using the recommender's EstimateCost method
+				pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{node.InstanceType}, capacityType, 1)
+				nodeCost := pricingResult.Cost
+				totalClusterCost += nodeCost
+				fmt.Printf("Node %s (%s): $%.4f/hr (source: %s)\n", node.Name, node.InstanceType, nodeCost, pricingResult.Source)
+				// Prioritize AWS Pricing API as the overall source if any node used it
+				if pricingResult.Source == recommender.PricingSourceAWSPricingAPI {
+					overallPricingSource = recommender.PricingSourceAWSPricingAPI
+				} else if overallPricingSource == recommender.PricingSourceUnknown {
+					overallPricingSource = pricingResult.Source
+				}
+			}
+		}
+		fmt.Printf("Total cluster cost: $%.4f/hr (source: %s)\n", totalClusterCost, overallPricingSource)
+	}
+
+	summaryData := gin.H{
+		"totalNodes":        totalNodes,
+		"spotNodes":         spotNodes,
+		"onDemandNodes":     onDemandNodes,
+		"totalPods":         totalPods,
+		"cpuUsed":           totalCPUUsed,
+		"cpuAllocatable":    totalCPUAllocatable,
+		"cpuPercent":        cpuPercent,
+		"memoryUsed":        totalMemoryUsed,
+		"memoryAllocatable": totalMemoryAllocatable,
+		"memoryPercent":     memoryPercent,
+	}
+
+	// Add cost information if available
+	if totalClusterCost > 0 {
+		summaryData["estimatedCost"] = totalClusterCost
+		summaryData["costPerHour"] = totalClusterCost
+		summaryData["pricingSource"] = overallPricingSource
+	}
+
 	c.JSON(200, gin.H{
-		"summary": gin.H{
-			"totalNodes":        totalNodes,
-			"spotNodes":         spotNodes,
-			"onDemandNodes":     onDemandNodes,
-			"totalPods":         totalPods,
-			"cpuUsed":           totalCPUUsed,
-			"cpuAllocatable":    totalCPUAllocatable,
-			"cpuPercent":        cpuPercent,
-			"memoryUsed":        totalMemoryUsed,
-			"memoryAllocatable": totalMemoryAllocatable,
-			"memoryPercent":     memoryPercent,
-		},
+		"summary": summaryData,
 	})
 }
 

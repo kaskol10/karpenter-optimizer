@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { RefreshCw, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { getCacheStats } from '../lib/pricingCache';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
@@ -24,9 +25,12 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
   const [clusterCost, setClusterCost] = useState(null);
   const [progressMessage, setProgressMessage] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
+  const [cacheStats, setCacheStats] = useState(null);
 
   useEffect(() => {
     fetchSummary();
+    // Load cache stats
+    setCacheStats(getCacheStats());
   }, []);
 
   useEffect(() => {
@@ -299,13 +303,47 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
           )}
 
           {/* Statistics Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Total Nodes</p>
                 <p className="text-2xl font-bold">{summary.totalNodes}</p>
               </CardContent>
             </Card>
+
+            {summary.estimatedCost !== undefined && summary.estimatedCost > 0 && (
+              <Card className="bg-green-50 border-green-200">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">Estimated Cost</p>
+                  <p className="text-2xl font-bold text-green-600">
+                    ${summary.estimatedCost.toFixed(2)}/hr
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    ${(summary.estimatedCost * 24).toFixed(2)}/day
+                  </p>
+                  {summary.pricingSource && (
+                    <p className="text-xs mt-1">
+                      <span className={cn(
+                        "font-semibold",
+                        summary.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
+                      )}>
+                        {summary.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
+                         summary.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
+                         summary.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
+                         summary.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
+                         summary.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
+                         "⚠ Estimated"}
+                      </span>
+                    </p>
+                  )}
+                  {cacheStats && cacheStats.valid > 0 && (
+                    <p className="text-xs mt-1 text-muted-foreground">
+                      {cacheStats.valid} price{cacheStats.valid !== 1 ? 's' : ''} cached in browser
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="bg-yellow-50 border-yellow-200">
               <CardContent className="pt-6">

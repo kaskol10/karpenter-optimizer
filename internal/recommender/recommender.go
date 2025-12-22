@@ -19,6 +19,24 @@ import (
 // ProgressCallback is a function type for reporting progress during recommendation generation
 type ProgressCallback func(message string, progress float64)
 
+// PricingSource indicates where the price came from
+type PricingSource string
+
+const (
+	PricingSourceAWSPricingAPI PricingSource = "aws-pricing-api"
+	PricingSourceHardcoded     PricingSource = "hardcoded"
+	PricingSourceOllamaCache    PricingSource = "ollama-cache"
+	PricingSourceFamilyEstimate PricingSource = "family-estimate"
+	PricingSourceOllama         PricingSource = "ollama"
+	PricingSourceUnknown        PricingSource = "unknown"
+)
+
+// PricingResult contains cost information and its source
+type PricingResult struct {
+	Cost   float64       `json:"cost"`
+	Source PricingSource `json:"source"`
+}
+
 type Recommender struct {
 	config       *config.Config
 	k8sClient    *kubernetes.Client
@@ -45,8 +63,31 @@ func NewRecommender(cfg *config.Config) *Recommender {
 		}
 	}
 
-	// Initialize AWS Pricing client (defaults to us-east-1)
-	awsPricingClient := awspricing.NewClient("us-east-1")
+	// Initialize AWS Pricing client
+	// REQUIRES AWS credentials - uses GetProducts API (queries specific instance types, no 400MB download)
+	awsPricingClient, err := awspricing.NewClient(
+		cfg.AWSRegion,
+		cfg.AWSAccessKeyID,
+		cfg.AWSSecretAccessKey,
+		cfg.AWSSessionToken,
+	)
+	if err != nil {
+		fmt.Printf("Error: Failed to initialize AWS Pricing API client: %v\n", err)
+		fmt.Printf("AWS credentials are required. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_SESSION_TOKEN environment variables,\n")
+		fmt.Printf("or configure AWS credentials via IAM role, ~/.aws/credentials, or AWS SDK default credential chain.\n")
+		// Don't continue without AWS credentials - pricing queries will fail
+		awsPricingClient = nil
+	} else {
+		// Always log successful initialization (not just in debug mode)
+		if cfg.AWSAccessKeyID != "" {
+			fmt.Printf("AWS Pricing API client initialized with explicit credentials (using GetProducts API)\n")
+		} else {
+			fmt.Printf("AWS Pricing API client initialized with default credentials (using GetProducts API)\n")
+		}
+		if cfg.Debug {
+			fmt.Printf("Debug: AWS Region=%s, Pricing API endpoint=us-east-1\n", cfg.AWSRegion)
+		}
+	}
 
 	return &Recommender{
 		config:       cfg,
@@ -492,7 +533,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 		}
 
 		// Calculate cost
-		recommendedCost := r.estimateCost(recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
+		recommendedCost := r.estimateCost(context.Background(), recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
 
 		// Calculate total CPU/Memory that would be provisioned with recommended configuration
 		// Distribute nodes evenly across instance types (like Karpenter does)
@@ -558,7 +599,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 				parts := strings.Split(key, ":")
 				instanceType := parts[0]
 				capacityType := nc.capacityType
-				nodeCost := r.estimateCost([]string{instanceType}, capacityType, 1)
+				nodeCost := r.estimateCost(context.Background(), []string{instanceType}, capacityType, 1)
 				currentCost += nodeCost * float64(nc.count)
 			}
 		} else {
@@ -584,7 +625,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 			// Calculate cost using the same method as recommended cost: distribute nodes across instance types
 			// For 0 nodes, this will return 0 (estimateCost handles 0 nodes correctly)
 			if len(typesForCost) > 0 {
-				currentCost = r.estimateCost(typesForCost, capacityType, actualNodeCount)
+				currentCost = r.estimateCost(context.Background(), typesForCost, capacityType, actualNodeCount)
 			} else {
 				// No instance types configured - cost is 0
 				currentCost = 0.0
@@ -1124,7 +1165,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 				// Unknown value, default to on-demand
 				capacityType = "on-demand"
 			}
-			nodeCost := r.estimateCost([]string{instanceType}, capacityType, 1)
+			nodeCost := r.estimateCost(context.Background(), []string{instanceType}, capacityType, 1)
 			currentCost += nodeCost * float64(count)
 		}
 	} else {
@@ -1144,7 +1185,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 			} else if capacityType != "spot" {
 				capacityType = "on-demand"
 			}
-			currentCost = r.estimateCost(np.InstanceTypes, capacityType, currentNodeCount)
+			currentCost = r.estimateCost(context.Background(), np.InstanceTypes, capacityType, currentNodeCount)
 			actualInstanceTypes = np.InstanceTypes
 		}
 	}
@@ -1264,7 +1305,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 			nodesNeeded = 1
 		}
 
-		recommendedCost := r.estimateCost(recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
+		recommendedCost := r.estimateCost(context.Background(), recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
 
 		// Update current state with calculated values
 		currentState.TotalCPU = totalCPU
@@ -1302,12 +1343,12 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 			if len(enhancedTypes) > 0 {
 				recommendedInstanceTypes = enhancedTypes
 				// Recalculate cost with new instance types
-				recommendedCost = r.estimateCost(recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
+				recommendedCost = r.estimateCost(context.Background(), recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
 			}
 			if ollamaCapacityType != "" {
 				recommendedCapacityType = ollamaCapacityType
 				// Recalculate cost with new capacity type
-				recommendedCost = r.estimateCost(recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
+				recommendedCost = r.estimateCost(context.Background(), recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
 			}
 			if minSize != nil {
 				recommendedMinSize = *minSize
@@ -1354,7 +1395,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 		if nodesNeeded < 1 {
 			nodesNeeded = 1
 		}
-		recommendedCost := r.estimateCost(recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
+		recommendedCost := r.estimateCost(context.Background(), recommendedInstanceTypes, recommendedCapacityType, nodesNeeded)
 
 		reasoning := r.generateReasoning(workloads, totalCPU, totalMemory, maxGPU, false, currentNodeCount, nodesNeeded)
 
@@ -1708,7 +1749,7 @@ func (r *Recommender) generateRecommendationForGroup(group []Workload, index int
 	capacityType := r.selectCapacityType(group, false) // Not checking overprovisioning in this path
 	architecture := r.selectArchitecture(group)
 
-	recommendedCost := r.estimateCost(instanceTypes, capacityType, nodesNeeded)
+		recommendedCost := r.estimateCost(context.Background(), instanceTypes, capacityType, nodesNeeded)
 
 	// Try to get actual current state from existing NodePools
 	var currentState *CurrentState
@@ -1724,7 +1765,7 @@ func (r *Recommender) generateRecommendationForGroup(group []Workload, index int
 		if currentNodes < 1 {
 			currentNodes = 1
 		}
-		currentCost := r.estimateCost(currentInstanceTypes, currentCapacityType, currentNodes)
+		currentCost := r.estimateCost(context.Background(), currentInstanceTypes, currentCapacityType, currentNodes)
 
 		currentState = &CurrentState{
 			EstimatedCost: currentCost,
@@ -1953,10 +1994,21 @@ func (r *Recommender) extractCommonLabels(workloads []Workload) map[string]strin
 // EstimateCost calculates the hourly cost for a given set of instance types, capacity type, and node count
 // This is exported so it can be used by the API server for calculating total cluster costs
 func (r *Recommender) EstimateCost(ctx context.Context, instanceTypes []string, capacityType string, nodeCount int) float64 {
-	return r.estimateCost(instanceTypes, capacityType, nodeCount)
+	result, _ := r.estimateCostWithSource(ctx, instanceTypes, capacityType, nodeCount)
+	return result.Cost
 }
 
-func (r *Recommender) estimateCost(instanceTypes []string, capacityType string, nodeCount int) float64 {
+// EstimateCostWithSource calculates the hourly cost and returns pricing source information
+func (r *Recommender) EstimateCostWithSource(ctx context.Context, instanceTypes []string, capacityType string, nodeCount int) (PricingResult, map[string]PricingSource) {
+	return r.estimateCostWithSource(ctx, instanceTypes, capacityType, nodeCount)
+}
+
+func (r *Recommender) estimateCost(ctx context.Context, instanceTypes []string, capacityType string, nodeCount int) float64 {
+	result, _ := r.estimateCostWithSource(ctx, instanceTypes, capacityType, nodeCount)
+	return result.Cost
+}
+
+func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes []string, capacityType string, nodeCount int) (PricingResult, map[string]PricingSource) {
 	// On-demand pricing (USD per hour) - US East (N. Virginia) region
 	// Prices are from AWS Pricing API (approximate, may vary by region and time)
 	onDemandPrices := map[string]float64{
@@ -2040,7 +2092,7 @@ func (r *Recommender) estimateCost(instanceTypes []string, capacityType string, 
 	// Calculate cost like eks-node-viewer: distribute nodes across instance types and sum costs
 	// This matches how eks-node-viewer calculates: cost per node based on instance type, then sum
 	if len(instanceTypes) == 0 || nodeCount == 0 {
-		return 0.0
+		return PricingResult{Cost: 0.0, Source: PricingSourceUnknown}, make(map[string]PricingSource)
 	}
 
 	// Distribute nodes evenly across instance types (like Karpenter does)
@@ -2048,50 +2100,113 @@ func (r *Recommender) estimateCost(instanceTypes []string, capacityType string, 
 	remainder := nodeCount % len(instanceTypes)
 
 	var totalCost float64
+	instanceTypeSources := make(map[string]PricingSource) // Track source per instance type
+	var overallSource PricingSource = PricingSourceUnknown
+
 	for i, it := range instanceTypes {
 		itLower := strings.ToLower(it)
 		var instanceCost float64
+		var priceFound bool
+		var source PricingSource = PricingSourceUnknown
 
+		// First, check hardcoded prices (no API call needed)
+		// This reduces AWS Pricing API calls significantly for common instance types
 		if cost, ok := onDemandPrices[itLower]; ok {
 			instanceCost = cost
-		} else {
-			// Try to get pricing from Ollama cache first
+			priceFound = true
+			source = PricingSourceHardcoded
+			if r.config != nil && r.config.Debug {
+				fmt.Printf("Debug: Using hardcoded price for %s: $%.4f/hr\n", it, cost)
+			}
+		}
+
+		// Only call AWS Pricing API if we don't have a hardcoded price
+		// This significantly reduces API calls
+		// Pass the actual capacityType so AWS Pricing client can apply spot discount correctly
+		if !priceFound && r.awsPricing != nil && ctx != nil {
+			// Use a longer timeout for pricing queries
+			// GetProducts API: 30 seconds (queries specific instance type)
+			// Public API: 60 seconds (downloads full 400MB index)
+			pricingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			// Pass the actual capacityType - AWS Pricing client will query on-demand price
+			// and apply spot discount internally if capacityType is "spot"
+			awsPrice, err := r.awsPricing.GetProductPrice(pricingCtx, it, capacityType)
+			cancel()
+			
+			if err == nil && awsPrice > 0 {
+				instanceCost = awsPrice
+				priceFound = true
+				source = PricingSourceAWSPricingAPI
+				fmt.Printf("Successfully fetched AWS Pricing API price for %s (%s): $%.4f/hr\n", it, capacityType, awsPrice)
+			} else if err != nil {
+				// Only log if it's not a "not found" error (those are expected for some instance types)
+				if !strings.Contains(err.Error(), "not found") {
+					fmt.Printf("Warning: AWS Pricing API failed for %s (%s): %v\n", it, capacityType, err)
+				}
+			} else if awsPrice <= 0 {
+				// This shouldn't happen - if err is nil, price should be > 0
+				fmt.Printf("Warning: AWS Pricing API returned zero price for %s (%s) (this may indicate a parsing issue)\n", it, capacityType)
+			}
+		}
+
+		// If still not found, try Ollama cache
+		if !priceFound {
 			r.priceCacheMu.RLock()
 			cachedPrice, cached := r.priceCache[itLower]
 			r.priceCacheMu.RUnlock()
 
 			if cached {
 				instanceCost = cachedPrice
-			} else {
-				// Try to estimate based on instance family and size
-				instanceCost = r.estimateCostFromFamily(it)
-				if instanceCost <= 0 {
-					// Try to get pricing from Ollama if available
-					if r.ollamaClient != nil {
-						// Use background context for pricing queries (they're quick and cached)
-						ollamaPrice := r.getPricingFromOllama(context.Background(), it)
-						if ollamaPrice > 0 {
-							instanceCost = ollamaPrice
-							// Cache the result
-							r.priceCacheMu.Lock()
-							r.priceCache[itLower] = ollamaPrice
-							r.priceCacheMu.Unlock()
-						} else {
-							// Skip unknown instance types
-							continue
-						}
-					} else {
-						// Skip unknown instance types
-						continue
-					}
-				}
+				priceFound = true
+				source = PricingSourceOllamaCache
 			}
 		}
 
-		// Apply spot discount if using spot instances
+		// If still not found, try family estimation
+		if !priceFound {
+			instanceCost = r.estimateCostFromFamily(it)
+			if instanceCost > 0 {
+				priceFound = true
+				source = PricingSourceFamilyEstimate
+			}
+		}
+
+		// Last resort: try Ollama if available
+		if !priceFound && r.ollamaClient != nil {
+			// Use background context for pricing queries (they're quick and cached)
+			ollamaPrice := r.getPricingFromOllama(context.Background(), it)
+			if ollamaPrice > 0 {
+				instanceCost = ollamaPrice
+				priceFound = true
+				source = PricingSourceOllama
+				// Cache the result
+				r.priceCacheMu.Lock()
+				r.priceCache[itLower] = ollamaPrice
+				r.priceCacheMu.Unlock()
+			}
+		}
+
+		// Skip this instance type if we couldn't find a price
+		if !priceFound {
+			continue
+		}
+
+		// Track source for this instance type
+		instanceTypeSources[it] = source
+		
+		// Set overall source (prefer AWS Pricing API if any instance type used it)
+		if source == PricingSourceAWSPricingAPI {
+			overallSource = PricingSourceAWSPricingAPI
+		} else if overallSource == PricingSourceUnknown || overallSource == PricingSourceAWSPricingAPI {
+			overallSource = source
+		}
+
+		// Apply spot discount if using spot instances (only for non-AWS Pricing API sources)
+		// AWS Pricing API already applies spot discount internally, so we only need to apply it
+		// for hardcoded prices, Ollama cache, family estimates, etc.
 		// Spot instances typically cost 70-90% less than on-demand (spot = 10-30% of on-demand)
 		// Using conservative 75% discount (spot = 25% of on-demand) for cost estimation
-		if capacityType == "spot" {
+		if capacityType == "spot" && source != PricingSourceAWSPricingAPI {
 			instanceCost *= 0.25 // Spot instances are ~75% cheaper than on-demand
 		}
 
@@ -2106,7 +2221,12 @@ func (r *Recommender) estimateCost(instanceTypes []string, capacityType string, 
 		totalCost += instanceCost * float64(nodesForThisType)
 	}
 
-	return totalCost
+	// If no prices were found, return unknown source
+	if overallSource == PricingSourceUnknown && totalCost == 0 {
+		return PricingResult{Cost: 0.0, Source: PricingSourceUnknown}, instanceTypeSources
+	}
+
+	return PricingResult{Cost: totalCost, Source: overallSource}, instanceTypeSources
 }
 
 // estimateCostFromFamily estimates cost based on instance family and size

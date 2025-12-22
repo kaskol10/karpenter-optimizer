@@ -17,7 +17,12 @@ type Config struct {
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
-	Debug       bool
+	// AWS Configuration for Pricing API
+	AWSRegion          string // AWS region (defaults to eu-west-1)
+	AWSAccessKeyID     string // AWS access key ID (optional, can use IAM role)
+	AWSSecretAccessKey string // AWS secret access key (optional, can use IAM role)
+	AWSSessionToken    string // AWS session token (for temporary credentials)
+	Debug              bool
 }
 
 func Load() *Config {
@@ -71,16 +76,20 @@ func Load() *Config {
 	}
 
 	return &Config{
-		KubeconfigPath: getEnv("KUBECONFIG", ""),
-		KubeContext:    getEnv("KUBE_CONTEXT", ""),
-		APIPort:        getEnv("PORT", "8080"),
-		LLMProvider:    llmProvider,
-		LLMURL:         llmURL,
-		LLMModel:       llmModel,
-		LLMAPIKey:      llmAPIKey,
-		OllamaURL:      ollamaURL, // Keep for backward compatibility
-		OllamaModel:    ollamaModel,
-		Debug:          getEnvBool("DEBUG", false),
+		KubeconfigPath:    getEnv("KUBECONFIG", ""),
+		KubeContext:       getEnv("KUBE_CONTEXT", ""),
+		APIPort:           getEnv("PORT", "8080"),
+		LLMProvider:       llmProvider,
+		LLMURL:            llmURL,
+		LLMModel:          llmModel,
+		LLMAPIKey:         llmAPIKey,
+		OllamaURL:         ollamaURL, // Keep for backward compatibility
+		OllamaModel:       ollamaModel,
+		AWSRegion:         getEnv("AWS_REGION", "eu-west-1"),
+		AWSAccessKeyID:    getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSSessionToken:   getEnv("AWS_SESSION_TOKEN", ""),
+		Debug:             getEnvBool("DEBUG", false),
 	}
 }
 
