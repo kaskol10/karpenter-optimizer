@@ -315,8 +315,22 @@ Return only the enhanced explanation text, no additional formatting.`,
 		rec.CapacityType,
 	)
 
-	// Use a shorter timeout for AI reasoning (it's an enhancement, not critical)
-	aiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Use appropriate timeout for AI reasoning based on context
+	// Check parent context deadline to avoid exceeding it
+	// Default to 2 minutes (120s) for LLM enhancement
+	timeout := 120 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 130*time.Second {
+			timeout = 120 * time.Second // Use 2-minute timeout if context allows
+		} else if remaining > 10*time.Second {
+			timeout = remaining - 10*time.Second // Use remaining time minus buffer
+		} else {
+			timeout = 5 * time.Second // Minimum timeout
+		}
+	}
+	
+	aiCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	response, err := r.ollamaClient.Chat(aiCtx, prompt)
@@ -397,7 +411,26 @@ Respond with JSON:
 			rec.RecommendedCost, rec.CapacityType,
 			rec.CostSavings, rec.CostSavingsPercent)
 
-		ollamaCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		// Use adaptive timeout based on parent context
+		// Remote LLM services (vLLM, LiteLLM) typically need more time than local Ollama
+		// Default to 2 minutes (120s) for LLM enhancement, but respect parent context deadline
+		timeout := 120 * time.Second
+		
+		// Check parent context deadline to avoid exceeding it
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining > 130*time.Second {
+				timeout = 120 * time.Second // Use 2-minute timeout if context allows
+			} else if remaining > 10*time.Second {
+				// Use most of remaining time but leave 10s buffer
+				timeout = remaining - 10*time.Second
+			} else {
+				// Not enough time, use short timeout
+				timeout = 5 * time.Second
+			}
+		}
+		
+		ollamaCtx, cancel := context.WithTimeout(ctx, timeout)
 		response, err := r.ollamaClient.Chat(ollamaCtx, prompt)
 		cancel()
 
