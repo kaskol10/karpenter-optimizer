@@ -9,8 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { Separator } from './ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { ChevronDown, RefreshCw, Loader2, Package } from 'lucide-react';
+import { ChevronDown, RefreshCw, Loader2, Package, Search, X, Regex } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
@@ -28,6 +30,10 @@ function NodeUsageView() {
   const [sortBy, setSortBy] = useState('cpu');
   const [sortOrder, setSortOrder] = useState('desc');
   const [podsFilter, setPodsFilter] = useState('all');
+  const [nodeNameFilter, setNodeNameFilter] = useState('');
+  const [podNameFilter, setPodNameFilter] = useState('');
+  const [useRegex, setUseRegex] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     fetchNodes();
@@ -191,9 +197,46 @@ function NodeUsageView() {
     });
   };
 
+  const matchesFilter = (text, filter) => {
+    if (!filter) return true;
+    
+    if (useRegex) {
+      try {
+        const regex = new RegExp(filter, 'i');
+        return regex.test(text);
+      } catch (e) {
+        // Invalid regex, fall back to simple contains
+        return text.toLowerCase().includes(filter.toLowerCase());
+      }
+    } else {
+      return text.toLowerCase().includes(filter.toLowerCase());
+    }
+  };
+
+  const filterNodesByNameAndPod = (nodeList) => {
+    return nodeList.filter(node => {
+      // Filter by node name
+      if (nodeNameFilter && !matchesFilter(node.name || '', nodeNameFilter)) {
+        return false;
+      }
+
+      // Filter by pod name (check if any pod matches)
+      if (podNameFilter) {
+        const podNames = node.podNames || [];
+        const matchesPod = podNames.some(podName => matchesFilter(podName, podNameFilter));
+        if (!matchesPod) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  };
+
   const groupedNodes = () => {
     const sortedNodes = sortNodes(nodes);
-    const filteredNodes = filterNodesByPods(sortedNodes);
+    const filteredByPods = filterNodesByPods(sortedNodes);
+    const filteredNodes = filterNodesByNameAndPod(filteredByPods);
     if (groupBy === 'nodepool') {
       const grouped = {};
       filteredNodes.forEach(node => {
@@ -206,6 +249,23 @@ function NodeUsageView() {
       return grouped;
     }
     return { 'All Nodes': filteredNodes };
+  };
+
+  const getFilteredNodeCount = () => {
+    const sortedNodes = sortNodes(nodes);
+    const filteredByPods = filterNodesByPods(sortedNodes);
+    const filteredNodes = filterNodesByNameAndPod(filteredByPods);
+    return filteredNodes.length;
+  };
+
+  const clearFilters = () => {
+    setNodeNameFilter('');
+    setPodNameFilter('');
+    setPodsFilter('all');
+  };
+
+  const hasActiveFilters = () => {
+    return nodeNameFilter || podNameFilter || podsFilter !== 'all';
   };
 
   const BarGauge = ({ label, used, capacity, allocatable, percent, type }) => {
@@ -239,6 +299,19 @@ function NodeUsageView() {
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
+            <Button
+              variant={showFilters ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <Search className="h-4 w-4 mr-2" />
+              Filters
+              {hasActiveFilters() && (
+                <Badge variant="secondary" className="ml-2 bg-primary text-primary-foreground">
+                  {getFilteredNodeCount()}/{nodes.length}
+                </Badge>
+              )}
+            </Button>
             <Select value={groupBy} onValueChange={setGroupBy}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue />
@@ -313,6 +386,117 @@ function NodeUsageView() {
           </Alert>
         )}
 
+        {/* Advanced Filters Panel */}
+        {showFilters && (
+          <Card className="mb-4 border-2">
+            <CardHeader className="pb-3">
+              <div className="flex justify-between items-center">
+                <CardTitle className="text-lg">Search & Filter</CardTitle>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={useRegex}
+                      onCheckedChange={setUseRegex}
+                      id="regex-mode"
+                    />
+                    <Label htmlFor="regex-mode" className="text-sm flex items-center gap-1 cursor-pointer">
+                      <Regex className="h-3 w-3" />
+                      Regex
+                    </Label>
+                  </div>
+                  {hasActiveFilters() && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearFilters}
+                      className="h-8"
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="node-name-filter">Node Name</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="node-name-filter"
+                      placeholder={useRegex ? "e.g., ip-.*-compute" : "e.g., ip-10-207-46-118"}
+                      value={nodeNameFilter}
+                      onChange={(e) => setNodeNameFilter(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  {nodeNameFilter && (
+                    <p className="text-xs text-muted-foreground">
+                      {useRegex ? "Regex pattern" : "Simple text search"}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pod-name-filter">Pod Name</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="pod-name-filter"
+                      placeholder={useRegex ? "e.g., .*-deployment-.*" : "e.g., my-app"}
+                      value={podNameFilter}
+                      onChange={(e) => setPodNameFilter(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  {podNameFilter && (
+                    <p className="text-xs text-muted-foreground">
+                      {useRegex ? "Regex pattern" : "Simple text search"}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Pod Count</Label>
+                  <Select value={podsFilter} onValueChange={setPodsFilter}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Pods</SelectItem>
+                      <SelectItem value="0">0 pods</SelectItem>
+                      <SelectItem value="1-10">1-10 pods</SelectItem>
+                      <SelectItem value="11-50">11-50 pods</SelectItem>
+                      <SelectItem value="50+">50+ pods</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {useRegex && (
+                <Alert className="mt-4">
+                  <AlertTitle className="text-sm">Regex Mode Enabled</AlertTitle>
+                  <AlertDescription className="text-xs">
+                    Use regex patterns for advanced matching. Examples:
+                    <code className="block mt-1 p-1 bg-muted rounded">ip-.*-compute</code>
+                    <code className="block mt-1 p-1 bg-muted rounded">.*-deployment-.*</code>
+                  </AlertDescription>
+                </Alert>
+              )}
+              {hasActiveFilters() && (
+                <div className="mt-4 pt-4 border-t">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Showing</span>
+                    <Badge variant="secondary">{getFilteredNodeCount()}</Badge>
+                    <span className="text-muted-foreground">of</span>
+                    <Badge variant="outline">{nodes.length}</Badge>
+                    <span className="text-muted-foreground">nodes</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {loading && nodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
@@ -320,6 +504,14 @@ function NodeUsageView() {
           </div>
         ) : nodes.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">No nodes found</p>
+        ) : getFilteredNodeCount() === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground mb-2">No nodes match the current filters</p>
+            <Button variant="outline" size="sm" onClick={clearFilters}>
+              <X className="h-4 w-4 mr-2" />
+              Clear Filters
+            </Button>
+          </div>
         ) : (
           <div className="space-y-6">
             {Object.entries(grouped).map(([groupName, groupNodes]) => {
@@ -520,6 +712,11 @@ function NodeUsageView() {
                             {node.instanceType && (
                               <Badge variant="secondary" className="font-mono text-xs">
                                 {node.instanceType}
+                              </Badge>
+                            )}
+                            {node.zone && (
+                              <Badge variant="outline" className="border-blue-500 text-blue-700">
+                                🌍 {node.zone}
                               </Badge>
                             )}
                             {node.capacityType && (

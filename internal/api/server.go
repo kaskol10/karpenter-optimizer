@@ -213,6 +213,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/cluster/summary", s.getClusterSummary)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
+		
+		// Agent endpoints
+		api.GET("/agent/cost-optimization", s.getCostOptimizationRecommendations)
+		api.POST("/agent/outcomes", s.recordOptimizationOutcome)
+		api.GET("/agent/learning/stats", s.getLearningStats)
+		api.GET("/agent/learning/history", s.getOptimizationHistory)
 	}
 }
 

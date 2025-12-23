@@ -416,8 +416,18 @@ Respond with JSON:
 				}
 			}
 			if ollamaResp.Explanation != "" {
-				enhanced[i].Reasoning = ollamaResp.Explanation
+				// Set both Reasoning and AIReasoning when LLM enhancement is applied
+				enhanced[i].AIReasoning = ollamaResp.Explanation
+				// Keep original reasoning, but add AI explanation as enhancement
+				if enhanced[i].Reasoning != "" {
+					enhanced[i].Reasoning = enhanced[i].Reasoning + " " + ollamaResp.Explanation
+				} else {
+					enhanced[i].Reasoning = ollamaResp.Explanation
+				}
 			}
+		} else {
+			// Log LLM enhancement failure but don't fail the whole operation
+			fmt.Printf("Warning: LLM enhancement failed for recommendation %d: %v\n", i, err)
 		}
 	}
 

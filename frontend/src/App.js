@@ -11,6 +11,7 @@ import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
+import AgentRecommendations from './components/AgentRecommendations';
 import { cn } from './lib/utils';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
@@ -229,7 +230,7 @@ function App() {
           )}
 
           <GlobalClusterSummary 
-            onRecommendationsGenerated={setRecommendations}
+            onRecommendationsGenerated={null}
             onClusterCostUpdate={setClusterCost}
           />
           
@@ -237,12 +238,10 @@ function App() {
           
           <DisruptionTracker />
           
-          <div>
-            <h2 className="text-xl font-semibold mb-2">NodePool Recommendations</h2>
-            <p className="text-sm text-muted-foreground">
-              Use "Generate Recommendations" button in the Cluster Overview section above to analyze your cluster and get NodePool optimization recommendations.
-            </p>
-          </div>
+          <AgentRecommendations 
+            onRecommendationsGenerated={setRecommendations}
+            onClusterCostUpdate={setClusterCost}
+          />
 
           {/* Cluster Cost Summary Card */}
           {recommendations.length > 0 && clusterCost && (
