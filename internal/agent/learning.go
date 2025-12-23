@@ -90,13 +90,22 @@ func NewLearningAgent(historyFile string) (*LearningAgent, error) {
 		},
 	}
 	
-	// Load existing history
+	// Load existing history (non-blocking - continue even if it fails)
 	if err := agent.loadHistory(); err != nil {
-		fmt.Printf("Warning: Failed to load optimization history: %v\n", err)
+		fmt.Printf("Warning: Failed to load optimization history: %v (continuing without history)\n", err)
+		// Continue with empty history - this is not critical
 	}
 	
-	// Analyze history to learn patterns
-	agent.learnFromHistory()
+	// Analyze history to learn patterns (non-blocking)
+	// Use a goroutine to avoid blocking initialization
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("Warning: Panic in learnFromHistory: %v\n", r)
+			}
+		}()
+		agent.learnFromHistory()
+	}()
 	
 	return agent, nil
 }

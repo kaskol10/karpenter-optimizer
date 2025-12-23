@@ -41,15 +41,21 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 		strategy = agent.StrategyBalanced
 	}
 	
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Use request context with timeout to allow cancellation
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 	
 	// Create agent
 	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, strategy)
 	
-	// Generate recommendations
+	// Generate recommendations with error handling
 	plans, err := costAgent.GenerateRecommendations(ctx)
 	if err != nil {
+		// Check if context was cancelled/timed out
+		if ctx.Err() == context.DeadlineExceeded {
+			c.JSON(504, gin.H{"error": "Request timeout: Agent took too long to generate recommendations"})
+			return
+		}
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

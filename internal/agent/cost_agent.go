@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 	
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
@@ -128,15 +129,22 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 		
 		// Enhance recommendations with LLM if available and enabled
 		// This ensures AI-enhanced explanations are applied when LLM is configured
+		// Use a shorter timeout for LLM enhancement to avoid blocking
 		if a.useLLM && a.llmEnhancer.HasLLM() && len(plan.Recommendations) > 0 {
-			enhancedRecs, err := a.llmEnhancer.EnhanceRecommendationsWithLLM(ctx, plan.Recommendations)
+			// Use a separate context with shorter timeout for LLM enhancement
+			llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
+			enhancedRecs, err := a.llmEnhancer.EnhanceRecommendationsWithLLM(llmCtx, plan.Recommendations)
+			llmCancel()
+			
 			if err == nil && len(enhancedRecs) > 0 {
 				plan.Recommendations = enhancedRecs
 				// AI-enhanced explanations are now in plan.Recommendations[].AIReasoning
 				// These will be displayed in the frontend when available
 			} else if err != nil {
-				fmt.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v\n", np.Name, err)
-				// Continue with non-enhanced recommendations if LLM fails
+				// Log but don't fail - continue with non-enhanced recommendations
+				if ctx.Err() == nil { // Only log if parent context is still valid
+					fmt.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v\n", np.Name, err)
+				}
 			}
 		} else if !a.llmEnhancer.HasLLM() && a.useLLM {
 			// Log when LLM is requested but not available
