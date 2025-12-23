@@ -406,12 +406,8 @@ func (l *LearningAgent) determineSuccess(outcome OptimizationOutcome) bool {
 	// 3. No major incidents
 	// 4. Performance impact is not negative
 	
-	success := true
-	
 	// Check user feedback
-	if outcome.UserFeedback == "rejected" {
-		success = false
-	}
+	success := outcome.UserFeedback != "rejected"
 	
 	// Check savings (should be positive or close to predicted)
 	if outcome.ActualSavings < 0 {

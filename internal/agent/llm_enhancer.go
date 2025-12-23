@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	
 	"github.com/karpenter-optimizer/internal/recommender"
 )
@@ -31,7 +29,7 @@ func (e *LLMEnhancer) HasLLM() bool {
 // EnhancePlanExplanation uses LLM to generate a better explanation for an optimization plan
 func (e *LLMEnhancer) EnhancePlanExplanation(ctx context.Context, plan *OptimizationPlan) string {
 	// Use the recommender's LLM enhancement if available
-	if plan.Recommendations == nil || len(plan.Recommendations) == 0 {
+	if len(plan.Recommendations) == 0 {
 		return ""
 	}
 	
@@ -64,113 +62,6 @@ func (e *LLMEnhancer) EnhanceOpportunityDescription(ctx context.Context, opportu
 	return opportunity.Description
 }
 
-// buildAgentExplanationPrompt builds a prompt for explaining the agent's optimization plan
-func (e *LLMEnhancer) buildAgentExplanationPrompt(plan *OptimizationPlan, rec recommender.NodePoolCapacityRecommendation) string {
-	return fmt.Sprintf(`You are an AI cost optimization agent for Kubernetes clusters. Explain this optimization plan:
-
-Optimization Plan:
-- NodePool: %s
-- Strategy: %s
-- Risk Level: %s
-- Confidence: %.0f%%
-- Estimated Savings: $%.2f/hr
-
-Current State:
-- Nodes: %d
-- Instance Types: %v
-- CPU Capacity: %.1f cores (%.1f%% used)
-- Memory Capacity: %.1f GiB (%.1f%% used)
-- Current Cost: $%.2f/hr
-- Capacity Type: %s
-
-Recommended State:
-- Nodes: %d
-- Instance Types: %v
-- CPU Capacity: %.1f cores
-- Memory Capacity: %.1f GiB
-- Recommended Cost: $%.2f/hr
-- Capacity Type: %s
-- Cost Savings: $%.2f/hr (%.1f%%)
-
-Optimization Opportunities Identified:
-%s
-
-Risk Factors:
-%s
-
-Provide a comprehensive explanation (3-4 sentences) that:
-1. Explains why this optimization strategy was chosen
-2. Describes the key changes and their benefits
-3. Addresses any risks or concerns
-4. Provides actionable next steps
-
-Return only the explanation text, no additional formatting.`,
-		plan.NodePoolName,
-		plan.Strategy,
-		plan.RiskLevel,
-		plan.Confidence*100,
-		plan.EstimatedSavings,
-		plan.CurrentState.CurrentNodes,
-		plan.CurrentState.InstanceTypes,
-		rec.CurrentCPUCapacity,
-		(rec.CurrentCPUUsed/rec.CurrentCPUCapacity)*100,
-		rec.CurrentMemoryCapacity,
-		(rec.CurrentMemoryUsed/rec.CurrentMemoryCapacity)*100,
-		rec.CurrentCost,
-		plan.CurrentState.CapacityType,
-		rec.RecommendedNodes,
-		rec.RecommendedInstanceTypes,
-		rec.RecommendedTotalCPU,
-		rec.RecommendedTotalMemory,
-		rec.RecommendedCost,
-		rec.CapacityType,
-		rec.CostSavings,
-		rec.CostSavingsPercent,
-		e.formatOpportunities(plan.CurrentState),
-		e.formatRiskFactors(plan.CurrentState),
-	)
-}
-
-// buildStrategySelectionPrompt builds a prompt for LLM to suggest optimization strategy
-func (e *LLMEnhancer) buildStrategySelectionPrompt(analysis *AnalysisResult) string {
-	return fmt.Sprintf(`You are an AI cost optimization agent. Analyze this NodePool and suggest the best optimization strategy.
-
-NodePool: %s
-Current State:
-- Nodes: %d
-- CPU Utilization: %.1f%%
-- Memory Utilization: %.1f%%
-- Capacity Type: %s
-- Current Cost: $%.2f/hr
-
-Optimization Opportunities:
-%s
-
-Risk Factors:
-%s
-
-Available Strategies:
-1. balanced - Balance cost savings and stability (default)
-2. aggressive - Maximize cost savings, higher risk
-3. conservative - Prioritize stability, lower risk
-4. spot-first - Prioritize spot instance conversion
-5. right-size - Focus on right-sizing
-
-Respond with JSON:
-{
-  "strategy": "balanced|aggressive|conservative|spot-first|right-size",
-  "reasoning": "Why this strategy is best for this NodePool"
-}`,
-		analysis.NodePoolState.Name,
-		analysis.NodePoolState.CurrentNodes,
-		analysis.NodePoolState.CPUUtilization,
-		analysis.NodePoolState.MemoryUtilization,
-		analysis.NodePoolState.CapacityType,
-		analysis.NodePoolState.CurrentCost,
-		e.formatOpportunities(analysis.NodePoolState),
-		strings.Join(analysis.RiskFactors, ", "),
-	)
-}
 
 // suggestStrategyRuleBased provides rule-based strategy suggestion (fallback)
 func (e *LLMEnhancer) suggestStrategyRuleBased(analysis *AnalysisResult) OptimizationStrategy {
@@ -194,18 +85,6 @@ func (e *LLMEnhancer) suggestStrategyRuleBased(analysis *AnalysisResult) Optimiz
 	
 	// Default to balanced
 	return StrategyBalanced
-}
-
-// formatOpportunities formats optimization opportunities for prompts
-func (e *LLMEnhancer) formatOpportunities(state *NodePoolState) string {
-	// This would be populated from analysis, but for now return empty
-	return "Optimization opportunities identified"
-}
-
-// formatRiskFactors formats risk factors for prompts
-func (e *LLMEnhancer) formatRiskFactors(state *NodePoolState) string {
-	// This would be populated from analysis, but for now return empty
-	return "Risk factors assessed"
 }
 
 // EnhanceRecommendationsWithLLM enhances recommendations using LLM

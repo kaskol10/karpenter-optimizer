@@ -7,15 +7,6 @@ import (
 	"time"
 )
 
-// Helper functions
-func absFloat(x float64) float64 {
-	return math.Abs(x)
-}
-
-func maxFloat(a, b float64) float64 {
-	return math.Max(a, b)
-}
-
 // OutcomeTracker helps track optimization outcomes
 type OutcomeTracker struct {
 	learningAgent *LearningAgent
@@ -74,6 +65,10 @@ func (t *OutcomeTracker) UpdateOutcome(ctx context.Context, planID string, actua
 		return fmt.Errorf("outcome not found for plan ID: %s", planID)
 	}
 	
+	if actualResults == nil {
+		return fmt.Errorf("actualResults cannot be nil")
+	}
+	
 	// Update with actual results
 	outcome.ActualSavings = actualResults.ActualSavings
 	outcome.ActualCost = actualResults.ActualCost
@@ -83,15 +78,11 @@ func (t *OutcomeTracker) UpdateOutcome(ctx context.Context, planID string, actua
 	outcome.PerformanceImpact = actualResults.PerformanceImpact
 	outcome.Incidents = actualResults.Incidents
 	
-	if outcome == nil {
-		return fmt.Errorf("outcome not found for plan ID: %s", planID)
-	}
-	
 	// Recalculate success and accuracy
 	outcome.Success = t.learningAgent.determineSuccess(*outcome)
 	if outcome.PredictedSavings > 0 && outcome.ActualSavings >= 0 {
-		diff := abs(outcome.PredictedSavings - outcome.ActualSavings)
-		maxVal := max(outcome.PredictedSavings, outcome.ActualSavings)
+		diff := math.Abs(outcome.PredictedSavings - outcome.ActualSavings)
+		maxVal := math.Max(outcome.PredictedSavings, outcome.ActualSavings)
 		if maxVal > 0 {
 			outcome.Accuracy = 1.0 - (diff / maxVal)
 			if outcome.Accuracy < 0 {
