@@ -46,6 +46,11 @@ type Recommender struct {
 	priceCacheMu sync.RWMutex       // Mutex for thread-safe cache access
 }
 
+// HasLLM returns true if LLM client is configured and available
+func (r *Recommender) HasLLM() bool {
+	return r.ollamaClient != nil
+}
+
 func NewRecommender(cfg *config.Config) *Recommender {
 	var ollamaClient *ollama.Client
 	// Use new LLM config if available, otherwise fall back to legacy Ollama config

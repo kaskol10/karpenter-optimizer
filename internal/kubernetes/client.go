@@ -345,6 +345,7 @@ type NodeInfo struct {
 	InstanceType string     `json:"instanceType"`
 	CapacityType string     `json:"capacityType"`           // spot, on-demand
 	Architecture string     `json:"architecture"`           // amd64, arm64
+	Zone         string     `json:"zone,omitempty"`         // Availability zone
 	CPUUsage     *NodeUsage `json:"cpuUsage,omitempty"`     // CPU usage information
 	MemoryUsage  *NodeUsage `json:"memoryUsage,omitempty"`  // Memory usage information
 	PodCount     int        `json:"podCount"`               // Number of pods scheduled on this node
@@ -559,6 +560,12 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			continue
 		}
 
+		// Extract zone from labels (try both standard and beta labels)
+		zone := node.Labels["topology.kubernetes.io/zone"]
+		if zone == "" {
+			zone = node.Labels["failure-domain.beta.kubernetes.io/zone"]
+		}
+
 		// Create a fresh nodeInfo struct for each node to avoid any potential data reuse
 		nodeInfo := NodeInfo{
 			Name:         node.Name,
@@ -566,6 +573,7 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			InstanceType: node.Labels["node.kubernetes.io/instance-type"],
 			CapacityType: node.Labels["karpenter.sh/capacity-type"],
 			Architecture: node.Labels["kubernetes.io/arch"],
+			Zone:         zone,
 			CPUUsage:     nil, // Explicitly initialize to nil
 			MemoryUsage:  nil, // Explicitly initialize to nil
 		}
