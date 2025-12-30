@@ -29,29 +29,21 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 ![Cluster Overview](docs/images/clusterOverview.png)
 *View cluster-wide statistics and generate recommendations*
 
-### Cost Savings Analysis
-![Potential Savings](docs/images/clusterOverviewPotentialSavings.png)
-*See potential cost savings across your entire cluster*
-
 ### NodePool Recommendations
-![NodePool Recommendation](docs/images/nodePoolRecommendationOverall.png)
-*Detailed NodePool recommendations with before/after comparisons*
-
-### AI-Powered Explanations
-![AI Explanation](docs/images/nodepoolRecommendationAIExplanation.png)
-*Get intelligent explanations for each recommendation*
+![NodePool Recommendation](docs/images/nodePoolRecommendation.png)
+*Detailed NodePool recommendations with before/after comparisons and cost savings*
 
 ### Node Usage Visualization
 ![Node Usage](docs/images/nodePoolOverallUsage.png)
-*Real-time visualization of CPU and memory usage per node*
+*Real-time visualization of CPU and memory usage per node with filtering capabilities*
+
+### Pod Location Tracking
+![Pod Location](docs/images/podLocation.png)
+*Track pods in nodes with detailed resource usage and filtering by node name or pod name*
 
 ### Node Disruption Tracking
 ![Node Disruptions](docs/images/nodeDisruption.png)
-*Monitor Karpenter node disruptions and identify blocked deletions*
-
-### Settings & Configuration
-![Settings](docs/images/settings.png)
-*Configure Kubernetes, Ollama, and AWS Pricing API settings*
+*Monitor Karpenter node disruptions and identify blocked deletions with PDB visibility*
 
 ## Architecture
 
@@ -411,6 +403,8 @@ For detailed architecture documentation, see [docs/architecture.md](docs/archite
 
 See the [Swagger UI](http://localhost:8080/swagger/index.html) for complete interactive API documentation with request/response schemas, or generate the docs with `make swagger`.
 
+
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
@@ -434,9 +428,13 @@ For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
 
 ## 🙏 Acknowledgments
 
-- Built for the [Karpenter](https://karpenter.sh/) community
-- Inspired by the need for better cost optimization in Kubernetes
-- Powered by AWS Pricing API and Ollama
+Karpenter Optimizer is heavily influenced by [eks-node-viewer](https://github.com/awslabs/eks-node-viewer), a fantastic tool by AWS Labs that I've been using for years. This project builds on that foundation and adds improvements I needed for my Karpenter workflows:
+
+1. **Easy visualization** - Modern React web UI vs CLI-only
+2. **Track pods in nodes** - Detailed pod-to-node mapping with resource usage
+3. **Clarify node disruptions** - Shows why nodes are blocked (PDBs, constraints)
+4. **Focus on Karpenter** - Built specifically for Karpenter NodePools
+5. **Current cost opportunities** - AI-powered recommendations with actual savings
 
 ---
 
