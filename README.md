@@ -14,7 +14,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 🎯 **Automatic Workload Discovery**: Automatically fetch workloads from your Kubernetes cluster
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
-- 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama
+- 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama/LiteLLM/VLLM
 - 💰 **AWS Pricing Integration**: Real-time pricing from AWS Pricing API for accurate cost calculations
 - 🔄 **Spot vs On-Demand Optimization**: Automatically recommends optimal capacity types (spot/on-demand)
 - 📈 **Cost Savings Analysis**: Detailed cost breakdown showing potential savings per NodePool and cluster-wide
@@ -27,22 +27,27 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 
 ### Cluster Overview
 ![Cluster Overview](docs/images/clusterOverview.png)
+
 *View cluster-wide statistics and generate recommendations*
 
 ### NodePool Recommendations
 ![NodePool Recommendation](docs/images/nodePoolRecommendation.png)
+
 *Detailed NodePool recommendations with before/after comparisons and cost savings*
 
 ### Node Usage Visualization
 ![Node Usage](docs/images/nodePoolOverallUsage.png)
+
 *Real-time visualization of CPU and memory usage per node with filtering capabilities*
 
 ### Pod Location Tracking
 ![Pod Location](docs/images/podLocation.png)
+
 *Track pods in nodes with detailed resource usage and filtering by node name or pod name*
 
 ### Node Disruption Tracking
 ![Node Disruptions](docs/images/nodeDisruption.png)
+
 *Monitor Karpenter node disruptions and identify blocked deletions with PDB visibility*
 
 ## Architecture
