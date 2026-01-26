@@ -398,7 +398,7 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 // DEPRECATED: getPricingIndex is no longer used - GetProducts API is the only option
 // This function is kept for reference but should never be called
 //
-//nolint:unused,deadcode
+//nolint:unused
 func (c *Client) getPricingIndex(ctx context.Context) (map[string]interface{}, map[string]interface{}, error) {
 	return nil, nil, fmt.Errorf("getPricingIndex is deprecated - GetProducts API is the only option (requires AWS credentials)")
 }
@@ -406,12 +406,12 @@ func (c *Client) getPricingIndex(ctx context.Context) (map[string]interface{}, m
 // DEPRECATED: findProductID and queryProductFile are no longer used - GetProducts API doesn't need product IDs
 // These functions are kept for reference but should never be called
 //
-//nolint:unused,deadcode
+//nolint:unused
 func (c *Client) findProductID(ctx context.Context, instanceType string) (string, error) {
 	return "", fmt.Errorf("findProductID is deprecated - GetProducts API is the only option (requires AWS credentials)")
 }
 
-//nolint:unused,deadcode
+//nolint:unused
 func (c *Client) queryProductFile(ctx context.Context, productID, capacityType string) (float64, error) {
 	return 0, fmt.Errorf("queryProductFile is deprecated - GetProducts API is the only option (requires AWS credentials)")
 }

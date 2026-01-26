@@ -257,6 +257,7 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 
 		// Extract workload info from pod owner references
 		var workloadKey string
+	ownerLoop:
 		for _, owner := range pod.OwnerReferences {
 			switch owner.Kind {
 			case "ReplicaSet":
@@ -265,17 +266,17 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 				if len(parts) > 1 {
 					workloadName := strings.Join(parts[:len(parts)-1], "-")
 					workloadKey = fmt.Sprintf("%s/deployment/%s", pod.Namespace, workloadName)
-					break
+					break ownerLoop
 				}
 			case "StatefulSet":
 				workloadKey = fmt.Sprintf("%s/statefulset/%s", pod.Namespace, owner.Name)
-				break
+				break ownerLoop
 			case "DaemonSet":
 				workloadKey = fmt.Sprintf("%s/daemonset/%s", pod.Namespace, owner.Name)
-				break
+				break ownerLoop
 			case "Job":
 				workloadKey = fmt.Sprintf("%s/job/%s", pod.Namespace, owner.Name)
-				break
+				break ownerLoop
 			}
 		}
 
