@@ -232,9 +232,11 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 	}
 
 	// Fetch all pods from all namespaces once (much faster than per-namespace)
+	// Note: We filter out Succeeded/Failed pods in the loop below to reduce processing
 	allPods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		// If we can't get pods, return workloads without usage data
+		// Don't fail the entire request if pod fetching fails
 		return workloads, nil
 	}
 

@@ -651,11 +651,21 @@ func (s *Server) listAllWorkloads(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Use longer timeout for large clusters - listing workloads across all namespaces
+	// and fetching all pods can take time
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	workloads, err := s.k8sClient.ListAllWorkloads(ctx)
 	if err != nil {
+		// Check if it's a timeout error
+		if ctx.Err() == context.DeadlineExceeded {
+			c.JSON(504, gin.H{
+				"error": "Request timeout - cluster may be too large",
+				"hint":  "The request took longer than 120 seconds. Consider filtering by namespace or increasing the timeout.",
+			})
+			return
+		}
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 			"hint":  "Check that you have permissions to list workloads across namespaces",
