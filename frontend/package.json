@@ -1,6 +1,6 @@
 {
   "name": "karpenter-optimizer-frontend",
-  "version": "0.0.20",
+  "version": "0.0.29",
   "private": true,
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.1",
