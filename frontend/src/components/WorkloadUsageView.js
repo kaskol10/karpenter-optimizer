@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { RefreshCw, Loader2, Search, X, ChevronLeft, ChevronRight, Columns, Eye, EyeOff } from 'lucide-react';
+import { RefreshCw, Loader2, Search, X, ChevronLeft, ChevronRight, Columns } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
@@ -210,7 +210,6 @@ function WorkloadUsageView() {
     }
   };
 
-  const uniqueNamespaces = [...new Set(workloads.map(w => w.namespace).filter(Boolean))].sort();
   const uniqueTypes = [...new Set(workloads.map(w => w.type).filter(Boolean))].sort();
 
   const { items, total, totalPages } = paginatedWorkloads();
