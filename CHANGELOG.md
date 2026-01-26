@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/kaskol10/karpenter-optimizer/compare/v0.0.1...HEAD
+## [0.0.29] - 2025-01-26
+
+### Added
+- **Workload Overview**: New comprehensive view for Deployments, StatefulSets, DaemonSets, and Jobs
+- **Workload Resource Usage**: CPU and memory usage tracking for workloads based on running pods
+- **Jobs Support**: Added Kubernetes Jobs to workload discovery and analysis
+- **Minimalist Tab Navigation**: Clean tab-based UI to reduce scrolling and improve navigation
+- **Column Visibility Controls**: Customizable table columns in Workload Overview with essential/all presets
+- **Workload Summary Statistics**: Aggregated CPU, memory, pods, and replicas totals
+- **Performance Optimizations**: Batch pod fetching for workload usage calculation (significant performance improvement)
+- **Sticky Table Headers**: Table headers remain visible while scrolling
+- **API Endpoint**: New `/api/v1/workloads/all` endpoint to list all workloads across namespaces
+
+### Changed
+- **UI Performance**: Optimized rendering by only showing active tab content
+- **Workload Calculation**: Changed from per-workload pod fetching to batch processing (10x+ faster)
+- **Table Design**: More compact table layout with better information density
+- **Navigation**: Replaced section dropdown with minimalist horizontal tabs
+- **Pagination**: Increased default items per page from 20 to 50
+
+### Fixed
+- Fixed workload usage calculation performance for large clusters
+- Improved pod-to-workload matching accuracy for all workload types
+
+[Unreleased]: https://github.com/kaskol10/karpenter-optimizer/compare/v0.0.29...HEAD
+[0.0.29]: https://github.com/kaskol10/karpenter-optimizer/compare/v0.0.28...v0.0.29
 
 ## [0.0.1] - 2024-12-02
 

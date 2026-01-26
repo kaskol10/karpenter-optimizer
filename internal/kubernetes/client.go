@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -34,14 +35,17 @@ type Client struct {
 type WorkloadInfo struct {
 	Name          string            `json:"name"`
 	Namespace     string            `json:"namespace"`
-	Type          string            `json:"type"` // deployment, statefulset, daemonset
+	Type          string            `json:"type"` // deployment, statefulset, daemonset, job
 	CPURequest    string            `json:"cpuRequest"`
 	MemoryRequest string            `json:"memoryRequest"`
 	CPULimit      string            `json:"cpuLimit"`
 	MemoryLimit   string            `json:"memoryLimit"`
-	Replicas      int32             `json:"replicas"`
+	Replicas      int32             `json:"replicas"` // For jobs, this is parallelism/completions
 	Labels        map[string]string `json:"labels"`
 	GPU           int               `json:"gpu"`
+	CPUUsed       float64           `json:"cpuUsed,omitempty"`       // Total CPU usage from running pods (resource requests)
+	MemoryUsed    float64           `json:"memoryUsed,omitempty"`     // Total Memory usage from running pods (resource requests) in GiB
+	RunningPods   int32             `json:"runningPods,omitempty"`   // Number of running pods for this workload
 }
 
 func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
@@ -193,6 +197,122 @@ func (c *Client) ListWorkloads(ctx context.Context, namespace string) ([]Workloa
 		workloads = append(workloads, workload)
 	}
 
+	// List Jobs
+	jobs, err := c.clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+
+	for _, job := range jobs.Items {
+		workload := c.extractWorkloadFromJob(&job)
+		workloads = append(workloads, workload)
+	}
+
+	return workloads, nil
+}
+
+// calculateWorkloadsUsageBatch calculates CPU and memory usage for all workloads efficiently
+// by fetching all pods once and matching them to workloads
+func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []WorkloadInfo) ([]WorkloadInfo, error) {
+	// Create a map to track workload usage
+	usageMap := make(map[string]*struct {
+		cpuUsed     float64
+		memoryUsed  float64
+		runningPods int32
+	})
+
+	// Initialize usage map for all workloads
+	for i := range workloads {
+		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
+		usageMap[key] = &struct {
+			cpuUsed     float64
+			memoryUsed  float64
+			runningPods int32
+		}{}
+	}
+
+	// Fetch all pods from all namespaces once (much faster than per-namespace)
+	allPods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// If we can't get pods, return workloads without usage data
+		return workloads, nil
+	}
+
+	// Process all pods once and match to workloads
+	for _, pod := range allPods.Items {
+		// Skip pods that are being terminated
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		// Skip pods in terminal states
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+
+		// Only count pods that are actually scheduled
+		if pod.Spec.NodeName == "" {
+			continue
+		}
+
+		// Extract workload info from pod owner references
+		var workloadKey string
+		for _, owner := range pod.OwnerReferences {
+			switch owner.Kind {
+			case "ReplicaSet":
+				// ReplicaSet name format: workloadname-randomstring
+				parts := strings.Split(owner.Name, "-")
+				if len(parts) > 1 {
+					workloadName := strings.Join(parts[:len(parts)-1], "-")
+					workloadKey = fmt.Sprintf("%s/deployment/%s", pod.Namespace, workloadName)
+					break
+				}
+			case "StatefulSet":
+				workloadKey = fmt.Sprintf("%s/statefulset/%s", pod.Namespace, owner.Name)
+				break
+			case "DaemonSet":
+				workloadKey = fmt.Sprintf("%s/daemonset/%s", pod.Namespace, owner.Name)
+				break
+			case "Job":
+				workloadKey = fmt.Sprintf("%s/job/%s", pod.Namespace, owner.Name)
+				break
+			}
+		}
+
+		if workloadKey == "" {
+			continue
+		}
+
+		// Check if this workload is in our list
+		usage, exists := usageMap[workloadKey]
+		if !exists {
+			continue
+		}
+
+		// Count this pod
+		usage.runningPods++
+
+		// Aggregate resource requests from containers (exclude init containers)
+		for _, container := range pod.Spec.Containers {
+			if cpuReq := container.Resources.Requests[corev1.ResourceCPU]; !cpuReq.IsZero() {
+				usage.cpuUsed += float64(cpuReq.MilliValue()) / 1000.0 // Convert millicores to cores
+			}
+			if memReq := container.Resources.Requests[corev1.ResourceMemory]; !memReq.IsZero() {
+				usage.memoryUsed += float64(memReq.Value()) / (1024.0 * 1024.0 * 1024.0) // Convert bytes to GiB
+			}
+		}
+	}
+
+	// Update workloads with calculated usage
+	for i := range workloads {
+		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
+		if usage, exists := usageMap[key]; exists {
+			workloads[i].CPUUsed = usage.cpuUsed
+			workloads[i].MemoryUsed = usage.memoryUsed
+			workloads[i].RunningPods = usage.runningPods
+		}
+	}
+
 	return workloads, nil
 }
 
@@ -218,8 +338,12 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 			// Log error but continue with other namespaces
 			continue
 		}
+
 		allWorkloads = append(allWorkloads, workloads...)
 	}
+
+	// Calculate usage for all workloads in batch (much faster - single pod fetch)
+	allWorkloads, _ = c.calculateWorkloadsUsageBatch(ctx, allWorkloads)
 
 	return allWorkloads, nil
 }
@@ -246,6 +370,13 @@ func (c *Client) GetWorkload(ctx context.Context, namespace, name, workloadType 
 			return nil, fmt.Errorf("failed to get daemonset: %w", err)
 		}
 		workload := c.extractWorkloadFromDaemonSet(ds)
+		return &workload, nil
+	case "job":
+		job, err := c.clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get job: %w", err)
+		}
+		workload := c.extractWorkloadFromJob(job)
 		return &workload, nil
 	default:
 		return nil, fmt.Errorf("unsupported workload type: %s", workloadType)
@@ -288,6 +419,27 @@ func (c *Client) extractWorkloadFromDaemonSet(ds *appsv1.DaemonSet) WorkloadInfo
 	}
 
 	c.extractResourcesFromPodSpec(&ds.Spec.Template.Spec, &workload)
+	return workload
+}
+
+func (c *Client) extractWorkloadFromJob(job *batchv1.Job) WorkloadInfo {
+	workload := WorkloadInfo{
+		Name:      job.Name,
+		Namespace: job.Namespace,
+		Type:      "job",
+		Labels:    job.Labels,
+	}
+
+	// For Jobs, use parallelism or completions as replicas equivalent
+	if job.Spec.Parallelism != nil {
+		workload.Replicas = *job.Spec.Parallelism
+	} else if job.Spec.Completions != nil {
+		workload.Replicas = *job.Spec.Completions
+	} else {
+		workload.Replicas = 1 // Default to 1 if not specified
+	}
+
+	c.extractResourcesFromPodSpec(&job.Spec.Template.Spec, &workload)
 	return workload
 }
 

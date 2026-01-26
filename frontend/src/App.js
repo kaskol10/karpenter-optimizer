@@ -4,12 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
-import { Loader2 } from 'lucide-react';
-import { Settings } from 'lucide-react';
+import { Loader2, Settings } from 'lucide-react';
 import './App.css';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
+import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
 import { cn } from './lib/utils';
@@ -36,6 +36,7 @@ function App() {
   const [clusterCost, setClusterCost] = useState(null);
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     checkHealth();
@@ -72,19 +73,83 @@ function App() {
               <h1 className="text-2xl font-bold text-blue-600 m-0">Karpenter Optimizer</h1>
               <p className="text-sm text-muted-foreground m-0">Cluster-level cost optimization</p>
             </div>
-            <Button 
-              onClick={() => setShowSettings(!showSettings)}
-              variant={showSettings ? 'default' : 'outline'}
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              {showSettings ? 'Hide' : 'Show'} Settings
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => setShowSettings(!showSettings)}
+                variant={showSettings ? 'default' : 'outline'}
+                size="sm"
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                {showSettings ? 'Hide' : 'Show'} Settings
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-6">
+        {/* Minimalist Tab Navigation */}
+        <div className="mb-6 border-b">
+          <nav className="flex space-x-1 -mb-px">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'overview'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => setActiveTab('nodes')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'nodes'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Nodes
+            </button>
+            <button
+              onClick={() => setActiveTab('workloads')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'workloads'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Workloads
+            </button>
+            <button
+              onClick={() => setActiveTab('disruptions')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'disruptions'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Disruptions
+            </button>
+            <button
+              onClick={() => setActiveTab('recommendations')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'recommendations'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Recommendations
+            </button>
+          </nav>
+        </div>
+
         <div className="space-y-6">
           {showSettings && (
             <Card>
@@ -229,22 +294,113 @@ function App() {
             </Card>
           )}
 
-          <GlobalClusterSummary 
-            onRecommendationsGenerated={null}
-            onClusterCostUpdate={setClusterCost}
-          />
-          
-          <NodeUsageView />
-          
-          <DisruptionTracker />
-          
-          <AgentRecommendations 
-            onRecommendationsGenerated={setRecommendations}
-            onClusterCostUpdate={setClusterCost}
-          />
+          {/* Overview Tab */}
+          {activeTab === 'overview' && (
+            <>
+              <GlobalClusterSummary 
+                onRecommendationsGenerated={null}
+                onClusterCostUpdate={setClusterCost}
+              />
+              {recommendations.length > 0 && clusterCost && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Cluster Cost Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Current Nodes</p>
+                        <p className="text-2xl font-bold">
+                          {clusterCost.clusterNodes?.current ?? recommendations.reduce((sum, rec) => {
+                            const isNewFormat = rec.nodePoolName !== undefined;
+                            return sum + (isNewFormat ? rec.currentNodes : (rec.currentState?.totalNodes || 0));
+                          }, 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Current Cost</p>
+                        <p className="text-2xl font-bold">
+                          ${clusterCost.current.toFixed(2)}/hr
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          ${(clusterCost.current * 24).toFixed(2)}/day
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Recommended Nodes</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          {clusterCost.clusterNodes?.recommended ?? recommendations.reduce((sum, rec) => {
+                            const isNewFormat = rec.nodePoolName !== undefined;
+                            if (isNewFormat) {
+                              return sum + (rec.recommendedNodes || 0);
+                            } else {
+                              return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
+                            }
+                          }, 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Recommended Cost</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          ${clusterCost.recommended.toFixed(2)}/hr
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          ${(clusterCost.recommended * 24).toFixed(2)}/day
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Potential Savings</p>
+                        <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
+                          {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
+                        </p>
+                        {clusterCost.current > 0 && (
+                          <p className={cn("text-xs mt-1", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
+                            {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+                            {' • '}${(Math.abs(clusterCost.savings) * 24).toFixed(2)}/day
+                          </p>
+                        )}
+                      </div>
+                      {clusterCost.totalNodePools !== undefined && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">NodePools with Changes</p>
+                          <p className="text-2xl font-bold">
+                            {clusterCost.recommendedCount ?? recommendations.length} / {clusterCost.totalNodePools}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              {recommendations.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {recommendations.map((rec, index) => (
+                    <NodePoolCard key={index} recommendation={rec} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
-          {/* Cluster Cost Summary Card */}
-          {recommendations.length > 0 && clusterCost && (
+          {/* Nodes Tab */}
+          {activeTab === 'nodes' && <NodeUsageView />}
+
+          {/* Workloads Tab */}
+          {activeTab === 'workloads' && <WorkloadUsageView />}
+
+          {/* Disruptions Tab */}
+          {activeTab === 'disruptions' && <DisruptionTracker />}
+
+          {/* Recommendations Tab */}
+          {activeTab === 'recommendations' && (
+            <AgentRecommendations 
+              onRecommendationsGenerated={setRecommendations}
+              onClusterCostUpdate={setClusterCost}
+            />
+          )}
+
+          {/* Legacy Cluster Cost Summary Card - removed, now in Overview */}
+          {false && recommendations.length > 0 && clusterCost && (
             <Card>
               <CardHeader>
                 <CardTitle>Cluster Cost Summary</CardTitle>
@@ -323,13 +479,6 @@ function App() {
             </Alert>
           )}
 
-          {recommendations.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {recommendations.map((rec, index) => (
-                <NodePoolCard key={index} recommendation={rec} />
-              ))}
-            </div>
-          )}
         </div>
       </main>
     </div>

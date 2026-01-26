@@ -203,6 +203,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/metrics/workloads", s.getWorkloadsMetrics)
 		api.GET("/namespaces", s.listNamespaces)
 		api.GET("/workloads", s.listWorkloads)
+		api.GET("/workloads/all", s.listAllWorkloads)
 		api.GET("/workloads/:namespace/:name", s.getWorkload)
 		api.GET("/nodepools", s.listNodePools)
 		api.GET("/nodepools/:name", s.getNodePool)
@@ -628,6 +629,43 @@ func (s *Server) listWorkloads(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"workloads": workloads,
+	})
+}
+
+// ListAllWorkloads godoc
+// @Summary      List all workloads
+// @Description  List all workloads (Deployments, StatefulSets, DaemonSets, Jobs) across all namespaces
+// @Tags         workloads
+// @Accept       json
+// @Produce      json
+// @Success      200       {object}  map[string]interface{}  "List of workloads"
+// @Failure      503       {object}  map[string]interface{}  "Kubernetes client not configured"
+// @Failure      500       {object}  map[string]interface{}  "Internal server error"
+// @Router       /workloads/all [get]
+func (s *Server) listAllWorkloads(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(503, gin.H{
+			"error": "Kubernetes client not configured",
+			"hint":  "Set KUBECONFIG environment variable or ensure kubeconfig is accessible",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	workloads, err := s.k8sClient.ListAllWorkloads(ctx)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+			"hint":  "Check that you have permissions to list workloads across namespaces",
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"workloads": workloads,
+		"count":     len(workloads),
 	})
 }
 
