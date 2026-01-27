@@ -3,27 +3,6 @@ entries:
   karpenter-optimizer:
   - apiVersion: v2
     appVersion: 0.0.32
-    created: "2026-01-27T09:01:15.50278043Z"
-    description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
-      Karpenter NodePools
-    digest: 9bc85e7f5633f7a6c4eedeef717f855e9597bf8077c112ae145d1e316d099ec2
-    home: https://github.com/kaskol10/karpenter-optimizer
-    icon: https://raw.githubusercontent.com/kaskol10/karpenter-optimizer/main/docs/logo.png
-    keywords:
-    - karpenter
-    - kubernetes
-    - cost-optimization
-    - aws
-    - ec2
-    name: karpenter-optimizer
-    sources:
-    - https://github.com/kaskol10/karpenter-optimizer
-    type: application
-    urls:
-    - https://kaskol10.github.io/karpenter-optimizer/charts/karpenter-optimizer-0.0.32.tgz
-    version: 0.0.32
-  - apiVersion: v2
-    appVersion: 0.0.32
     created: "2026-01-27T09:01:15.502024981Z"
     description: A Helm chart for Karpenter Optimizer - Cost optimization tool for
       Karpenter NodePools
