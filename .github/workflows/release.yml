@@ -176,14 +176,34 @@ jobs:
 
       - name: Generate Index
         run: |
-          # Copy new chart package
+          # Copy new chart package to root (not in subdirectories)
           cp charts/karpenter-optimizer-*.tgz . || true
           
+          # Remove any .tgz files from subdirectories to avoid incorrect URLs
+          rm -f charts/*.tgz || true
+          
+          # Fix any existing incorrect URLs in index.yaml (remove /charts/ prefix)
+          if [ -f index.yaml ]; then
+            sed -i 's|https://kaskol10.github.io/karpenter-optimizer/charts/|https://kaskol10.github.io/karpenter-optimizer/|g' index.yaml
+            sed -i 's|urls:.*/charts/|urls:|g' index.yaml || true
+          fi
+          
           # Generate or update index.yaml
+          # Use --url without trailing slash to ensure correct paths
           if [ -f index.yaml ]; then
             helm repo index . --url https://kaskol10.github.io/karpenter-optimizer --merge index.yaml
           else
             helm repo index . --url https://kaskol10.github.io/karpenter-optimizer
+          fi
+          
+          # Fix any URLs that still have /charts/ (shouldn't happen, but just in case)
+          sed -i 's|https://kaskol10.github.io/karpenter-optimizer/charts/|https://kaskol10.github.io/karpenter-optimizer/|g' index.yaml || true
+          
+          # Verify URLs in index.yaml don't have /charts/ subdirectory
+          if grep -q '/charts/' index.yaml; then
+            echo "ERROR: index.yaml still contains incorrect /charts/ paths after fix!"
+            cat index.yaml
+            exit 1
           fi
           
           # Show what was generated
