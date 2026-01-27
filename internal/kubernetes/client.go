@@ -321,7 +321,8 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 
 // ListAllWorkloads lists all workloads across all namespaces in the cluster
 func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
-	var allWorkloads []WorkloadInfo
+	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
+	allWorkloads := make([]WorkloadInfo, 0)
 
 	// List all namespaces
 	namespaces, err := c.ListNamespaces(ctx)
@@ -329,7 +330,13 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 		return nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
+	if len(namespaces) == 0 {
+		return allWorkloads, nil
+	}
+
 	// List workloads from each namespace
+	var errors []string
+	successfulNamespaces := 0
 	for _, ns := range namespaces {
 		// Skip system namespaces
 		if ns == "kube-system" || ns == "kube-public" || ns == "kube-node-lease" {
@@ -339,10 +346,24 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 		workloads, err := c.ListWorkloads(ctx, ns)
 		if err != nil {
 			// Log error but continue with other namespaces
+			// Collect errors to return if all namespaces fail
+			errors = append(errors, fmt.Sprintf("namespace %s: %v", ns, err))
 			continue
 		}
 
+		successfulNamespaces++
 		allWorkloads = append(allWorkloads, workloads...)
+	}
+
+	// If we have no workloads and errors from all namespaces, return an error
+	// This helps diagnose permission issues
+	if len(allWorkloads) == 0 && successfulNamespaces == 0 && len(errors) > 0 {
+		// Limit error messages to first 5 to avoid huge error strings
+		maxErrors := 5
+		if len(errors) < maxErrors {
+			maxErrors = len(errors)
+		}
+		return nil, fmt.Errorf("failed to list workloads from any namespace (checked %d namespaces). First errors: %s", len(namespaces), strings.Join(errors[:maxErrors], "; "))
 	}
 
 	// Calculate usage for all workloads in batch (much faster - single pod fetch)
