@@ -28,6 +28,8 @@ const COLUMNS = {
   runningPods: { key: 'runningPods', label: 'Running Pods', defaultVisible: true, essential: true },
   cpuUsed: { key: 'cpuUsed', label: 'CPU Used', defaultVisible: true, essential: true },
   memoryUsed: { key: 'memoryUsed', label: 'Memory Used', defaultVisible: true, essential: true },
+  storageSize: { key: 'storageSize', label: 'Storage Size', defaultVisible: true, essential: false },
+  pvcCount: { key: 'pvcCount', label: 'PVCs', defaultVisible: true, essential: false },
   cpuRequest: { key: 'cpuRequest', label: 'CPU Request', defaultVisible: false, essential: false },
   memoryRequest: { key: 'memoryRequest', label: 'Memory Request', defaultVisible: false, essential: false },
   cpuLimit: { key: 'cpuLimit', label: 'CPU Limit', defaultVisible: false, essential: false },
@@ -143,6 +145,14 @@ function WorkloadUsageView() {
           aValue = a.memoryUsed ?? parseResource(a.memoryRequest);
           bValue = b.memoryUsed ?? parseResource(b.memoryRequest);
           break;
+        case 'storageSize':
+          aValue = a.storageSize ?? 0;
+          bValue = b.storageSize ?? 0;
+          break;
+        case 'pvcCount':
+          aValue = a.pvcCount ?? 0;
+          bValue = b.pvcCount ?? 0;
+          break;
         default:
           return 0;
       }
@@ -220,8 +230,10 @@ function WorkloadUsageView() {
     acc.totalMemoryUsed += w.memoryUsed ?? 0;
     acc.totalRunningPods += w.runningPods ?? 0;
     acc.totalReplicas += w.replicas ?? 0;
+    acc.totalStorageSize += w.storageSize ?? 0;
+    acc.totalPVCCount += w.pvcCount ?? 0;
     return acc;
-  }, { totalCPUUsed: 0, totalMemoryUsed: 0, totalRunningPods: 0, totalReplicas: 0 });
+  }, { totalCPUUsed: 0, totalMemoryUsed: 0, totalRunningPods: 0, totalReplicas: 0, totalStorageSize: 0, totalPVCCount: 0 });
 
   const toggleColumn = (columnKey) => {
     setVisibleColumns(prev => ({
@@ -279,6 +291,8 @@ function WorkloadUsageView() {
                 <SelectItem value="replicas">Sort by Replicas</SelectItem>
                 <SelectItem value="cpu">Sort by CPU</SelectItem>
                 <SelectItem value="memory">Sort by Memory</SelectItem>
+                <SelectItem value="storageSize">Sort by Storage Size</SelectItem>
+                <SelectItem value="pvcCount">Sort by PVC Count</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sortOrder} onValueChange={setSortOrder}>
@@ -430,7 +444,7 @@ function WorkloadUsageView() {
             {/* Summary Statistics */}
             {items.length > 0 && (
               <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
                   <div>
                     <span className="text-muted-foreground">Total CPU Used:</span>
                     <span className="ml-2 font-semibold text-blue-600">{summary.totalCPUUsed.toFixed(2)} cores</span>
@@ -440,12 +454,20 @@ function WorkloadUsageView() {
                     <span className="ml-2 font-semibold text-blue-600">{summary.totalMemoryUsed.toFixed(2)} GiB</span>
                   </div>
                   <div>
+                    <span className="text-muted-foreground">Total Storage:</span>
+                    <span className="ml-2 font-semibold text-green-600">{summary.totalStorageSize.toFixed(2)} GiB</span>
+                  </div>
+                  <div>
                     <span className="text-muted-foreground">Running Pods:</span>
                     <span className="ml-2 font-semibold">{summary.totalRunningPods}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Total Replicas:</span>
                     <span className="ml-2 font-semibold">{summary.totalReplicas}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Total PVCs:</span>
+                    <span className="ml-2 font-semibold">{summary.totalPVCCount}</span>
                   </div>
                 </div>
               </div>
@@ -463,6 +485,8 @@ function WorkloadUsageView() {
                     {visibleColumns.runningPods && <th className="text-right p-2 font-semibold">Running Pods</th>}
                     {visibleColumns.cpuUsed && <th className="text-right p-2 font-semibold">CPU Used</th>}
                     {visibleColumns.memoryUsed && <th className="text-right p-2 font-semibold">Memory Used</th>}
+                    {visibleColumns.storageSize && <th className="text-right p-2 font-semibold">Storage Size</th>}
+                    {visibleColumns.pvcCount && <th className="text-right p-2 font-semibold">PVCs</th>}
                     {visibleColumns.cpuRequest && <th className="text-right p-2 font-semibold">CPU Request</th>}
                     {visibleColumns.memoryRequest && <th className="text-right p-2 font-semibold">Memory Request</th>}
                     {visibleColumns.cpuLimit && <th className="text-right p-2 font-semibold">CPU Limit</th>}
@@ -529,6 +553,28 @@ function WorkloadUsageView() {
                             {memoryUsed > 0 ? (
                               <span className="font-semibold text-blue-600">
                                 {memoryUsed.toFixed(2)} GiB
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.storageSize && (
+                          <td className="p-2 text-right">
+                            {workload.storageSize > 0 ? (
+                              <span className="font-semibold text-green-600">
+                                {workload.storageSize.toFixed(2)} GiB
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.pvcCount && (
+                          <td className="p-2 text-right">
+                            {workload.pvcCount > 0 ? (
+                              <span className="font-semibold">
+                                {workload.pvcCount}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">-</span>

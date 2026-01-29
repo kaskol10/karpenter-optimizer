@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +47,9 @@ type WorkloadInfo struct {
 	CPUUsed       float64           `json:"cpuUsed,omitempty"`       // Total CPU usage from running pods (resource requests)
 	MemoryUsed    float64           `json:"memoryUsed,omitempty"`     // Total Memory usage from running pods (resource requests) in GiB
 	RunningPods   int32             `json:"runningPods,omitempty"`   // Number of running pods for this workload
+	StorageSize   float64           `json:"storageSize,omitempty"`   // Total storage size from PVCs in GiB
+	StorageUsed   float64           `json:"storageUsed,omitempty"`   // Storage usage (if available from metrics) in GiB
+	PVCCount      int               `json:"pvcCount,omitempty"`      // Number of PVCs associated with this workload
 }
 
 func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
@@ -319,6 +323,153 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 	return workloads, nil
 }
 
+// calculateWorkloadsStorage calculates PVC storage for all workloads
+func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []WorkloadInfo) ([]WorkloadInfo, error) {
+	// Create a map to track workload storage
+	storageMap := make(map[string]*struct {
+		storageSize float64
+		pvcCount     int
+	})
+
+	// Initialize storage map for all workloads
+	for i := range workloads {
+		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
+		storageMap[key] = &struct {
+			storageSize float64
+			pvcCount     int
+		}{}
+	}
+
+	// Fetch all PVCs from all namespaces once
+	allPVCs, err := c.clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// If we can't get PVCs, return workloads without storage data
+		return workloads, nil
+	}
+
+	// For StatefulSets, fetch them to get volumeClaimTemplate names for accurate matching
+	statefulSetMap := make(map[string]map[string]bool) // namespace/name -> set of PVC template names
+	for _, workload := range workloads {
+		if workload.Type == "statefulset" {
+			sts, err := c.clientset.AppsV1().StatefulSets(workload.Namespace).Get(ctx, workload.Name, metav1.GetOptions{})
+			if err == nil {
+				key := fmt.Sprintf("%s/%s", workload.Namespace, workload.Name)
+				templateNames := make(map[string]bool)
+				for _, vct := range sts.Spec.VolumeClaimTemplates {
+					templateNames[vct.Name] = true
+				}
+				statefulSetMap[key] = templateNames
+			}
+		}
+	}
+
+	// Process all PVCs and match to workloads
+	for _, pvc := range allPVCs.Items {
+		// Skip PVCs that are being deleted
+		if pvc.DeletionTimestamp != nil {
+			continue
+		}
+
+		// Get storage size from PVC spec
+		var storageSize float64
+		if storageReq := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; !storageReq.IsZero() {
+			storageSize = float64(storageReq.Value()) / (1024.0 * 1024.0 * 1024.0) // Convert bytes to GiB
+		}
+
+		// Match PVC to workload
+		matched := false
+		for key, storage := range storageMap {
+			parts := strings.Split(key, "/")
+			if len(parts) != 3 {
+				continue
+			}
+			namespace := parts[0]
+			workloadType := parts[1]
+			workloadName := parts[2]
+
+			// Skip if namespace doesn't match
+			if pvc.Namespace != namespace {
+				continue
+			}
+
+			// For StatefulSets, use volumeClaimTemplate matching
+			if workloadType == "statefulset" {
+				stsKey := fmt.Sprintf("%s/%s", namespace, workloadName)
+				if templateNames, exists := statefulSetMap[stsKey]; exists {
+					// StatefulSet PVC pattern: {pvc-template-name}-{statefulset-name}-{ordinal}
+					pvcName := pvc.Name
+					for templateName := range templateNames {
+						// Check if PVC name starts with template name and contains workload name
+						expectedPrefix := templateName + "-" + workloadName + "-"
+						if strings.HasPrefix(pvcName, expectedPrefix) {
+							// Extract ordinal (last part after prefix)
+							suffix := strings.TrimPrefix(pvcName, expectedPrefix)
+							if _, err := strconv.Atoi(suffix); err == nil {
+								// Valid StatefulSet PVC
+								storage.storageSize += storageSize
+								storage.pvcCount++
+								matched = true
+								break
+							}
+						}
+						// Also check reverse pattern: {workload-name}-{template-name}-{ordinal}
+						expectedPrefix2 := workloadName + "-" + templateName + "-"
+						if strings.HasPrefix(pvcName, expectedPrefix2) {
+							suffix := strings.TrimPrefix(pvcName, expectedPrefix2)
+							if _, err := strconv.Atoi(suffix); err == nil {
+								storage.storageSize += storageSize
+								storage.pvcCount++
+								matched = true
+								break
+							}
+						}
+					}
+				}
+				if matched {
+					break
+				}
+			}
+
+			// Match by labels (common pattern: app.kubernetes.io/instance or app label)
+			if !matched && pvc.Labels != nil {
+				// Check for common workload labels
+				if instance := pvc.Labels["app.kubernetes.io/instance"]; instance == workloadName {
+					storage.storageSize += storageSize
+					storage.pvcCount++
+					matched = true
+					break
+				}
+				if app := pvc.Labels["app"]; app == workloadName {
+					storage.storageSize += storageSize
+					storage.pvcCount++
+					matched = true
+					break
+				}
+				// Check for workload-specific labels
+				if workloadType == "statefulset" {
+					if stsName := pvc.Labels["app.kubernetes.io/name"]; stsName == workloadName {
+						storage.storageSize += storageSize
+						storage.pvcCount++
+						matched = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Update workloads with calculated storage
+	for i := range workloads {
+		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
+		if storage, exists := storageMap[key]; exists {
+			workloads[i].StorageSize = storage.storageSize
+			workloads[i].PVCCount = storage.pvcCount
+		}
+	}
+
+	return workloads, nil
+}
+
 // ListAllWorkloads lists all workloads across all namespaces in the cluster
 func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
@@ -368,6 +519,9 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 
 	// Calculate usage for all workloads in batch (much faster - single pod fetch)
 	allWorkloads, _ = c.calculateWorkloadsUsageBatch(ctx, allWorkloads)
+
+	// Calculate PVC storage for all workloads
+	allWorkloads, _ = c.calculateWorkloadsStorage(ctx, allWorkloads)
 
 	return allWorkloads, nil
 }
