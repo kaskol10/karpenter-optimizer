@@ -9,23 +9,24 @@ import (
 	"strings"
 	"time"
 
+	"bufio"
+	"io"
+
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	"io"
-	"bufio"
 )
 
 type Client struct {
@@ -46,12 +47,12 @@ type WorkloadInfo struct {
 	Replicas      int32             `json:"replicas"` // For jobs, this is parallelism/completions
 	Labels        map[string]string `json:"labels"`
 	GPU           int               `json:"gpu"`
-	CPUUsed       float64           `json:"cpuUsed,omitempty"`       // Total CPU usage from running pods (resource requests)
-	MemoryUsed    float64           `json:"memoryUsed,omitempty"`     // Total Memory usage from running pods (resource requests) in GiB
-	RunningPods   int32             `json:"runningPods,omitempty"`   // Number of running pods for this workload
-	StorageSize   float64           `json:"storageSize,omitempty"`   // Total storage size from PVCs in GiB
-	StorageUsed   float64           `json:"storageUsed,omitempty"`   // Storage usage (if available from metrics) in GiB
-	PVCCount      int               `json:"pvcCount,omitempty"`      // Number of PVCs associated with this workload
+	CPUUsed       float64           `json:"cpuUsed,omitempty"`     // Total CPU usage from running pods (resource requests)
+	MemoryUsed    float64           `json:"memoryUsed,omitempty"`  // Total Memory usage from running pods (resource requests) in GiB
+	RunningPods   int32             `json:"runningPods,omitempty"` // Number of running pods for this workload
+	StorageSize   float64           `json:"storageSize,omitempty"` // Total storage size from PVCs in GiB
+	StorageUsed   float64           `json:"storageUsed,omitempty"` // Storage usage (if available from metrics) in GiB
+	PVCCount      int               `json:"pvcCount,omitempty"`    // Number of PVCs associated with this workload
 }
 
 func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
@@ -330,7 +331,7 @@ func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []Work
 	// Create a map to track workload storage
 	storageMap := make(map[string]*struct {
 		storageSize float64
-		pvcCount     int
+		pvcCount    int
 	})
 
 	// Initialize storage map for all workloads
@@ -338,7 +339,7 @@ func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []Work
 		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
 		storageMap[key] = &struct {
 			storageSize float64
-			pvcCount     int
+			pvcCount    int
 		}{}
 	}
 
@@ -709,13 +710,13 @@ type NodePoolInfo struct {
 	MinSize       int               `json:"minSize"`
 	MaxSize       int               `json:"maxSize"`
 	Labels        map[string]string `json:"labels"`
-	Requirements  map[string]string `json:"requirements"`          // Node requirements
-	Taints        []Taint          `json:"taints,omitempty"`      // Node taints
-	EstimatedCost float64           `json:"estimatedCost"`         // Cost per hour per instance type
+	Requirements  map[string]string `json:"requirements"`            // Node requirements
+	Taints        []Taint           `json:"taints,omitempty"`        // Node taints
+	EstimatedCost float64           `json:"estimatedCost"`           // Cost per hour per instance type
 	PricingSource string            `json:"pricingSource,omitempty"` // Source of pricing data (aws-pricing-api, hardcoded, etc.)
-	CurrentNodes  int               `json:"currentNodes"`          // Actual number of nodes in the cluster
-	PodCount      int               `json:"podCount"`              // Total number of pods across all nodes in this NodePool
-	ActualNodes   []NodeInfo        `json:"actualNodes,omitempty"` // Actual node details
+	CurrentNodes  int               `json:"currentNodes"`            // Actual number of nodes in the cluster
+	PodCount      int               `json:"podCount"`                // Total number of pods across all nodes in this NodePool
+	ActualNodes   []NodeInfo        `json:"actualNodes,omitempty"`   // Actual node details
 	// Selectors for matching workloads to this NodePool
 	Selector map[string]string `json:"selector,omitempty"` // NodePool selector labels
 }
@@ -807,6 +808,7 @@ func (c *Client) ListNodePools(ctx context.Context) ([]NodePoolInfo, error) {
 
 // getAllNodes gets all nodes from the cluster with their NodePool and instance type information
 // Deprecated: Use GetAllNodesWithUsage instead
+//
 //nolint:unused // Kept for potential future use
 func (c *Client) getAllNodes(ctx context.Context) ([]NodeInfo, error) {
 	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
@@ -998,7 +1000,7 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				}
 			}
 		}
-		
+
 		// Explicitly clear pods reference to help GC (pods can be large)
 		// This is important for large clusters where pods.Items can be large
 		pods = nil
@@ -1365,7 +1367,7 @@ func (c *Client) parseNodePool(item *unstructured.Unstructured) (*NodePoolInfo, 
 	if taints == nil {
 		taints, _, _ = unstructured.NestedSlice(spec, "taints")
 	}
-	
+
 	// Parse taints
 	np.Taints = []Taint{}
 	for _, taintInterface := range taints {
@@ -1455,36 +1457,36 @@ func (c *Client) estimateNodePoolCost(instanceTypes []string, capacityType strin
 
 // PDBBlockingInfo represents detailed information about a PDB that's blocking pod eviction
 type PDBBlockingInfo struct {
-	PDBName            string   `json:"pdbName"`            // namespace/name format
-	Namespace          string   `json:"namespace"`          // PDB namespace
-	Name               string   `json:"name"`               // PDB name
-	BlockingPods       []string `json:"blockingPods"`       // Pods blocked by this PDB (namespace/name format)
-	MinAvailable       string   `json:"minAvailable,omitempty"`       // minAvailable value if set (can be int or percentage string)
-	MaxUnavailable     string   `json:"maxUnavailable,omitempty"`     // maxUnavailable value if set (can be int or percentage string)
-	CurrentHealthy     int32    `json:"currentHealthy"`     // Current healthy pods
-	DesiredHealthy     int32    `json:"desiredHealthy"`     // Desired healthy pods
-	DisruptionsAllowed int32    `json:"disruptionsAllowed"` // Current disruptions allowed (0 = blocking)
+	PDBName            string   `json:"pdbName"`                  // namespace/name format
+	Namespace          string   `json:"namespace"`                // PDB namespace
+	Name               string   `json:"name"`                     // PDB name
+	BlockingPods       []string `json:"blockingPods"`             // Pods blocked by this PDB (namespace/name format)
+	MinAvailable       string   `json:"minAvailable,omitempty"`   // minAvailable value if set (can be int or percentage string)
+	MaxUnavailable     string   `json:"maxUnavailable,omitempty"` // maxUnavailable value if set (can be int or percentage string)
+	CurrentHealthy     int32    `json:"currentHealthy"`           // Current healthy pods
+	DesiredHealthy     int32    `json:"desiredHealthy"`           // Desired healthy pods
+	DisruptionsAllowed int32    `json:"disruptionsAllowed"`       // Current disruptions allowed (0 = blocking)
 }
 
 // NodeDisruptionInfo represents information about a node disruption event
 type NodeDisruptionInfo struct {
-	NodeName        string            `json:"nodeName"`
-	NodePool        string            `json:"nodePool"`
-	InstanceType    string            `json:"instanceType"`
-	Reason          string            `json:"reason"`                 // consolidation, expiration, drift, etc.
-	Message         string            `json:"message"`                // Event message
-	FirstSeen       string            `json:"firstSeen"`              // RFC3339 timestamp
-	LastSeen        string            `json:"lastSeen"`               // RFC3339 timestamp
-	EventCount      int               `json:"eventCount"`             // Number of events for this disruption
-	AffectedPods    []PodInfo         `json:"affectedPods,omitempty"` // Pods that were on this node
-	Labels          map[string]string `json:"labels,omitempty"`
-	Annotations     map[string]string `json:"annotations,omitempty"`    // Node annotations (includes Karpenter disruption reasons)
-	IsBlocked       bool              `json:"isBlocked"`                // True if node deletion is blocked
-	BlockingReason  string            `json:"blockingReason,omitempty"` // Why it's blocked (PDB, etc.)
-	BlockingPods    []string          `json:"blockingPods,omitempty"`   // Pods that are blocking eviction
-	BlockingPDBs    []string          `json:"blockingPDBs,omitempty"`   // PDBs that are blocking (deprecated, use BlockingPDBDetails)
+	NodeName           string            `json:"nodeName"`
+	NodePool           string            `json:"nodePool"`
+	InstanceType       string            `json:"instanceType"`
+	Reason             string            `json:"reason"`                 // consolidation, expiration, drift, etc.
+	Message            string            `json:"message"`                // Event message
+	FirstSeen          string            `json:"firstSeen"`              // RFC3339 timestamp
+	LastSeen           string            `json:"lastSeen"`               // RFC3339 timestamp
+	EventCount         int               `json:"eventCount"`             // Number of events for this disruption
+	AffectedPods       []PodInfo         `json:"affectedPods,omitempty"` // Pods that were on this node
+	Labels             map[string]string `json:"labels,omitempty"`
+	Annotations        map[string]string `json:"annotations,omitempty"`        // Node annotations (includes Karpenter disruption reasons)
+	IsBlocked          bool              `json:"isBlocked"`                    // True if node deletion is blocked
+	BlockingReason     string            `json:"blockingReason,omitempty"`     // Why it's blocked (PDB, etc.)
+	BlockingPods       []string          `json:"blockingPods,omitempty"`       // Pods that are blocking eviction
+	BlockingPDBs       []string          `json:"blockingPDBs,omitempty"`       // PDBs that are blocking (deprecated, use BlockingPDBDetails)
 	BlockingPDBDetails []PDBBlockingInfo `json:"blockingPDBDetails,omitempty"` // Detailed PDB blocking information
-	NodeStillExists bool              `json:"nodeStillExists"`          // True if node still exists (might be blocked)
+	NodeStillExists    bool              `json:"nodeStillExists"`              // True if node still exists (might be blocked)
 	// Enhanced node information from Kubernetes API
 	NodeConditions      []NodeCondition `json:"nodeConditions,omitempty"`      // Node conditions (Ready, MemoryPressure, etc.)
 	ResourceCapacity    ResourceInfo    `json:"resourceCapacity,omitempty"`    // Node resource capacity
@@ -1885,11 +1887,11 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 			if selector.Matches(labels.Set(pod.Labels)) {
 				// Pod is protected by this PDB
 				pdbKey := fmt.Sprintf("%s/%s", pdb.Namespace, pdb.Name)
-				
+
 				// Check if PDB would block eviction
 				// A PDB blocks eviction when DisruptionsAllowed is 0 and we're at or below the desired healthy threshold
 				isBlocking := pdb.Status.DisruptionsAllowed == 0 && pdb.Status.CurrentHealthy <= pdb.Status.DesiredHealthy
-				
+
 				if isBlocking {
 					// Initialize PDB details if not already tracked
 					if _, exists := pdbDetailsMap[pdbKey]; !exists {
@@ -1902,7 +1904,7 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 							DesiredHealthy:     pdb.Status.DesiredHealthy,
 							DisruptionsAllowed: pdb.Status.DisruptionsAllowed,
 						}
-						
+
 						// Extract minAvailable or maxUnavailable from spec
 						// These can be either int values or percentage strings (e.g., "50%")
 						if pdb.Spec.MinAvailable != nil {
@@ -1921,16 +1923,16 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 								pdbDetails.MaxUnavailable = pdb.Spec.MaxUnavailable.StrVal
 							}
 						}
-						
+
 						pdbDetailsMap[pdbKey] = pdbDetails
 						blockingPDBs = append(blockingPDBs, pdbKey)
 					}
-					
+
 					// Add this pod to the PDB's blocking pods list
 					if !contains(pdbDetailsMap[pdbKey].BlockingPods, podKey) {
 						pdbDetailsMap[pdbKey].BlockingPods = append(pdbDetailsMap[pdbKey].BlockingPods, podKey)
 					}
-					
+
 					if !contains(blockingPods, podKey) {
 						blockingPods = append(blockingPods, podKey)
 					}
@@ -2140,6 +2142,7 @@ func parseTime(timeStr string) time.Time {
 
 // sortDisruptionsByTime sorts disruptions by LastSeen time (most recent first)
 // Deprecated: Not currently used, kept for potential future use
+//
 //nolint:unused // Kept for potential future use
 func sortDisruptionsByTime(disruptions []NodeDisruptionInfo) {
 	// Simple insertion sort by LastSeen
@@ -2251,13 +2254,15 @@ func (c *Client) GetKarpenterLogs(ctx context.Context, namespace, podName string
 	if err != nil {
 		return nil, fmt.Errorf("failed to get log stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() {
+		_ = stream.Close() // Ignore close errors
+	}()
 
 	var logs []string
 	scanner := bufio.NewScanner(stream)
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// If errorOnly is true, filter for ERROR level logs
 		if errorOnly {
 			// Check if line contains ERROR level (JSON format)

@@ -198,12 +198,12 @@ func (s *Server) generateBasicExplanation(parsedError *KarpenterLogError, errorC
 // generateAIExplanation uses Ollama to generate an intelligent explanation
 func (s *Server) generateAIExplanation(ctx context.Context, parsedError *KarpenterLogError, errorCauses []ErrorCauseDetail) (string, error) {
 	if s.recommender == nil || !s.recommender.HasOllama() {
-		return "", fmt.Errorf("Ollama client not available")
+		return "", fmt.Errorf("ollama client not available")
 	}
 
 	ollamaClient := s.recommender.GetOllamaClient()
 	if ollamaClient == nil {
-		return "", fmt.Errorf("Ollama client not available")
+		return "", fmt.Errorf("ollama client not available")
 	}
 
 	// Build prompt
