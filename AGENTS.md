@@ -88,6 +88,9 @@ type NodeInfo struct {
 - `GET /api/v1/nodes` - Get all nodes with usage data
 - `GET /api/v1/cluster/summary` - Cluster-wide statistics
 
+### Karpenter Log Analysis Endpoints
+- `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs and provide explanations
+
 ## Important Patterns and Conventions
 
 ### 1. Recommendation Generation Flow
@@ -160,11 +163,20 @@ type NodeInfo struct {
   - `getRecommendations()` - Main recommendation endpoint
   - `getRecommendationsFromClusterSummary()` - Enhanced with Ollama
   - `getNodePoolRecommendations()` - NodePool-specific recommendations
+  - `analyzeKarpenterLog()` - Karpenter error log analysis endpoint
+
+- `internal/api/karpenter_log.go` - Karpenter log analysis
+  - `analyzeKarpenterLogInternal()` - Parses and analyzes Karpenter error logs
+  - `parseKarpenterLog()` - Parses JSON error logs
+  - `categorizeErrorCause()` - Categorizes error causes (Label Error, Taint Tolerance, etc.)
+  - `generateAIExplanation()` - Uses Ollama to generate intelligent explanations
+  - `generateLogRecommendations()` - Generates actionable recommendations
 
 ### Frontend Core Files
 - `frontend/src/App.js` - Main app, manages recommendations state
 - `frontend/src/components/NodePoolCard.js` - Displays recommendation cards (supports both formats)
 - `frontend/src/components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
+- `frontend/src/components/KarpenterLogAnalyzer.js` - Karpenter error log analysis UI
 
 ## Important Notes
 
@@ -248,6 +260,47 @@ type NodeInfo struct {
 - **Context**: Use `context.Context` for all API calls with timeouts
 - **Progress callbacks**: Use for long-running operations (SSE)
 
+## Quality Assurance Requirements
+
+**Every change MUST pass these checks before completion:**
+
+### 1. Linting (MANDATORY)
+- **Frontend**: Run `npm run lint` - must pass with 0 warnings
+- **Backend**: Run `golangci-lint run` - must pass with 0 errors
+- Fix ALL linting issues before marking task complete
+- Use `read_lints` tool to verify changed files
+
+### 2. Build (MANDATORY)
+- **Frontend**: `npm run build` must succeed (exit code 0)
+- **Backend**: `make backend` or `go build ./cmd/api` must succeed
+- If build fails, fix issues before proceeding
+- Never commit code that doesn't build
+
+### 3. Testing (MANDATORY)
+- **Frontend**: `npm run test` must pass (or document pre-existing failures)
+- **Backend**: `make test` or `go test ./...` must pass (or document pre-existing failures)
+- Do NOT skip or delete tests to make them pass
+- Add tests for new features when appropriate
+
+### 4. Documentation (MANDATORY)
+- Update `README.md` for user-facing changes
+- Update `CHANGELOG.md` for significant changes
+- Update `AGENTS.md` for architectural changes
+- Update API documentation for new/modified endpoints
+- Add/update code comments for complex logic
+- Document new configuration options
+
+**Failure to meet any requirement = task NOT complete**
+
+### Pre-Commit Checklist
+Before marking any task complete, verify:
+- [ ] All linting passes (0 errors, 0 warnings)
+- [ ] Build succeeds (frontend and/or backend)
+- [ ] Tests pass (or pre-existing failures documented)
+- [ ] Documentation updated (README, CHANGELOG, API docs, comments)
+- [ ] Code follows project conventions
+- [ ] Error handling is appropriate
+
 ## Important Warnings
 
 ⚠️ **DO NOT**:
@@ -256,6 +309,10 @@ type NodeInfo struct {
 - Assume capacity type (always check actual nodes)
 - Skip cost validation (prevent cost increases)
 - Recommend for NodePools with 0 nodes
+- **Commit code that doesn't build or pass tests**
+- **Skip linting, testing, or documentation updates**
+- **Leave code in broken state**
+- **Mark tasks complete without verification**
 
 ✅ **DO**:
 - Use actual node data for recommendations
@@ -263,9 +320,13 @@ type NodeInfo struct {
 - Query AWS API for instance types
 - Provide clear explanations with Ollama
 - Support both old and new data formats
+- **Verify linting, build, and tests pass before completion**
+- **Update documentation for every change**
+- **Fix all issues before marking task complete**
 
 ## Recent Changes
 
+- **Karpenter Log Analyzer**: Analyze error logs with AI-powered explanations
 - **NodePool-based recommendations**: Primary recommendation engine
 - **AWS Pricing API integration**: Dynamic instance type discovery
 - **Capacity type optimization**: Analyzes spot vs on-demand

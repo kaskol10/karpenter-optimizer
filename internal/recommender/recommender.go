@@ -106,6 +106,16 @@ func (r *Recommender) SetK8sClient(client *kubernetes.Client) {
 	r.k8sClient = client
 }
 
+// GetOllamaClient returns the Ollama client if available (for use by API handlers)
+func (r *Recommender) GetOllamaClient() *ollama.Client {
+	return r.ollamaClient
+}
+
+// HasOllama is an alias for HasLLM for backward compatibility
+func (r *Recommender) HasOllama() bool {
+	return r.HasLLM()
+}
+
 type Workload struct {
 	Name          string
 	Namespace     string

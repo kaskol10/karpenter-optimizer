@@ -12,6 +12,7 @@ import NodeUsageView from './components/NodeUsageView';
 import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
+import KarpenterLogAnalyzer from './components/KarpenterLogAnalyzer';
 import { cn } from './lib/utils';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
@@ -146,6 +147,17 @@ function App() {
               )}
             >
               Recommendations
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'logs'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Log Analyzer
             </button>
           </nav>
         </div>
@@ -390,6 +402,9 @@ function App() {
 
           {/* Disruptions Tab */}
           {activeTab === 'disruptions' && <DisruptionTracker />}
+
+          {/* Log Analyzer Tab */}
+          {activeTab === 'logs' && <KarpenterLogAnalyzer />}
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (

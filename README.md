@@ -20,6 +20,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 📈 **Cost Savings Analysis**: Detailed cost breakdown showing potential savings per NodePool and cluster-wide
 - 🖥️ **Modern Web UI**: React-based interface with real-time updates and progress tracking
 - 🚨 **Disruption Tracking**: Monitor Karpenter node disruptions and identify blocked deletions
+- 🔍 **Karpenter Log Analyzer**: Analyze Karpenter error logs with AI-powered explanations and actionable recommendations
 - 📦 **Helm Chart**: Production-ready Helm chart for easy Kubernetes deployment
 - ⚡ **Kubernetes Native**: Uses Kubernetes API directly - no Prometheus required
 

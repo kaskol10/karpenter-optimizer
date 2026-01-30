@@ -24,6 +24,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"io"
+	"bufio"
 )
 
 type Client struct {
@@ -2176,4 +2178,100 @@ func (c *Client) GetRecentNodeDeletions(ctx context.Context, sinceHours int) ([]
 	}
 
 	return deletions, nil
+}
+
+// KarpenterPodInfo represents information about a Karpenter pod
+type KarpenterPodInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Ready     string `json:"ready"`
+	Status    string `json:"status"`
+	Age       string `json:"age"`
+}
+
+// FindKarpenterPods finds all Karpenter pods in the cluster
+func (c *Client) FindKarpenterPods(ctx context.Context) ([]KarpenterPodInfo, error) {
+	// Search in all namespaces for pods with label app.kubernetes.io/name=karpenter
+	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=karpenter",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list Karpenter pods: %w", err)
+	}
+
+	var karpenterPods []KarpenterPodInfo
+	for _, pod := range pods.Items {
+		// Calculate ready status
+		ready := "0/0"
+		if len(pod.Status.ContainerStatuses) > 0 {
+			readyCount := 0
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.Ready {
+					readyCount++
+				}
+			}
+			ready = fmt.Sprintf("%d/%d", readyCount, len(pod.Status.ContainerStatuses))
+		}
+
+		// Calculate age
+		age := time.Since(pod.CreationTimestamp.Time)
+		ageStr := ""
+		if age.Hours() >= 24 {
+			ageStr = fmt.Sprintf("%dd", int(age.Hours()/24))
+		} else if age.Hours() >= 1 {
+			ageStr = fmt.Sprintf("%dh", int(age.Hours()))
+		} else {
+			ageStr = fmt.Sprintf("%dm", int(age.Minutes()))
+		}
+
+		karpenterPods = append(karpenterPods, KarpenterPodInfo{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+			Ready:     ready,
+			Status:    string(pod.Status.Phase),
+			Age:       ageStr,
+		})
+	}
+
+	return karpenterPods, nil
+}
+
+// GetKarpenterLogs gets logs from a Karpenter pod, optionally filtered for ERROR level
+func (c *Client) GetKarpenterLogs(ctx context.Context, namespace, podName string, errorOnly bool, tailLines *int64) ([]string, error) {
+	// Get pod logs
+	opts := &corev1.PodLogOptions{
+		Container: "", // Use default container
+	}
+	if tailLines != nil {
+		opts.TailLines = tailLines
+	}
+
+	req := c.clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get log stream: %w", err)
+	}
+	defer stream.Close()
+
+	var logs []string
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Text()
+		
+		// If errorOnly is true, filter for ERROR level logs
+		if errorOnly {
+			// Check if line contains ERROR level (JSON format)
+			if strings.Contains(line, `"level":"ERROR"`) || strings.Contains(line, `"level":"error"`) {
+				logs = append(logs, line)
+			}
+		} else {
+			logs = append(logs, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read log stream: %w", err)
+	}
+
+	return logs, nil
 }

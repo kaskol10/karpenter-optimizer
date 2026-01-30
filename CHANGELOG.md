@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Karpenter Log Analyzer**: New feature to analyze Karpenter error logs with AI-powered explanations
+  - Paste Karpenter error logs (JSON format) to get detailed analysis
+  - Automatic error categorization (Label Errors, Taint Tolerance, NodePool Limits, Resource Constraints)
+  - AI-powered explanations using Ollama/LiteLLM (when available)
+  - Actionable recommendations for resolving scheduling issues
+  - Visual display of error causes with severity indicators
+  - Parsed log details showing pod, NodePool, and taint information
+  - New API endpoint: `POST /api/v1/karpenter/logs/analyze`
+  - New UI tab: "Log Analyzer" in the main navigation
+
+## [Unreleased]
+
 ## [0.0.29] - 2025-01-26
 
 ### Added

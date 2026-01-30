@@ -41,12 +41,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
-	
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
 	"github.com/karpenter-optimizer/internal/docs/swagger" // Swagger docs
 )
 
@@ -140,35 +140,35 @@ func (s *Server) setupRoutes() {
 			} else if proto := c.GetHeader("X-Forwarded-Proto"); proto == "https" {
 				scheme = "https"
 			}
-			
+
 			// Get host from request (works with ingress via X-Forwarded-Host or Host header)
 			host := c.GetHeader("X-Forwarded-Host")
 			if host == "" {
 				host = c.Request.Host
 			}
-			
+
 			// Get the Swagger spec using swag
 			swaggerInfo := swagger.SwaggerInfo.ReadDoc()
-			
+
 			// Parse JSON to modify host dynamically
 			var swaggerSpec map[string]interface{}
 			if err := json.Unmarshal([]byte(swaggerInfo), &swaggerSpec); err == nil {
 				// Update host in spec
 				swaggerSpec["host"] = host
 				swaggerSpec["schemes"] = []string{scheme}
-				
+
 				// Return modified spec
 				c.Header("Content-Type", "application/json")
 				c.JSON(200, swaggerSpec)
 				return
 			}
-			
+
 			// Fallback: return original spec if parsing fails
 			c.Header("Content-Type", "application/json")
 			c.String(200, swaggerInfo)
 			return
 		}
-		
+
 		// For all other Swagger UI paths (index.html, etc.)
 		// Detect scheme from request
 		scheme := "http"
@@ -177,16 +177,16 @@ func (s *Server) setupRoutes() {
 		} else if proto := c.GetHeader("X-Forwarded-Proto"); proto == "https" {
 			scheme = "https"
 		}
-		
+
 		// Get host from request
 		host := c.GetHeader("X-Forwarded-Host")
 		if host == "" {
 			host = c.Request.Host
 		}
-		
+
 		// Build dynamic Swagger doc URL based on request
 		swaggerURL := fmt.Sprintf("%s://%s/api/swagger/doc.json", scheme, host)
-		
+
 		// Wrap handler with dynamic URL
 		handler := ginSwagger.WrapHandler(swaggerFiles.Handler, ginSwagger.URL(swaggerURL))
 		handler(c)
@@ -214,7 +214,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/cluster/summary", s.getClusterSummary)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
-		
+
+		// Karpenter log analysis
+		api.POST("/karpenter/logs/analyze", s.analyzeKarpenterLog)
+		api.GET("/karpenter/pods", s.getKarpenterPods)
+		api.GET("/karpenter/logs", s.getKarpenterLogs)
+
 		// Agent endpoints
 		api.GET("/agent/cost-optimization", s.getCostOptimizationRecommendations)
 		api.POST("/agent/outcomes", s.recordOptimizationOutcome)
@@ -1255,12 +1260,128 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 // WorkloadRequest represents a workload analysis request
 // @Description Workload specification for analysis
 type WorkloadRequest struct {
-	Name          string            `json:"name" example:"web-app"`                                    // Workload name
-	Namespace     string            `json:"namespace" example:"default"`                              // Kubernetes namespace
-	CPU           string            `json:"cpu,omitempty" example:"500m"`                            // CPU limit (optional)
-	Memory        string            `json:"memory,omitempty" example:"512Mi"`                         // Memory limit (optional)
-	CPURequest    string            `json:"cpuRequest,omitempty" example:"250m"`                      // CPU request (optional)
-	MemoryRequest string            `json:"memoryRequest,omitempty" example:"256Mi"`                 // Memory request (optional)
-	GPU           int               `json:"gpu" example:"0"`                                          // Number of GPUs required
-	Labels        map[string]string `json:"labels,omitempty" example:"app:web,tier:frontend"`        // Workload labels
+	Name          string            `json:"name" example:"web-app"`                           // Workload name
+	Namespace     string            `json:"namespace" example:"default"`                      // Kubernetes namespace
+	CPU           string            `json:"cpu,omitempty" example:"500m"`                     // CPU limit (optional)
+	Memory        string            `json:"memory,omitempty" example:"512Mi"`                 // Memory limit (optional)
+	CPURequest    string            `json:"cpuRequest,omitempty" example:"250m"`              // CPU request (optional)
+	MemoryRequest string            `json:"memoryRequest,omitempty" example:"256Mi"`          // Memory request (optional)
+	GPU           int               `json:"gpu" example:"0"`                                  // Number of GPUs required
+	Labels        map[string]string `json:"labels,omitempty" example:"app:web,tier:frontend"` // Workload labels
+}
+
+// analyzeKarpenterLog handles POST /api/v1/karpenter/logs/analyze
+// @Summary Analyze Karpenter error log
+// @Description Analyzes a Karpenter error log and provides explanations and recommendations
+// @Tags karpenter
+// @Accept json
+// @Produce json
+// @Param log body LogAnalysisRequest true "Karpenter error log (JSON string)"
+// @Success 200 {object} LogAnalysisResponse
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /karpenter/logs/analyze [post]
+func (s *Server) analyzeKarpenterLog(c *gin.Context) {
+	var req LogAnalysisRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": fmt.Sprintf("Invalid request: %v", err)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	analysis, err := s.analyzeKarpenterLogInternal(ctx, req.Log)
+	if err != nil {
+		c.JSON(500, gin.H{"error": fmt.Sprintf("Failed to analyze log: %v", err)})
+		return
+	}
+
+	c.JSON(200, analysis)
+}
+
+// getKarpenterPods handles GET /api/v1/karpenter/pods
+// @Summary Get Karpenter pods
+// @Description Lists all Karpenter pods in the cluster
+// @Tags karpenter
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 500 {object} map[string]string
+// @Router /karpenter/pods [get]
+func (s *Server) getKarpenterPods(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(500, gin.H{"error": "Kubernetes client not available"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	pods, err := s.k8sClient.FindKarpenterPods(ctx)
+	if err != nil {
+		c.JSON(500, gin.H{"error": fmt.Sprintf("Failed to find Karpenter pods: %v", err)})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"pods":  pods,
+		"count": len(pods),
+	})
+}
+
+// getKarpenterLogs handles GET /api/v1/karpenter/logs
+// @Summary Get Karpenter logs
+// @Description Gets logs from a Karpenter pod, optionally filtered for ERROR level
+// @Tags karpenter
+// @Produce json
+// @Param namespace query string true "Pod namespace"
+// @Param pod query string true "Pod name"
+// @Param errorOnly query bool false "Filter for ERROR level logs only" default(false)
+// @Param tailLines query int false "Number of lines to tail" default(100)
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /karpenter/logs [get]
+func (s *Server) getKarpenterLogs(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(500, gin.H{"error": "Kubernetes client not available"})
+		return
+	}
+
+	namespace := c.Query("namespace")
+	podName := c.Query("pod")
+	if namespace == "" || podName == "" {
+		c.JSON(400, gin.H{"error": "namespace and pod query parameters are required"})
+		return
+	}
+
+	errorOnly := c.Query("errorOnly") == "true"
+
+	var tailLines *int64
+	if tailStr := c.Query("tailLines"); tailStr != "" {
+		if tail, err := strconv.ParseInt(tailStr, 10, 64); err == nil {
+			tailLines = &tail
+		}
+	} else {
+		// Default to 100 lines
+		defaultTail := int64(100)
+		tailLines = &defaultTail
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	logs, err := s.k8sClient.GetKarpenterLogs(ctx, namespace, podName, errorOnly, tailLines)
+	if err != nil {
+		c.JSON(500, gin.H{"error": fmt.Sprintf("Failed to get Karpenter logs: %v", err)})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"logs":      logs,
+		"count":     len(logs),
+		"pod":       podName,
+		"namespace": namespace,
+		"errorOnly": errorOnly,
+	})
 }
