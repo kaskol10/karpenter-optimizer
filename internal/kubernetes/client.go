@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"bufio"
@@ -112,15 +113,14 @@ func NewClientWithDebug(kubeconfigPath, kubeContext string, debug bool) (*Client
 		}
 	}
 
-	// Configure rate limiting to prevent throttling
-	// QPS: queries per second (default is 5, increase to 10)
-	// Burst: maximum burst of requests (default is 10, increase to 20)
-	// This helps prevent "client-side throttling" errors when querying many resources
+	// Increase client-side rate limits (defaults: 5 QPS, 10 burst).
+	// The parallel namespace listing issues up to maxConcurrent*4 calls concurrently;
+	// low limits cause artificial multi-second delays per request.
 	if config.QPS == 0 {
-		config.QPS = 10
+		config.QPS = 50
 	}
 	if config.Burst == 0 {
-		config.Burst = 20
+		config.Burst = 100
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
@@ -350,13 +350,21 @@ func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []Work
 		return workloads, nil
 	}
 
-	// For StatefulSets, fetch them to get volumeClaimTemplate names for accurate matching
-	statefulSetMap := make(map[string]map[string]bool) // namespace/name -> set of PVC template names
-	for _, workload := range workloads {
-		if workload.Type == "statefulset" {
-			sts, err := c.clientset.AppsV1().StatefulSets(workload.Namespace).Get(ctx, workload.Name, metav1.GetOptions{})
-			if err == nil {
-				key := fmt.Sprintf("%s/%s", workload.Namespace, workload.Name)
+	// Build volumeClaimTemplate map with one cluster-wide List() instead of N individual Get() calls.
+	statefulSetMap := make(map[string]map[string]bool) // "namespace/name" -> set of PVC template names
+	hasStatefulSets := false
+	for _, w := range workloads {
+		if w.Type == "statefulset" {
+			hasStatefulSets = true
+			break
+		}
+	}
+	if hasStatefulSets {
+		allSTS, err := c.clientset.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
+		if err == nil {
+			for i := range allSTS.Items {
+				sts := &allSTS.Items[i]
+				key := fmt.Sprintf("%s/%s", sts.Namespace, sts.Name)
 				templateNames := make(map[string]bool)
 				for _, vct := range sts.Spec.VolumeClaimTemplates {
 					templateNames[vct.Name] = true
@@ -488,25 +496,59 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 		return allWorkloads, nil
 	}
 
-	// List workloads from each namespace
-	var errors []string
-	successfulNamespaces := 0
+	// Filter out system namespaces first
+	userNamespaces := make([]string, 0, len(namespaces))
 	for _, ns := range namespaces {
-		// Skip system namespaces
 		if ns == "kube-system" || ns == "kube-public" || ns == "kube-node-lease" {
 			continue
 		}
+		userNamespaces = append(userNamespaces, ns)
+	}
 
-		workloads, err := c.ListWorkloads(ctx, ns)
-		if err != nil {
-			// Log error but continue with other namespaces
-			// Collect errors to return if all namespaces fail
-			errors = append(errors, fmt.Sprintf("namespace %s: %v", ns, err))
+	// List workloads concurrently across namespaces with bounded parallelism.
+	type nsResult struct {
+		ns        string
+		workloads []WorkloadInfo
+		err       error
+	}
+
+	const maxConcurrent = 10
+	sem := make(chan struct{}, maxConcurrent)
+	results := make(chan nsResult, len(userNamespaces))
+
+	var wg sync.WaitGroup
+	for _, ns := range userNamespaces {
+		wg.Add(1)
+		go func(namespace string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- nsResult{ns: namespace, err: ctx.Err()}
+				return
+			}
+			workloads, err := c.ListWorkloads(ctx, namespace)
+			results <- nsResult{ns: namespace, workloads: workloads, err: err}
+		}(ns)
+	}
+
+	// Close results channel once all goroutines complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var errors []string
+	successfulNamespaces := 0
+	for result := range results {
+		if result.err != nil {
+			errors = append(errors, fmt.Sprintf("namespace %s: %v", result.ns, result.err))
 			continue
 		}
-
 		successfulNamespaces++
-		allWorkloads = append(allWorkloads, workloads...)
+		allWorkloads = append(allWorkloads, result.workloads...)
 	}
 
 	// If we have no workloads and errors from all namespaces, return an error
@@ -517,7 +559,7 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 		if len(errors) < maxErrors {
 			maxErrors = len(errors)
 		}
-		return nil, fmt.Errorf("failed to list workloads from any namespace (checked %d namespaces). First errors: %s", len(namespaces), strings.Join(errors[:maxErrors], "; "))
+		return nil, fmt.Errorf("failed to list workloads from any namespace (checked %d namespaces). First errors: %s", len(userNamespaces), strings.Join(errors[:maxErrors], "; "))
 	}
 
 	// Calculate usage for all workloads in batch (much faster - single pod fetch)

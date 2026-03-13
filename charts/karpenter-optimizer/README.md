@@ -132,6 +132,9 @@ The following table lists the configurable parameters and their default values:
 | `resources.limits.memory` | Memory limit | `512Mi` |
 | `resources.requests.cpu` | CPU request | `100m` |
 | `resources.requests.memory` | Memory request | `128Mi` |
+| `frontend.nginxConnectTimeout` | Nginx proxy connect timeout | `60s` |
+| `frontend.nginxSendTimeout` | Nginx proxy send timeout | `60s` |
+| `frontend.nginxReadTimeout` | Nginx proxy read timeout (should be >= backend timeout) | `120s` |
 
 ## Values
 

@@ -620,11 +620,18 @@ func (s *Server) listWorkloads(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	workloads, err := s.k8sClient.ListWorkloads(ctx, namespace)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			c.JSON(504, gin.H{
+				"error": "Request timeout listing workloads",
+				"hint":  fmt.Sprintf("Listing workloads in namespace '%s' took longer than 60 seconds. The API server may be under load.", namespace),
+			})
+			return
+		}
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 			"hint":  fmt.Sprintf("Check that namespace '%s' exists and you have permissions to list workloads", namespace),
