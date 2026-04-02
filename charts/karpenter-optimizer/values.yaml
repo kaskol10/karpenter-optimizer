@@ -203,6 +203,11 @@ frontend:
   # When using "localhost", nginx connects directly to the backend container in the same pod
   # When using "service", nginx connects via the Kubernetes service (useful for debugging or if localhost doesn't work)
   backendConnection: "localhost"
+  # Nginx proxy timeout configuration.
+  # nginxReadTimeout should be >= the backend request timeout (120s).
+  nginxConnectTimeout: "60s"
+  nginxSendTimeout: "60s"
+  nginxReadTimeout: "120s"
   # Security context for frontend container (overrides pod-level securityContext)
   # Set to {} to use pod-level securityContext, or specify custom values
   securityContext:
