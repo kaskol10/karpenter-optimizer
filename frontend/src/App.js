@@ -9,6 +9,7 @@ import './App.css';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
+import TopologyView from './components/TopologyView';
 import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
@@ -114,6 +115,17 @@ function App() {
               )}
             >
               Nodes
+            </button>
+            <button
+              onClick={() => setActiveTab('topology')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'topology'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Topology
             </button>
             <button
               onClick={() => setActiveTab('workloads')}
@@ -396,6 +408,9 @@ function App() {
 
           {/* Nodes Tab */}
           {activeTab === 'nodes' && <NodeUsageView />}
+
+          {/* Topology Tab */}
+          {activeTab === 'topology' && <TopologyView />}
 
           {/* Workloads Tab */}
           {activeTab === 'workloads' && <WorkloadUsageView />}
