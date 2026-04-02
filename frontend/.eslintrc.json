@@ -1,0 +1,9 @@
+{
+  "extends": ["react-app", "prettier"],
+  "plugins": ["prettier"],
+  "rules": {
+    "prettier/prettier": ["error", { "singleQuote": true, "trailingComma": "es5" }],
+    "no-unused-vars": "warn",
+    "no-console": "warn"
+  }
+}

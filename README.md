@@ -233,6 +233,7 @@ make swagger
 - `GET /api/v1/nodepools/:name` - Get specific NodePool details
 - `GET /api/v1/nodepools/recommendations` - Get NodePool recommendations
 - `GET /api/v1/nodes` - Get nodes with usage data
+- `GET /api/v1/topology` - Get nodes with scheduled pods (topology view)
 - `GET /api/v1/cluster/summary` - Get cluster-wide statistics
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions

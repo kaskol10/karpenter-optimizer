@@ -27,7 +27,16 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+
+	"github.com/karpenter-optimizer/internal/prometheus"
 )
+
+// PrometheusClient interface for querying metrics (allows for dependency injection and testing)
+type PrometheusClient interface {
+	IsEnabled() bool
+	GetPodMetrics(ctx context.Context) (map[string]*prometheus.PodMetrics, error)
+	GetWorkloadStorageMetrics(ctx context.Context) (map[string]float64, error) // Returns PVC storage usage keyed by "namespace/pvcname"
+}
 
 type Client struct {
 	clientset       *kubernetes.Clientset
@@ -47,12 +56,15 @@ type WorkloadInfo struct {
 	Replicas      int32             `json:"replicas"` // For jobs, this is parallelism/completions
 	Labels        map[string]string `json:"labels"`
 	GPU           int               `json:"gpu"`
-	CPUUsed       float64           `json:"cpuUsed,omitempty"`     // Total CPU usage from running pods (resource requests)
-	MemoryUsed    float64           `json:"memoryUsed,omitempty"`  // Total Memory usage from running pods (resource requests) in GiB
-	RunningPods   int32             `json:"runningPods,omitempty"` // Number of running pods for this workload
-	StorageSize   float64           `json:"storageSize,omitempty"` // Total storage size from PVCs in GiB
-	StorageUsed   float64           `json:"storageUsed,omitempty"` // Storage usage (if available from metrics) in GiB
-	PVCCount      int               `json:"pvcCount,omitempty"`    // Number of PVCs associated with this workload
+	CPUUsed       float64           `json:"cpuUsed,omitempty"`       // Total CPU usage from running pods (resource requests)
+	MemoryUsed    float64           `json:"memoryUsed,omitempty"`    // Total Memory usage from running pods (resource requests) in GiB
+	CPUActual     float64           `json:"cpuActual,omitempty"`     // Real CPU usage from Prometheus/Mimir metrics (in cores)
+	MemoryActual  float64           `json:"memoryActual,omitempty"`  // Real Memory usage from Prometheus/Mimir metrics (in GiB)
+	RunningPods   int32             `json:"runningPods,omitempty"`   // Number of running pods for this workload
+	StorageSize   float64           `json:"storageSize,omitempty"`   // Total storage size from PVCs in GiB
+	StorageUsed   float64           `json:"storageUsed,omitempty"`   // Storage usage (if available from metrics) in GiB
+	StorageActual float64           `json:"storageActual,omitempty"` // Real storage usage from Prometheus/Mimir metrics in GiB
+	PVCCount      int               `json:"pvcCount,omitempty"`      // Number of PVCs associated with this workload
 }
 
 func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
@@ -220,7 +232,8 @@ func (c *Client) ListWorkloads(ctx context.Context, namespace string) ([]Workloa
 
 // calculateWorkloadsUsageBatch calculates CPU and memory usage for all workloads efficiently
 // by fetching all pods once and matching them to workloads
-func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []WorkloadInfo) ([]WorkloadInfo, error) {
+// If promClient is provided and enabled, it will also fetch real usage metrics from Prometheus/Mimir
+func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []WorkloadInfo, promClient PrometheusClient) ([]WorkloadInfo, error) {
 	// Create a map to track workload usage
 	usageMap := make(map[string]*struct {
 		cpuUsed     float64
@@ -246,6 +259,9 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 		// Don't fail the entire request if pod fetching fails
 		return workloads, nil
 	}
+
+	// Build pod-to-workload map for Prometheus metrics lookup
+	podToWorkloadMap := make(map[string]string) // "namespace/podname" -> "namespace/type/workloadname"
 
 	// Process all pods once and match to workloads
 	for _, pod := range allPods.Items {
@@ -293,6 +309,10 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 			continue
 		}
 
+		// Build pod-to-workload map for Prometheus metrics
+		podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+		podToWorkloadMap[podKey] = workloadKey
+
 		// Check if this workload is in our list
 		usage, exists := usageMap[workloadKey]
 		if !exists {
@@ -313,6 +333,48 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 		}
 	}
 
+	// Fetch real metrics from Prometheus if available
+	var promMetrics map[string]*prometheus.PodMetrics
+	if promClient != nil {
+		// Check if enabled (handles nil client gracefully)
+		if promClient.IsEnabled() {
+			metrics, err := promClient.GetPodMetrics(ctx)
+			if err != nil {
+				// Log error but continue without metrics (graceful degradation)
+				if c.debug {
+					fmt.Printf("Warning: Failed to fetch Prometheus metrics: %v\n", err)
+				}
+			} else {
+				promMetrics = metrics
+			}
+		}
+	}
+
+	// Aggregate Prometheus metrics by workload
+	workloadMetricsMap := make(map[string]*struct {
+		cpuActual    float64
+		memoryActual float64
+	})
+
+	if len(promMetrics) > 0 {
+		for podKey, metrics := range promMetrics {
+			workloadKey, exists := podToWorkloadMap[podKey]
+			if !exists {
+				continue
+			}
+
+			if _, exists := workloadMetricsMap[workloadKey]; !exists {
+				workloadMetricsMap[workloadKey] = &struct {
+					cpuActual    float64
+					memoryActual float64
+				}{}
+			}
+
+			workloadMetricsMap[workloadKey].cpuActual += metrics.CPUUsage
+			workloadMetricsMap[workloadKey].memoryActual += metrics.MemoryUsage
+		}
+	}
+
 	// Update workloads with calculated usage
 	for i := range workloads {
 		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
@@ -321,25 +383,34 @@ func (c *Client) calculateWorkloadsUsageBatch(ctx context.Context, workloads []W
 			workloads[i].MemoryUsed = usage.memoryUsed
 			workloads[i].RunningPods = usage.runningPods
 		}
+
+		// Add real metrics if available
+		if metrics, exists := workloadMetricsMap[key]; exists {
+			workloads[i].CPUActual = metrics.cpuActual
+			workloads[i].MemoryActual = metrics.memoryActual
+		}
 	}
 
 	return workloads, nil
 }
 
 // calculateWorkloadsStorage calculates PVC storage for all workloads
-func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []WorkloadInfo) ([]WorkloadInfo, error) {
+// If promClient is provided and enabled, it will also fetch real storage usage from Prometheus/Mimir
+func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []WorkloadInfo, promClient PrometheusClient) ([]WorkloadInfo, error) {
 	// Create a map to track workload storage
 	storageMap := make(map[string]*struct {
-		storageSize float64
-		pvcCount    int
+		storageSize   float64
+		storageActual float64
+		pvcCount      int
 	})
 
 	// Initialize storage map for all workloads
 	for i := range workloads {
 		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
 		storageMap[key] = &struct {
-			storageSize float64
-			pvcCount    int
+			storageSize   float64
+			storageActual float64
+			pvcCount      int
 		}{}
 	}
 
@@ -461,11 +532,164 @@ func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []Work
 		}
 	}
 
+	// Fetch real storage metrics from Prometheus if available
+	var pvcStorageMetrics map[string]float64
+	if promClient != nil {
+		if promClient.IsEnabled() {
+			if c.debug {
+				fmt.Printf("Debug: Fetching storage metrics from Prometheus...\n")
+			}
+			metrics, err := promClient.GetWorkloadStorageMetrics(ctx)
+			if err != nil {
+				// Log error but continue without metrics (graceful degradation)
+				if c.debug {
+					fmt.Printf("Warning: Failed to fetch Prometheus storage metrics: %v\n", err)
+				}
+			} else {
+				pvcStorageMetrics = metrics
+				if c.debug {
+					fmt.Printf("Debug: Successfully fetched %d PVC storage metrics from Prometheus\n", len(metrics))
+					// Print first few metrics for debugging
+					count := 0
+					for k, v := range metrics {
+						if count < 5 {
+							fmt.Printf("Debug: PVC metric: %s = %.2f GiB\n", k, v)
+							count++
+						}
+					}
+				}
+			}
+		} else {
+			if c.debug {
+				fmt.Printf("Debug: Prometheus client is not enabled\n")
+			}
+		}
+	} else {
+		if c.debug {
+			fmt.Printf("Debug: Prometheus client is nil\n")
+		}
+	}
+
+	// Build PVC-to-workload map for matching storage metrics
+	pvcToWorkloadMap := make(map[string]string) // "namespace/pvcname" -> "namespace/type/workloadname"
+
+	if c.debug {
+		fmt.Printf("Debug: Building PVC-to-workload map for %d PVCs and %d workloads\n", len(allPVCs.Items), len(workloads))
+	}
+
+	// Match PVCs to workloads using the same logic as above
+	for _, pvc := range allPVCs.Items {
+		if pvc.DeletionTimestamp != nil {
+			continue
+		}
+
+		pvcKey := fmt.Sprintf("%s/%s", pvc.Namespace, pvc.Name)
+
+		// Match PVC to workload using the same logic as above
+		for key := range storageMap {
+			parts := strings.Split(key, "/")
+			if len(parts) != 3 {
+				continue
+			}
+			namespace := parts[0]
+			workloadType := parts[1]
+			workloadName := parts[2]
+
+			if pvc.Namespace != namespace {
+				continue
+			}
+
+			matched := false
+			// For StatefulSets, use volumeClaimTemplate matching
+			if workloadType == "statefulset" {
+				stsKey := fmt.Sprintf("%s/%s", namespace, workloadName)
+				if templateNames, exists := statefulSetMap[stsKey]; exists {
+					pvcName := pvc.Name
+					for templateName := range templateNames {
+						expectedPrefix := templateName + "-" + workloadName + "-"
+						if strings.HasPrefix(pvcName, expectedPrefix) {
+							suffix := strings.TrimPrefix(pvcName, expectedPrefix)
+							if _, err := strconv.Atoi(suffix); err == nil {
+								pvcToWorkloadMap[pvcKey] = key
+								matched = true
+								break
+							}
+						}
+						expectedPrefix2 := workloadName + "-" + templateName + "-"
+						if strings.HasPrefix(pvcName, expectedPrefix2) {
+							suffix := strings.TrimPrefix(pvcName, expectedPrefix2)
+							if _, err := strconv.Atoi(suffix); err == nil {
+								pvcToWorkloadMap[pvcKey] = key
+								matched = true
+								break
+							}
+						}
+					}
+				}
+			}
+
+			// Match by labels
+			if !matched && pvc.Labels != nil {
+				if instance := pvc.Labels["app.kubernetes.io/instance"]; instance == workloadName {
+					pvcToWorkloadMap[pvcKey] = key
+					matched = true
+				} else if app := pvc.Labels["app"]; app == workloadName {
+					pvcToWorkloadMap[pvcKey] = key
+					matched = true
+				} else if workloadType == "statefulset" {
+					if stsName := pvc.Labels["app.kubernetes.io/name"]; stsName == workloadName {
+						pvcToWorkloadMap[pvcKey] = key
+						matched = true
+					}
+				}
+			}
+
+			if matched {
+				if c.debug {
+					fmt.Printf("Debug: Matched PVC %s to workload %s\n", pvcKey, key)
+				}
+				break
+			}
+		}
+	}
+
+	if c.debug {
+		fmt.Printf("Debug: Built PVC-to-workload map with %d entries\n", len(pvcToWorkloadMap))
+	}
+
+	// Aggregate Prometheus storage metrics by workload
+	if len(pvcStorageMetrics) > 0 {
+		if c.debug {
+			fmt.Printf("Debug: Found %d PVC storage metrics from Prometheus\n", len(pvcStorageMetrics))
+		}
+		for pvcKey, storageUsage := range pvcStorageMetrics {
+			workloadKey, exists := pvcToWorkloadMap[pvcKey]
+			if !exists {
+				if c.debug {
+					fmt.Printf("Debug: PVC %s not matched to any workload\n", pvcKey)
+				}
+				continue
+			}
+
+			if storage, exists := storageMap[workloadKey]; exists {
+				storage.storageActual += storageUsage
+				if c.debug {
+					fmt.Printf("Debug: Matched PVC %s to workload %s, added %.2f GiB (total: %.2f GiB)\n", pvcKey, workloadKey, storageUsage, storage.storageActual)
+				}
+			}
+		}
+	} else {
+		if c.debug {
+			fmt.Printf("Debug: No PVC storage metrics from Prometheus (pvcStorageMetrics is empty or nil)\n")
+		}
+	}
+
 	// Update workloads with calculated storage
 	for i := range workloads {
 		key := fmt.Sprintf("%s/%s/%s", workloads[i].Namespace, workloads[i].Type, workloads[i].Name)
 		if storage, exists := storageMap[key]; exists {
 			workloads[i].StorageSize = storage.storageSize
+			workloads[i].StorageActual = storage.storageActual
 			workloads[i].PVCCount = storage.pvcCount
 		}
 	}
@@ -474,7 +698,8 @@ func (c *Client) calculateWorkloadsStorage(ctx context.Context, workloads []Work
 }
 
 // ListAllWorkloads lists all workloads across all namespaces in the cluster
-func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
+// If promClient is provided and enabled, it will also fetch real usage metrics from Prometheus/Mimir
+func (c *Client) ListAllWorkloads(ctx context.Context, promClient PrometheusClient) ([]WorkloadInfo, error) {
 	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
 	allWorkloads := make([]WorkloadInfo, 0)
 
@@ -521,10 +746,10 @@ func (c *Client) ListAllWorkloads(ctx context.Context) ([]WorkloadInfo, error) {
 	}
 
 	// Calculate usage for all workloads in batch (much faster - single pod fetch)
-	allWorkloads, _ = c.calculateWorkloadsUsageBatch(ctx, allWorkloads)
+	allWorkloads, _ = c.calculateWorkloadsUsageBatch(ctx, allWorkloads, promClient)
 
-	// Calculate PVC storage for all workloads
-	allWorkloads, _ = c.calculateWorkloadsStorage(ctx, allWorkloads)
+	// Calculate PVC storage for all workloads (includes Prometheus metrics if available)
+	allWorkloads, _ = c.calculateWorkloadsStorage(ctx, allWorkloads, promClient)
 
 	return allWorkloads, nil
 }
@@ -1085,53 +1310,16 @@ type PodInfo struct {
 func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) ([]PodInfo, error) {
 	var allPods []PodInfo
 
-	// Get pods from all namespaces
-	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pod := range pods.Items {
-		// Check if pod is running on one of our nodes
-		if nodeNames[pod.Spec.NodeName] {
-			// Extract workload name from pod name (remove pod-specific suffix)
-			workloadName := pod.Name
-			workloadType := ""
-
-			// Try to get workload from owner references
-			for _, owner := range pod.OwnerReferences {
-				switch owner.Kind {
-				case "ReplicaSet":
-					// ReplicaSet name format: workloadname-randomstring
-					// Extract workload name
-					parts := strings.Split(owner.Name, "-")
-					if len(parts) > 1 {
-						// Remove the random suffix (last part)
-						workloadName = strings.Join(parts[:len(parts)-1], "-")
-					}
-					workloadType = "deployment"
-				case "StatefulSet":
-					// StatefulSet pod name format: workloadname-ordinal
-					parts := strings.Split(pod.Name, "-")
-					if len(parts) > 1 {
-						// Remove the ordinal (last part)
-						workloadName = strings.Join(parts[:len(parts)-1], "-")
-					}
-					workloadType = "statefulset"
-				case "DaemonSet":
-					workloadName = pod.Name
-					workloadType = "daemonset"
-				}
-			}
-
-			allPods = append(allPods, PodInfo{
-				Name:         pod.Name,
-				Namespace:    pod.Namespace,
-				NodeName:     pod.Spec.NodeName,
-				WorkloadName: workloadName,
-				WorkloadType: workloadType,
-			})
+	// Fetch pods per node so we can reuse the existing extraction logic
+	// (which populates per-container resource requests/limits and QoS).
+	for nodeName := range nodeNames {
+		pods, err := c.getPodsOnNode(ctx, nodeName)
+		if err != nil {
+			// Keep topology functional even if one node fails.
+			c.debugLog("Warning: failed to get pods for node %s: %v\n", nodeName, err)
+			continue
 		}
+		allPods = append(allPods, pods...)
 	}
 
 	return allPods, nil

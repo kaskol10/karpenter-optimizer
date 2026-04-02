@@ -10,12 +10,14 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { RefreshCw, Loader2, Search, X, ChevronLeft, ChevronRight, Columns } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { logger } from '../lib/logger';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
 
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 const ITEMS_PER_PAGE = 50; // Increased from 20 to reduce pagination
 
@@ -26,14 +28,52 @@ const COLUMNS = {
   type: { key: 'type', label: 'Type', defaultVisible: true, essential: true },
   replicas: { key: 'replicas', label: 'Replicas', defaultVisible: true, essential: false },
   runningPods: { key: 'runningPods', label: 'Running Pods', defaultVisible: true, essential: true },
-  cpuUsed: { key: 'cpuUsed', label: 'CPU Used', defaultVisible: true, essential: true },
-  memoryUsed: { key: 'memoryUsed', label: 'Memory Used', defaultVisible: true, essential: true },
-  storageSize: { key: 'storageSize', label: 'Storage Size', defaultVisible: true, essential: false },
+  cpuActual: { key: 'cpuActual', label: 'CPU Actual', defaultVisible: true, essential: true },
+  memoryActual: {
+    key: 'memoryActual',
+    label: 'Memory Actual',
+    defaultVisible: true,
+    essential: true,
+  },
+  storageActual: {
+    key: 'storageActual',
+    label: 'Storage Actual',
+    defaultVisible: true,
+    essential: false,
+  },
+  cpuUsed: { key: 'cpuUsed', label: 'CPU Request', defaultVisible: false, essential: false },
+  memoryUsed: {
+    key: 'memoryUsed',
+    label: 'Memory Request',
+    defaultVisible: false,
+    essential: false,
+  },
+  storageSize: {
+    key: 'storageSize',
+    label: 'Storage Size',
+    defaultVisible: false,
+    essential: false,
+  },
   pvcCount: { key: 'pvcCount', label: 'PVCs', defaultVisible: true, essential: false },
-  cpuRequest: { key: 'cpuRequest', label: 'CPU Request', defaultVisible: false, essential: false },
-  memoryRequest: { key: 'memoryRequest', label: 'Memory Request', defaultVisible: false, essential: false },
+  cpuRequest: {
+    key: 'cpuRequest',
+    label: 'CPU Request (Spec)',
+    defaultVisible: false,
+    essential: false,
+  },
+  memoryRequest: {
+    key: 'memoryRequest',
+    label: 'Memory Request (Spec)',
+    defaultVisible: false,
+    essential: false,
+  },
   cpuLimit: { key: 'cpuLimit', label: 'CPU Limit', defaultVisible: false, essential: false },
-  memoryLimit: { key: 'memoryLimit', label: 'Memory Limit', defaultVisible: false, essential: false },
+  memoryLimit: {
+    key: 'memoryLimit',
+    label: 'Memory Limit',
+    defaultVisible: false,
+    essential: false,
+  },
   gpu: { key: 'gpu', label: 'GPU', defaultVisible: false, essential: false },
 };
 
@@ -52,7 +92,7 @@ function WorkloadUsageView() {
   const [visibleColumns, setVisibleColumns] = useState(() => {
     // Initialize with default visible columns
     const defaults = {};
-    Object.keys(COLUMNS).forEach(key => {
+    Object.keys(COLUMNS).forEach((key) => {
       defaults[key] = COLUMNS[key].defaultVisible;
     });
     return defaults;
@@ -87,7 +127,7 @@ function WorkloadUsageView() {
       setWorkloads(workloadsData);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch workloads');
-      console.error('Workloads error:', err);
+      logger.error('Workloads error:', err);
     } finally {
       setLoading(false);
     }
@@ -117,7 +157,7 @@ function WorkloadUsageView() {
     const sorted = [...workloadList];
     sorted.sort((a, b) => {
       let aValue, bValue;
-      
+
       switch (sortBy) {
         case 'name':
           aValue = a.name || '';
@@ -136,12 +176,22 @@ function WorkloadUsageView() {
           bValue = b.replicas || 0;
           break;
         case 'cpu':
-          // Sort by CPU usage if available, otherwise by CPU request
+        case 'cpuActual':
+          // Sort by actual CPU usage if available, then by CPU request, then by CPU used (requests sum)
+          aValue = a.cpuActual ?? a.cpuUsed ?? parseResource(a.cpuRequest);
+          bValue = b.cpuActual ?? b.cpuUsed ?? parseResource(b.cpuRequest);
+          break;
+        case 'memory':
+        case 'memoryActual':
+          // Sort by actual Memory usage if available, then by Memory request, then by Memory used (requests sum)
+          aValue = a.memoryActual ?? a.memoryUsed ?? parseResource(a.memoryRequest);
+          bValue = b.memoryActual ?? b.memoryUsed ?? parseResource(b.memoryRequest);
+          break;
+        case 'cpuUsed':
           aValue = a.cpuUsed ?? parseResource(a.cpuRequest);
           bValue = b.cpuUsed ?? parseResource(b.cpuRequest);
           break;
-        case 'memory':
-          // Sort by Memory usage if available, otherwise by Memory request
+        case 'memoryUsed':
           aValue = a.memoryUsed ?? parseResource(a.memoryRequest);
           bValue = b.memoryUsed ?? parseResource(b.memoryRequest);
           break;
@@ -156,27 +206,28 @@ function WorkloadUsageView() {
         default:
           return 0;
       }
-      
+
       if (typeof aValue === 'string') {
-        return sortOrder === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
+        return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
       }
-      
+
       return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
     });
     return sorted;
   };
 
   const filterWorkloads = (workloadList) => {
-    return workloadList.filter(workload => {
+    return workloadList.filter((workload) => {
       // Filter by type
       if (typeFilter !== 'all' && workload.type !== typeFilter) {
         return false;
       }
 
       // Filter by namespace
-      if (namespaceFilter && !workload.namespace?.toLowerCase().includes(namespaceFilter.toLowerCase())) {
+      if (
+        namespaceFilter &&
+        !workload.namespace?.toLowerCase().includes(namespaceFilter.toLowerCase())
+      ) {
         return false;
       }
 
@@ -220,31 +271,47 @@ function WorkloadUsageView() {
     }
   };
 
-  const uniqueTypes = [...new Set(workloads.map(w => w.type).filter(Boolean))].sort();
+  const uniqueTypes = [...new Set(workloads.map((w) => w.type).filter(Boolean))].sort();
 
   const { items, total, totalPages } = paginatedWorkloads();
 
   // Calculate summary statistics
-  const summary = items.reduce((acc, w) => {
-    acc.totalCPUUsed += w.cpuUsed ?? 0;
-    acc.totalMemoryUsed += w.memoryUsed ?? 0;
-    acc.totalRunningPods += w.runningPods ?? 0;
-    acc.totalReplicas += w.replicas ?? 0;
-    acc.totalStorageSize += w.storageSize ?? 0;
-    acc.totalPVCCount += w.pvcCount ?? 0;
-    return acc;
-  }, { totalCPUUsed: 0, totalMemoryUsed: 0, totalRunningPods: 0, totalReplicas: 0, totalStorageSize: 0, totalPVCCount: 0 });
+  const summary = items.reduce(
+    (acc, w) => {
+      acc.totalCPUUsed += w.cpuUsed ?? 0;
+      acc.totalMemoryUsed += w.memoryUsed ?? 0;
+      acc.totalCPUActual = (acc.totalCPUActual ?? 0) + (w.cpuActual ?? 0);
+      acc.totalMemoryActual = (acc.totalMemoryActual ?? 0) + (w.memoryActual ?? 0);
+      acc.totalStorageActual = (acc.totalStorageActual ?? 0) + (w.storageActual ?? 0);
+      acc.totalRunningPods += w.runningPods ?? 0;
+      acc.totalReplicas += w.replicas ?? 0;
+      acc.totalStorageSize += w.storageSize ?? 0;
+      acc.totalPVCCount += w.pvcCount ?? 0;
+      return acc;
+    },
+    {
+      totalCPUUsed: 0,
+      totalMemoryUsed: 0,
+      totalCPUActual: 0,
+      totalMemoryActual: 0,
+      totalStorageActual: 0,
+      totalRunningPods: 0,
+      totalReplicas: 0,
+      totalStorageSize: 0,
+      totalPVCCount: 0,
+    }
+  );
 
   const toggleColumn = (columnKey) => {
-    setVisibleColumns(prev => ({
+    setVisibleColumns((prev) => ({
       ...prev,
-      [columnKey]: !prev[columnKey]
+      [columnKey]: !prev[columnKey],
     }));
   };
 
   const showEssentialColumns = () => {
     const essential = {};
-    Object.keys(COLUMNS).forEach(key => {
+    Object.keys(COLUMNS).forEach((key) => {
       essential[key] = COLUMNS[key].essential;
     });
     setVisibleColumns(essential);
@@ -252,7 +319,7 @@ function WorkloadUsageView() {
 
   const showAllColumns = () => {
     const all = {};
-    Object.keys(COLUMNS).forEach(key => {
+    Object.keys(COLUMNS).forEach((key) => {
       all[key] = true;
     });
     setVisibleColumns(all);
@@ -265,7 +332,8 @@ function WorkloadUsageView() {
           <div>
             <CardTitle>Workload Overview</CardTitle>
             <CardDescription>
-              Deployments, StatefulSets, DaemonSets, and Jobs across all namespaces. Usage is calculated from resource requests of running pods.
+              Deployments, StatefulSets, DaemonSets, and Jobs across all namespaces. Usage is
+              calculated from resource requests of running pods.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
@@ -275,8 +343,10 @@ function WorkloadUsageView() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                {uniqueTypes.map(type => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
+                {uniqueTypes.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -316,10 +386,20 @@ function WorkloadUsageView() {
                   <div className="flex items-center justify-between">
                     <Label className="font-semibold">Visible Columns</Label>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={showEssentialColumns}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={showEssentialColumns}
+                      >
                         Essential
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={showAllColumns}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={showAllColumns}
+                      >
                         All
                       </Button>
                     </div>
@@ -335,14 +415,16 @@ function WorkloadUsageView() {
                         <Label
                           htmlFor={`col-${key}`}
                           className={cn(
-                            "text-sm cursor-pointer flex-1",
-                            col.essential && "font-semibold"
+                            'text-sm cursor-pointer flex-1',
+                            col.essential && 'font-semibold'
                           )}
                         >
                           {col.label}
                         </Label>
                         {col.essential && (
-                          <Badge variant="outline" className="text-xs">Essential</Badge>
+                          <Badge variant="outline" className="text-xs">
+                            Essential
+                          </Badge>
                         )}
                       </div>
                     ))}
@@ -351,7 +433,7 @@ function WorkloadUsageView() {
               </PopoverContent>
             </Popover>
             <Button onClick={fetchWorkloads} disabled={loading} size="sm" variant="outline">
-              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
               Refresh
             </Button>
             <div className="flex items-center gap-2">
@@ -359,7 +441,10 @@ function WorkloadUsageView() {
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
             </div>
             {autoRefresh && (
-              <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+              <Select
+                value={String(refreshInterval)}
+                onValueChange={(v) => setRefreshInterval(Number(v))}
+              >
                 <SelectTrigger className="w-[120px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -414,7 +499,8 @@ function WorkloadUsageView() {
             <Label>Results</Label>
             <div className="flex items-center gap-2 pt-2">
               <span className="text-sm text-muted-foreground">
-                Showing {items.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0} - {Math.min(currentPage * ITEMS_PER_PAGE, total)} of {total}
+                Showing {items.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0} -{' '}
+                {Math.min(currentPage * ITEMS_PER_PAGE, total)} of {total}
               </span>
             </div>
           </div>
@@ -430,11 +516,15 @@ function WorkloadUsageView() {
         ) : total === 0 ? (
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-2">No workloads match the current filters</p>
-            <Button variant="outline" size="sm" onClick={() => {
-              setTypeFilter('all');
-              setNamespaceFilter('');
-              setNameFilter('');
-            }}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setTypeFilter('all');
+                setNamespaceFilter('');
+                setNameFilter('');
+              }}
+            >
               <X className="h-4 w-4 mr-2" />
               Clear Filters
             </Button>
@@ -447,15 +537,54 @@ function WorkloadUsageView() {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
                   <div>
                     <span className="text-muted-foreground">Total CPU Used:</span>
-                    <span className="ml-2 font-semibold text-blue-600">{summary.totalCPUUsed.toFixed(2)} cores</span>
+                    <span className="ml-2 font-semibold text-blue-600">
+                      {summary.totalCPUActual > 0 ? (
+                        <>
+                          {summary.totalCPUActual.toFixed(2)} cores (actual)
+                          {summary.totalCPUUsed > 0 && (
+                            <span className="text-gray-500 text-sm ml-1">
+                              / {summary.totalCPUUsed.toFixed(2)} (request)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        `${summary.totalCPUUsed.toFixed(2)} cores`
+                      )}
+                    </span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Total Memory Used:</span>
-                    <span className="ml-2 font-semibold text-blue-600">{summary.totalMemoryUsed.toFixed(2)} GiB</span>
+                    <span className="ml-2 font-semibold text-blue-600">
+                      {summary.totalMemoryActual > 0 ? (
+                        <>
+                          {summary.totalMemoryActual.toFixed(2)} GiB (actual)
+                          {summary.totalMemoryUsed > 0 && (
+                            <span className="text-gray-500 text-sm ml-1">
+                              / {summary.totalMemoryUsed.toFixed(2)} (request)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        `${summary.totalMemoryUsed.toFixed(2)} GiB`
+                      )}
+                    </span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Total Storage:</span>
-                    <span className="ml-2 font-semibold text-green-600">{summary.totalStorageSize.toFixed(2)} GiB</span>
+                    <span className="ml-2 font-semibold text-green-600">
+                      {summary.totalStorageActual > 0 ? (
+                        <>
+                          {summary.totalStorageActual.toFixed(2)} GiB (actual)
+                          {summary.totalStorageSize > 0 && (
+                            <span className="text-gray-500 text-sm ml-1">
+                              / {summary.totalStorageSize.toFixed(2)} (size)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        `${summary.totalStorageSize.toFixed(2)} GiB`
+                      )}
+                    </span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Running Pods:</span>
@@ -478,30 +607,68 @@ function WorkloadUsageView() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-background z-10">
                   <tr className="border-b">
-                    {visibleColumns.name && <th className="text-left p-2 font-semibold sticky left-0 bg-background z-20 border-r">Name</th>}
-                    {visibleColumns.namespace && <th className="text-left p-2 font-semibold">Namespace</th>}
+                    {visibleColumns.name && (
+                      <th className="text-left p-2 font-semibold sticky left-0 bg-background z-20 border-r">
+                        Name
+                      </th>
+                    )}
+                    {visibleColumns.namespace && (
+                      <th className="text-left p-2 font-semibold">Namespace</th>
+                    )}
                     {visibleColumns.type && <th className="text-left p-2 font-semibold">Type</th>}
-                    {visibleColumns.replicas && <th className="text-right p-2 font-semibold">Replicas</th>}
-                    {visibleColumns.runningPods && <th className="text-right p-2 font-semibold">Running Pods</th>}
-                    {visibleColumns.cpuUsed && <th className="text-right p-2 font-semibold">CPU Used</th>}
-                    {visibleColumns.memoryUsed && <th className="text-right p-2 font-semibold">Memory Used</th>}
-                    {visibleColumns.storageSize && <th className="text-right p-2 font-semibold">Storage Size</th>}
-                    {visibleColumns.pvcCount && <th className="text-right p-2 font-semibold">PVCs</th>}
-                    {visibleColumns.cpuRequest && <th className="text-right p-2 font-semibold">CPU Request</th>}
-                    {visibleColumns.memoryRequest && <th className="text-right p-2 font-semibold">Memory Request</th>}
-                    {visibleColumns.cpuLimit && <th className="text-right p-2 font-semibold">CPU Limit</th>}
-                    {visibleColumns.memoryLimit && <th className="text-right p-2 font-semibold">Memory Limit</th>}
+                    {visibleColumns.replicas && (
+                      <th className="text-right p-2 font-semibold">Replicas</th>
+                    )}
+                    {visibleColumns.runningPods && (
+                      <th className="text-right p-2 font-semibold">Running Pods</th>
+                    )}
+                    {visibleColumns.cpuActual && (
+                      <th className="text-right p-2 font-semibold">CPU Actual</th>
+                    )}
+                    {visibleColumns.memoryActual && (
+                      <th className="text-right p-2 font-semibold">Memory Actual</th>
+                    )}
+                    {visibleColumns.cpuUsed && (
+                      <th className="text-right p-2 font-semibold">CPU Request</th>
+                    )}
+                    {visibleColumns.memoryUsed && (
+                      <th className="text-right p-2 font-semibold">Memory Request</th>
+                    )}
+                    {visibleColumns.storageSize && (
+                      <th className="text-right p-2 font-semibold">Storage Size</th>
+                    )}
+                    {visibleColumns.pvcCount && (
+                      <th className="text-right p-2 font-semibold">PVCs</th>
+                    )}
+                    {visibleColumns.cpuRequest && (
+                      <th className="text-right p-2 font-semibold">CPU Request</th>
+                    )}
+                    {visibleColumns.memoryRequest && (
+                      <th className="text-right p-2 font-semibold">Memory Request</th>
+                    )}
+                    {visibleColumns.cpuLimit && (
+                      <th className="text-right p-2 font-semibold">CPU Limit</th>
+                    )}
+                    {visibleColumns.memoryLimit && (
+                      <th className="text-right p-2 font-semibold">Memory Limit</th>
+                    )}
                     {visibleColumns.gpu && <th className="text-right p-2 font-semibold">GPU</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((workload, idx) => {
+                    const cpuActual = workload.cpuActual ?? 0;
+                    const memoryActual = workload.memoryActual ?? 0;
+                    const storageActual = workload.storageActual ?? 0;
                     const cpuUsed = workload.cpuUsed ?? 0;
                     const memoryUsed = workload.memoryUsed ?? 0;
                     const runningPods = workload.runningPods ?? 0;
-                    
+
                     return (
-                      <tr key={`${workload.namespace}-${workload.name}-${idx}`} className="border-b hover:bg-muted/50">
+                      <tr
+                        key={`${workload.namespace}-${workload.name}-${idx}`}
+                        className="border-b hover:bg-muted/50"
+                      >
                         {visibleColumns.name && (
                           <td className="p-2 sticky left-0 bg-background z-10 border-r">
                             <code className="text-xs font-semibold">{workload.name}</code>
@@ -516,15 +683,16 @@ function WorkloadUsageView() {
                         )}
                         {visibleColumns.type && (
                           <td className="p-2">
-                            <Badge variant="outline" className={cn("text-xs font-semibold", getTypeColor(workload.type))}>
+                            <Badge
+                              variant="outline"
+                              className={cn('text-xs font-semibold', getTypeColor(workload.type))}
+                            >
                               {workload.type}
                             </Badge>
                           </td>
                         )}
                         {visibleColumns.replicas && (
-                          <td className="p-2 text-right">
-                            {workload.replicas || 0}
-                          </td>
+                          <td className="p-2 text-right">{workload.replicas || 0}</td>
                         )}
                         {visibleColumns.runningPods && (
                           <td className="p-2 text-right">
@@ -532,6 +700,39 @@ function WorkloadUsageView() {
                               <Badge variant="secondary" className="text-xs">
                                 {runningPods}
                               </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.cpuActual && (
+                          <td className="p-2 text-right">
+                            {cpuActual > 0 ? (
+                              <span className="font-semibold text-green-600">
+                                {cpuActual.toFixed(2)} cores
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.memoryActual && (
+                          <td className="p-2 text-right">
+                            {memoryActual > 0 ? (
+                              <span className="font-semibold text-green-600">
+                                {memoryActual.toFixed(2)} GiB
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.storageActual && (
+                          <td className="p-2 text-right">
+                            {storageActual > 0 ? (
+                              <span className="font-semibold text-green-600">
+                                {storageActual.toFixed(2)} GiB
+                              </span>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
@@ -573,9 +774,7 @@ function WorkloadUsageView() {
                         {visibleColumns.pvcCount && (
                           <td className="p-2 text-right">
                             {workload.pvcCount > 0 ? (
-                              <span className="font-semibold">
-                                {workload.pvcCount}
-                              </span>
+                              <span className="font-semibold">{workload.pvcCount}</span>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
@@ -629,7 +828,7 @@ function WorkloadUsageView() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -638,7 +837,7 @@ function WorkloadUsageView() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
                   >
                     Next
@@ -655,4 +854,3 @@ function WorkloadUsageView() {
 }
 
 export default WorkloadUsageView;
-

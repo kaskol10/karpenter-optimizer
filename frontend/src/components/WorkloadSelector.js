@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { logger } from '../lib/logger';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
   const [namespaces, setNamespaces] = useState([]);
@@ -32,7 +34,7 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
       setNamespaces(response.data.namespaces || []);
       setK8sAvailable(true);
     } catch (err) {
-      console.error('Failed to load namespaces:', err);
+      logger.error('Failed to load namespaces:', err);
       setK8sAvailable(false);
       if (err.response?.status === 503) {
         setError('Kubernetes client not configured. Please set KUBECONFIG or run in-cluster.');
@@ -48,7 +50,7 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
       setWorkloads(response.data.workloads || []);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to load workloads');
-      console.error('Failed to load workloads:', err);
+      logger.error('Failed to load workloads:', err);
     } finally {
       setLoading(false);
     }
@@ -56,13 +58,13 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
 
   const handleWorkloadToggle = (workload) => {
     const isSelected = selectedWorkloads.some(
-      w => w.name === workload.name && w.namespace === workload.namespace
+      (w) => w.name === workload.name && w.namespace === workload.namespace
     );
 
     if (isSelected) {
       // Remove workload
       const updated = selectedWorkloads.filter(
-        w => !(w.name === workload.name && w.namespace === workload.namespace)
+        (w) => !(w.name === workload.name && w.namespace === workload.namespace)
       );
       onWorkloadsSelected(updated);
     } else {
@@ -84,7 +86,9 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
   if (!k8sAvailable) {
     return (
       <div className="workload-selector-disabled">
-        <p>⚠️ Kubernetes integration not available. Please configure KUBECONFIG or run in-cluster.</p>
+        <p>
+          ⚠️ Kubernetes integration not available. Please configure KUBECONFIG or run in-cluster.
+        </p>
         <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
           You can still add workloads manually below.
         </p>
@@ -95,7 +99,7 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
   return (
     <div className="workload-selector">
       <h3>📦 Select Workloads from Cluster</h3>
-      
+
       <div className="selector-controls">
         <div className="form-group">
           <label>Namespace:</label>
@@ -113,9 +117,7 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
           </select>
         </div>
 
-        {loading && (
-          <div className="loading-indicator">Loading workloads...</div>
-        )}
+        {loading && <div className="loading-indicator">Loading workloads...</div>}
 
         {error && (
           <div className="error-message" style={{ marginTop: '1rem' }}>
@@ -130,9 +132,9 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
           <div className="workload-checkboxes">
             {workloads.map((workload) => {
               const isSelected = selectedWorkloads.some(
-                w => w.name === workload.name && w.namespace === workload.namespace
+                (w) => w.name === workload.name && w.namespace === workload.namespace
               );
-              
+
               return (
                 <div
                   key={`${workload.namespace}-${workload.name}-${workload.type}`}
@@ -189,4 +191,3 @@ function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
 }
 
 export default WorkloadSelector;
-

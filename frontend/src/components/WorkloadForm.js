@@ -10,10 +10,7 @@ function WorkloadForm({ workload, index, onChange, onRemove }) {
       <div className="workload-form-header">
         <h3>Workload #{index + 1}</h3>
         {index > 0 && (
-          <button 
-            className="btn btn-danger"
-            onClick={() => onRemove(index)}
-          >
+          <button className="btn btn-danger" onClick={() => onRemove(index)}>
             Remove
           </button>
         )}
@@ -70,4 +67,3 @@ function WorkloadForm({ workload, index, onChange, onRemove }) {
 }
 
 export default WorkloadForm;
-

@@ -11,13 +11,15 @@ import { Separator } from './ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { ChevronDown, RefreshCw, Loader2, Package, Search, X, Regex } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { logger } from '../lib/logger';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 function NodeUsageView() {
   const [nodes, setNodes] = useState([]);
@@ -59,15 +61,9 @@ function NodeUsageView() {
       const response = await axios.get(`${API_URL}/api/v1/nodes`);
       const nodesData = response.data.nodes || [];
       setNodes(nodesData);
-      // Debug: Log pod names
-      nodesData.forEach(node => {
-        if (node.podNames && node.podNames.length > 0) {
-          console.log(`[NodeUsageView] Node ${node.name} has ${node.podNames.length} pods:`, node.podNames);
-        }
-      });
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch nodes');
-      console.error('Nodes error:', err);
+      logger.error('Nodes error:', err);
     } finally {
       setLoading(false);
     }
@@ -79,7 +75,7 @@ function NodeUsageView() {
       const nodePoolsData = response.data.nodepools || [];
       setNodePools(nodePoolsData);
     } catch (err) {
-      console.error('Failed to fetch NodePools:', err);
+      logger.error('Failed to fetch NodePools:', err);
       // Don't set error state, just log it - NodePools are optional
     }
   };
@@ -92,7 +88,6 @@ function NodeUsageView() {
     }
   };
 
-
   const getNodeAge = (creationTime) => {
     if (!creationTime) return 'N/A';
     const now = new Date();
@@ -101,7 +96,7 @@ function NodeUsageView() {
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
-    
+
     if (diffDays > 0) return `${diffDays}d`;
     if (diffHours > 0) return `${diffHours}h`;
     return `${diffMins}m`;
@@ -111,7 +106,7 @@ function NodeUsageView() {
     const sorted = [...nodeList];
     sorted.sort((a, b) => {
       let aValue, bValue;
-      
+
       switch (sortBy) {
         case 'cpu':
           aValue = a.cpuUsage?.percent || 0;
@@ -132,7 +127,7 @@ function NodeUsageView() {
         default:
           return 0;
       }
-      
+
       if (sortOrder === 'desc') {
         return bValue - aValue;
       } else {
@@ -149,7 +144,7 @@ function NodeUsageView() {
     let totalMemoryAllocatable = 0;
     let totalPods = 0;
 
-    nodeList.forEach(node => {
+    nodeList.forEach((node) => {
       if (node.cpuUsage) {
         totalCPUUsed += node.cpuUsage.used;
         totalCPUAllocatable += node.cpuUsage.allocatable;
@@ -162,7 +157,8 @@ function NodeUsageView() {
     });
 
     const cpuPercent = totalCPUAllocatable > 0 ? (totalCPUUsed / totalCPUAllocatable) * 100 : 0;
-    const memoryPercent = totalMemoryAllocatable > 0 ? (totalMemoryUsed / totalMemoryAllocatable) * 100 : 0;
+    const memoryPercent =
+      totalMemoryAllocatable > 0 ? (totalMemoryUsed / totalMemoryAllocatable) * 100 : 0;
 
     return {
       cpuUsed: totalCPUUsed,
@@ -172,7 +168,7 @@ function NodeUsageView() {
       memoryAllocatable: totalMemoryAllocatable,
       memoryPercent: Math.min(memoryPercent, 100),
       totalPods: totalPods,
-      nodeCount: nodeList.length
+      nodeCount: nodeList.length,
     };
   };
 
@@ -180,7 +176,7 @@ function NodeUsageView() {
     if (podsFilter === 'all') {
       return nodeList;
     }
-    return nodeList.filter(node => {
+    return nodeList.filter((node) => {
       const podCount = node.podCount || 0;
       switch (podsFilter) {
         case '0':
@@ -199,7 +195,7 @@ function NodeUsageView() {
 
   const matchesFilter = (text, filter) => {
     if (!filter) return true;
-    
+
     if (useRegex) {
       try {
         const regex = new RegExp(filter, 'i');
@@ -214,7 +210,7 @@ function NodeUsageView() {
   };
 
   const filterNodesByNameAndPod = (nodeList) => {
-    return nodeList.filter(node => {
+    return nodeList.filter((node) => {
       // Filter by node name
       if (nodeNameFilter && !matchesFilter(node.name || '', nodeNameFilter)) {
         return false;
@@ -223,7 +219,7 @@ function NodeUsageView() {
       // Filter by pod name (check if any pod matches)
       if (podNameFilter) {
         const podNames = node.podNames || [];
-        const matchesPod = podNames.some(podName => matchesFilter(podName, podNameFilter));
+        const matchesPod = podNames.some((podName) => matchesFilter(podName, podNameFilter));
         if (!matchesPod) {
           return false;
         }
@@ -239,7 +235,7 @@ function NodeUsageView() {
     const filteredNodes = filterNodesByNameAndPod(filteredByPods);
     if (groupBy === 'nodepool') {
       const grouped = {};
-      filteredNodes.forEach(node => {
+      filteredNodes.forEach((node) => {
         const key = node.nodePool || 'No NodePool';
         if (!grouped[key]) {
           grouped[key] = [];
@@ -273,8 +269,14 @@ function NodeUsageView() {
       <div className="space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-semibold">{label}</span>
-          <span className={cn("font-semibold", percent >= 90 ? "text-red-600" : percent >= 70 ? "text-yellow-600" : "text-green-600")}>
-            {percent.toFixed(1)}% ({formatResource(used, type)} / {formatResource(allocatable, type)})
+          <span
+            className={cn(
+              'font-semibold',
+              percent >= 90 ? 'text-red-600' : percent >= 70 ? 'text-yellow-600' : 'text-green-600'
+            )}
+          >
+            {percent.toFixed(1)}% ({formatResource(used, type)} /{' '}
+            {formatResource(allocatable, type)})
           </span>
         </div>
         <Progress value={Math.min(percent, 100)} className="h-2" />
@@ -300,7 +302,7 @@ function NodeUsageView() {
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             <Button
-              variant={showFilters ? "default" : "outline"}
+              variant={showFilters ? 'default' : 'outline'}
               size="sm"
               onClick={() => setShowFilters(!showFilters)}
             >
@@ -354,7 +356,7 @@ function NodeUsageView() {
               </SelectContent>
             </Select>
             <Button onClick={fetchNodes} disabled={loading} size="sm" variant="outline">
-              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
               Refresh
             </Button>
             <div className="flex items-center gap-2">
@@ -362,7 +364,10 @@ function NodeUsageView() {
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
             </div>
             {autoRefresh && (
-              <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+              <Select
+                value={String(refreshInterval)}
+                onValueChange={(v) => setRefreshInterval(Number(v))}
+              >
                 <SelectTrigger className="w-[120px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -394,23 +399,17 @@ function NodeUsageView() {
                 <CardTitle className="text-lg">Search & Filter</CardTitle>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <Switch
-                      checked={useRegex}
-                      onCheckedChange={setUseRegex}
-                      id="regex-mode"
-                    />
-                    <Label htmlFor="regex-mode" className="text-sm flex items-center gap-1 cursor-pointer">
+                    <Switch checked={useRegex} onCheckedChange={setUseRegex} id="regex-mode" />
+                    <Label
+                      htmlFor="regex-mode"
+                      className="text-sm flex items-center gap-1 cursor-pointer"
+                    >
                       <Regex className="h-3 w-3" />
                       Regex
                     </Label>
                   </div>
                   {hasActiveFilters() && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearFilters}
-                      className="h-8"
-                    >
+                    <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8">
                       <X className="h-4 w-4 mr-1" />
                       Clear
                     </Button>
@@ -426,7 +425,7 @@ function NodeUsageView() {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="node-name-filter"
-                      placeholder={useRegex ? "e.g., ip-.*-compute" : "e.g., ip-10-207-46-118"}
+                      placeholder={useRegex ? 'e.g., ip-.*-compute' : 'e.g., ip-10-207-46-118'}
                       value={nodeNameFilter}
                       onChange={(e) => setNodeNameFilter(e.target.value)}
                       className="pl-9"
@@ -434,7 +433,7 @@ function NodeUsageView() {
                   </div>
                   {nodeNameFilter && (
                     <p className="text-xs text-muted-foreground">
-                      {useRegex ? "Regex pattern" : "Simple text search"}
+                      {useRegex ? 'Regex pattern' : 'Simple text search'}
                     </p>
                   )}
                 </div>
@@ -444,7 +443,7 @@ function NodeUsageView() {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="pod-name-filter"
-                      placeholder={useRegex ? "e.g., .*-deployment-.*" : "e.g., my-app"}
+                      placeholder={useRegex ? 'e.g., .*-deployment-.*' : 'e.g., my-app'}
                       value={podNameFilter}
                       onChange={(e) => setPodNameFilter(e.target.value)}
                       className="pl-9"
@@ -452,7 +451,7 @@ function NodeUsageView() {
                   </div>
                   {podNameFilter && (
                     <p className="text-xs text-muted-foreground">
-                      {useRegex ? "Regex pattern" : "Simple text search"}
+                      {useRegex ? 'Regex pattern' : 'Simple text search'}
                     </p>
                   )}
                 </div>
@@ -516,139 +515,163 @@ function NodeUsageView() {
           <div className="space-y-6">
             {Object.entries(grouped).map(([groupName, groupNodes]) => {
               const summary = groupBy === 'nodepool' ? calculateNodePoolSummary(groupNodes) : null;
-              
+
               return (
                 <div key={groupName}>
                   <h3 className="text-lg font-semibold mb-4">
                     {groupName} ({groupNodes.length} node{groupNodes.length !== 1 ? 's' : ''})
                   </h3>
-                  
-                  {summary && summary.cpuAllocatable > 0 && (() => {
-                    // Find NodePool info to get taints and cost
-                    const nodePoolInfo = nodePools.find(np => np.name === groupName);
-                    const taints = nodePoolInfo?.taints || [];
-                    const estimatedCost = nodePoolInfo?.estimatedCost || 0;
-                    
-                    return (
-                      <Card className="mb-4 bg-gradient-to-br from-purple-500 to-purple-700 border-0">
-                        <CardHeader>
-                          <div className="flex justify-between items-center">
-                            <CardTitle className="text-white text-sm uppercase tracking-wide">
-                              📊 NodePool Overall Usage
-                            </CardTitle>
-                            <div className="flex items-center gap-2">
-                              {estimatedCost > 0 && (
-                                <Badge 
-                                  variant="secondary" 
-                                  className={cn(
-                                    "font-semibold",
-                                    nodePoolInfo?.pricingSource === "aws-pricing-api" 
-                                      ? "bg-green-500/80 text-white" 
-                                      : "bg-yellow-500/80 text-white"
-                                  )}
-                                  title={nodePoolInfo?.pricingSource === "aws-pricing-api" 
-                                    ? "Using AWS Pricing API" 
-                                    : `Using ${nodePoolInfo?.pricingSource || "estimated"} pricing`}
-                                >
-                                  ${estimatedCost.toFixed(2)}/hr
-                                  {nodePoolInfo?.pricingSource === "aws-pricing-api" && " ✓"}
+
+                  {summary &&
+                    summary.cpuAllocatable > 0 &&
+                    (() => {
+                      // Find NodePool info to get taints and cost
+                      const nodePoolInfo = nodePools.find((np) => np.name === groupName);
+                      const taints = nodePoolInfo?.taints || [];
+                      const estimatedCost = nodePoolInfo?.estimatedCost || 0;
+
+                      return (
+                        <Card className="mb-4 bg-gradient-to-br from-purple-500 to-purple-700 border-0">
+                          <CardHeader>
+                            <div className="flex justify-between items-center">
+                              <CardTitle className="text-white text-sm uppercase tracking-wide">
+                                📊 NodePool Overall Usage
+                              </CardTitle>
+                              <div className="flex items-center gap-2">
+                                {estimatedCost > 0 && (
+                                  <Badge
+                                    variant="secondary"
+                                    className={cn(
+                                      'font-semibold',
+                                      nodePoolInfo?.pricingSource === 'aws-pricing-api'
+                                        ? 'bg-green-500/80 text-white'
+                                        : 'bg-yellow-500/80 text-white'
+                                    )}
+                                    title={
+                                      nodePoolInfo?.pricingSource === 'aws-pricing-api'
+                                        ? 'Using AWS Pricing API'
+                                        : `Using ${nodePoolInfo?.pricingSource || 'estimated'} pricing`
+                                    }
+                                  >
+                                    ${estimatedCost.toFixed(2)}/hr
+                                    {nodePoolInfo?.pricingSource === 'aws-pricing-api' && ' ✓'}
+                                  </Badge>
+                                )}
+                                <Badge variant="secondary" className="bg-white/25 text-white">
+                                  {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} •{' '}
+                                  {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
                                 </Badge>
-                              )}
-                              <Badge variant="secondary" className="bg-white/25 text-white">
-                                {summary.totalPods} pod{summary.totalPods !== 1 ? 's' : ''} • {summary.nodeCount} node{summary.nodeCount !== 1 ? 's' : ''}
-                              </Badge>
+                              </div>
                             </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className={cn("grid gap-4 mb-4", estimatedCost > 0 ? "grid-cols-3" : "grid-cols-2")}>
-                            <Card className="bg-white/95">
-                              <CardContent className="pt-6">
-                                <BarGauge
-                                  label="Total CPU"
-                                  used={summary.cpuUsed}
-                                  capacity={summary.cpuAllocatable}
-                                  allocatable={summary.cpuAllocatable}
-                                  percent={summary.cpuPercent}
-                                  type="cpu"
-                                />
-                              </CardContent>
-                            </Card>
-                            <Card className="bg-white/95">
-                              <CardContent className="pt-6">
-                                <BarGauge
-                                  label="Total Memory"
-                                  used={summary.memoryUsed}
-                                  capacity={summary.memoryAllocatable}
-                                  allocatable={summary.memoryAllocatable}
-                                  percent={summary.memoryPercent}
-                                  type="memory"
-                                />
-                              </CardContent>
-                            </Card>
-                            {estimatedCost > 0 && (
+                          </CardHeader>
+                          <CardContent>
+                            <div
+                              className={cn(
+                                'grid gap-4 mb-4',
+                                estimatedCost > 0 ? 'grid-cols-3' : 'grid-cols-2'
+                              )}
+                            >
                               <Card className="bg-white/95">
                                 <CardContent className="pt-6">
-                                  <p className="text-sm text-muted-foreground mb-2">Estimated Cost</p>
-                                  <p className="text-2xl font-bold text-green-600">
-                                    ${estimatedCost.toFixed(2)}/hr
-                                  </p>
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    ${(estimatedCost * 24).toFixed(2)}/day
-                                  </p>
-                                  {nodePoolInfo?.pricingSource && (
-                                    <p className="text-xs mt-1">
-                                      <span className={cn(
-                                        "font-semibold",
-                                        nodePoolInfo.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
-                                      )}>
-                                        {nodePoolInfo.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
-                                         nodePoolInfo.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
-                                         nodePoolInfo.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
-                                         nodePoolInfo.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
-                                         nodePoolInfo.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
-                                         "⚠ Estimated"}
-                                      </span>
-                                    </p>
-                                  )}
+                                  <BarGauge
+                                    label="Total CPU"
+                                    used={summary.cpuUsed}
+                                    capacity={summary.cpuAllocatable}
+                                    allocatable={summary.cpuAllocatable}
+                                    percent={summary.cpuPercent}
+                                    type="cpu"
+                                  />
                                 </CardContent>
                               </Card>
-                            )}
-                          </div>
-                          
-                          {/* Taints Section */}
-                          {taints.length > 0 && (
-                            <div className="mt-4 pt-4 border-t border-white/20">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-white text-xs font-semibold">Taints:</span>
-                                <Badge variant="secondary" className="bg-white/25 text-white text-xs">
-                                  {taints.length} configured
-                                </Badge>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {taints.map((taint, idx) => {
-                                  const taintKey = taint?.key || taint?.Key || '';
-                                  const taintValue = taint?.value || taint?.Value || '';
-                                  const taintEffect = taint?.effect || taint?.Effect || '';
-                                  const taintString = `${taintKey}${taintValue ? `=${taintValue}` : ''}:${taintEffect}`;
-                                  return (
-                                    <Badge
-                                      key={idx}
-                                      variant="outline"
-                                      className="font-mono text-xs border-yellow-300 text-yellow-100 bg-yellow-500/20"
-                                    >
-                                      {taintString}
-                                    </Badge>
-                                  );
-                                })}
-                              </div>
+                              <Card className="bg-white/95">
+                                <CardContent className="pt-6">
+                                  <BarGauge
+                                    label="Total Memory"
+                                    used={summary.memoryUsed}
+                                    capacity={summary.memoryAllocatable}
+                                    allocatable={summary.memoryAllocatable}
+                                    percent={summary.memoryPercent}
+                                    type="memory"
+                                  />
+                                </CardContent>
+                              </Card>
+                              {estimatedCost > 0 && (
+                                <Card className="bg-white/95">
+                                  <CardContent className="pt-6">
+                                    <p className="text-sm text-muted-foreground mb-2">
+                                      Estimated Cost
+                                    </p>
+                                    <p className="text-2xl font-bold text-green-600">
+                                      ${estimatedCost.toFixed(2)}/hr
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      ${(estimatedCost * 24).toFixed(2)}/day
+                                    </p>
+                                    {nodePoolInfo?.pricingSource && (
+                                      <p className="text-xs mt-1">
+                                        <span
+                                          className={cn(
+                                            'font-semibold',
+                                            nodePoolInfo.pricingSource === 'aws-pricing-api'
+                                              ? 'text-green-700'
+                                              : 'text-yellow-700'
+                                          )}
+                                        >
+                                          {nodePoolInfo.pricingSource === 'aws-pricing-api'
+                                            ? '✓ AWS Pricing API'
+                                            : nodePoolInfo.pricingSource === 'hardcoded'
+                                              ? '⚠ Estimated (hardcoded)'
+                                              : nodePoolInfo.pricingSource === 'family-estimate'
+                                                ? '⚠ Estimated (family-based)'
+                                                : nodePoolInfo.pricingSource === 'ollama-cache'
+                                                  ? '⚠ Estimated (cached)'
+                                                  : nodePoolInfo.pricingSource === 'ollama'
+                                                    ? '⚠ Estimated (LLM)'
+                                                    : '⚠ Estimated'}
+                                        </span>
+                                      </p>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              )}
                             </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    );
-                  })()}
-                  
+
+                            {/* Taints Section */}
+                            {taints.length > 0 && (
+                              <div className="mt-4 pt-4 border-t border-white/20">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-white text-xs font-semibold">Taints:</span>
+                                  <Badge
+                                    variant="secondary"
+                                    className="bg-white/25 text-white text-xs"
+                                  >
+                                    {taints.length} configured
+                                  </Badge>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {taints.map((taint, idx) => {
+                                    const taintKey = taint?.key || taint?.Key || '';
+                                    const taintValue = taint?.value || taint?.Value || '';
+                                    const taintEffect = taint?.effect || taint?.Effect || '';
+                                    const taintString = `${taintKey}${taintValue ? `=${taintValue}` : ''}:${taintEffect}`;
+                                    return (
+                                      <Badge
+                                        key={idx}
+                                        variant="outline"
+                                        className="font-mono text-xs border-yellow-300 text-yellow-100 bg-yellow-500/20"
+                                      >
+                                        {taintString}
+                                      </Badge>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })()}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {groupNodes.map((node) => (
                       <Card key={node.name}>
@@ -658,13 +681,19 @@ function NodeUsageView() {
                             {node.podCount !== undefined && (
                               <Popover>
                                 <PopoverTrigger asChild>
-                                  <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80 transition-colors">
+                                  <Badge
+                                    variant="secondary"
+                                    className="cursor-pointer hover:bg-secondary/80 transition-colors"
+                                  >
                                     <Package className="h-3 w-3 mr-1" />
                                     {node.podCount} pod{node.podCount !== 1 ? 's' : ''}
                                     <ChevronDown className="ml-1 h-3 w-3" />
                                   </Badge>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-[400px] max-h-[500px] overflow-y-auto" align="end">
+                                <PopoverContent
+                                  className="w-[400px] max-h-[500px] overflow-y-auto"
+                                  align="end"
+                                >
                                   <div className="space-y-3">
                                     <div className="flex items-center gap-2">
                                       <Package className="h-4 w-4 text-primary" />
@@ -685,8 +714,13 @@ function NodeUsageView() {
                                             >
                                               <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2">
-                                                  <code className="text-xs font-semibold truncate">{name}</code>
-                                                  <Badge variant="outline" className="text-xs shrink-0">
+                                                  <code className="text-xs font-semibold truncate">
+                                                    {name}
+                                                  </code>
+                                                  <Badge
+                                                    variant="outline"
+                                                    className="text-xs shrink-0"
+                                                  >
                                                     {namespace}
                                                   </Badge>
                                                 </div>
@@ -706,9 +740,7 @@ function NodeUsageView() {
                             )}
                           </div>
                           <div className="flex flex-wrap gap-2 mt-2">
-                            {node.nodePool && (
-                              <Badge variant="outline">📦 {node.nodePool}</Badge>
-                            )}
+                            {node.nodePool && <Badge variant="outline">📦 {node.nodePool}</Badge>}
                             {node.instanceType && (
                               <Badge variant="secondary" className="font-mono text-xs">
                                 {node.instanceType}
@@ -720,12 +752,21 @@ function NodeUsageView() {
                               </Badge>
                             )}
                             {node.capacityType && (
-                              <Badge variant={node.capacityType === 'spot' ? 'default' : 'secondary'}>
+                              <Badge
+                                variant={node.capacityType === 'spot' ? 'default' : 'secondary'}
+                              >
                                 {node.capacityType}
                               </Badge>
                             )}
                             {node.architecture && (
-                              <Badge variant="outline" className={node.architecture === 'arm64' ? 'border-green-500 text-green-700' : 'border-indigo-500 text-indigo-700'}>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  node.architecture === 'arm64'
+                                    ? 'border-green-500 text-green-700'
+                                    : 'border-indigo-500 text-indigo-700'
+                                }
+                              >
                                 {node.architecture.toUpperCase()}
                               </Badge>
                             )}
@@ -757,7 +798,7 @@ function NodeUsageView() {
                             />
                           )}
 
-                          {(!node.cpuUsage && !node.memoryUsage) && (
+                          {!node.cpuUsage && !node.memoryUsage && (
                             <p className="text-xs text-muted-foreground italic">
                               No usage data available
                             </p>

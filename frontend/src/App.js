@@ -9,25 +9,28 @@ import './App.css';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
+import TopologyView from './components/TopologyView';
 import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
 import KarpenterLogAnalyzer from './components/KarpenterLogAnalyzer';
 import { cn } from './lib/utils';
+import { logger } from './lib/logger';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 if (typeof window !== 'undefined') {
-  console.log('=== Frontend API Configuration Debug ===');
-  console.log('API_URL configured as:', API_URL || '(empty - using relative URLs)');
-  console.log('window.ENV:', window.ENV);
-  console.log('window.ENV.REACT_APP_API_URL:', window.ENV?.REACT_APP_API_URL);
-  console.log('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
-  console.log('Full API URL for requests:', API_URL || '(relative URLs - same origin)');
-  console.log('========================================');
+  logger.debug('=== Frontend API Configuration Debug ===');
+  logger.debug('API_URL configured as:', API_URL || '(empty - using relative URLs)');
+  logger.debug('window.ENV:', window.ENV);
+  logger.debug('window.ENV.REACT_APP_API_URL:', window.ENV?.REACT_APP_API_URL);
+  logger.debug('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+  logger.debug('Full API URL for requests:', API_URL || '(relative URLs - same origin)');
+  logger.debug('========================================');
 }
 
 function App() {
@@ -50,7 +53,7 @@ function App() {
       const response = await axios.get(`${API_URL}/api/v1/config`);
       setConfig(response.data);
     } catch (err) {
-      console.error('Failed to fetch config:', err);
+      logger.error('Failed to fetch config:', err);
     } finally {
       setConfigLoading(false);
     }
@@ -60,7 +63,7 @@ function App() {
     try {
       await axios.get(`${API_URL}/api/v1/health`);
     } catch (err) {
-      console.error('Health check failed:', err);
+      logger.error('Health check failed:', err);
     }
   };
 
@@ -75,7 +78,7 @@ function App() {
               <p className="text-sm text-muted-foreground m-0">Cluster-level cost optimization</p>
             </div>
             <div className="flex gap-2">
-              <Button 
+              <Button
                 onClick={() => setShowSettings(!showSettings)}
                 variant={showSettings ? 'default' : 'outline'}
                 size="sm"
@@ -96,10 +99,10 @@ function App() {
             <button
               onClick={() => setActiveTab('overview')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'overview'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Overview
@@ -107,21 +110,32 @@ function App() {
             <button
               onClick={() => setActiveTab('nodes')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'nodes'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Nodes
             </button>
             <button
+              onClick={() => setActiveTab('topology')}
+              className={cn(
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+                activeTab === 'topology'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
+              )}
+            >
+              Topology
+            </button>
+            <button
               onClick={() => setActiveTab('workloads')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'workloads'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Workloads
@@ -129,10 +143,10 @@ function App() {
             <button
               onClick={() => setActiveTab('disruptions')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'disruptions'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Disruptions
@@ -140,10 +154,10 @@ function App() {
             <button
               onClick={() => setActiveTab('recommendations')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'recommendations'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Recommendations
@@ -151,10 +165,10 @@ function App() {
             <button
               onClick={() => setActiveTab('logs')}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                 activeTab === 'logs'
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
               )}
             >
               Log Analyzer
@@ -184,8 +198,13 @@ function App() {
                         <CardTitle className="text-lg">Kubernetes</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <Alert variant={config.kubernetes?.connected ? 'default' : 'destructive'} className="mb-4">
-                          <AlertTitle>{config.kubernetes?.connected ? 'Connected' : 'Not Connected'}</AlertTitle>
+                        <Alert
+                          variant={config.kubernetes?.connected ? 'default' : 'destructive'}
+                          className="mb-4"
+                        >
+                          <AlertTitle>
+                            {config.kubernetes?.connected ? 'Connected' : 'Not Connected'}
+                          </AlertTitle>
                         </Alert>
                         <div className="space-y-2">
                           {config.kubernetes?.kubeconfigPath && (
@@ -203,7 +222,10 @@ function App() {
                         </div>
                         {!config.kubernetes?.connected && (
                           <Alert variant="destructive" className="mt-4">
-                            <AlertTitle>Set KUBECONFIG environment variable or ensure kubeconfig is accessible.</AlertTitle>
+                            <AlertTitle>
+                              Set KUBECONFIG environment variable or ensure kubeconfig is
+                              accessible.
+                            </AlertTitle>
                           </Alert>
                         )}
                       </CardContent>
@@ -218,10 +240,11 @@ function App() {
                         {(() => {
                           const llmConfig = config.llm?.configured ? config.llm : config.ollama;
                           const isConfigured = llmConfig?.configured || false;
-                          const provider = config.llm?.provider || (config.ollama?.configured ? 'ollama' : null);
+                          const provider =
+                            config.llm?.provider || (config.ollama?.configured ? 'ollama' : null);
                           const url = llmConfig?.url || 'Not set';
                           const model = llmConfig?.model || 'Not set';
-                          
+
                           return (
                             <>
                               <div className="flex gap-2 mb-4">
@@ -250,7 +273,11 @@ function App() {
                               </div>
                               {!isConfigured && (
                                 <Alert className="mt-4">
-                                  <AlertTitle>Set LLM_URL and LLM_MODEL (or OLLAMA_URL and OLLAMA_MODEL for legacy) environment variables to enable AI-enhanced explanations.</AlertTitle>
+                                  <AlertTitle>
+                                    Set LLM_URL and LLM_MODEL (or OLLAMA_URL and OLLAMA_MODEL for
+                                    legacy) environment variables to enable AI-enhanced
+                                    explanations.
+                                  </AlertTitle>
                                 </Alert>
                               )}
                             </>
@@ -269,7 +296,8 @@ function App() {
                           <AlertTitle>Enabled</AlertTitle>
                         </Alert>
                         <p className="text-xs text-muted-foreground">
-                          Instance pricing is fetched dynamically from AWS Pricing API for accurate cost calculations.
+                          Instance pricing is fetched dynamically from AWS Pricing API for accurate
+                          cost calculations.
                         </p>
                       </CardContent>
                     </Card>
@@ -294,7 +322,10 @@ function App() {
                     </Card>
 
                     <Alert>
-                      <AlertTitle>Configuration is read from environment variables. Restart the backend server after changing environment variables.</AlertTitle>
+                      <AlertTitle>
+                        Configuration is read from environment variables. Restart the backend server
+                        after changing environment variables.
+                      </AlertTitle>
                     </Alert>
                   </div>
                 ) : (
@@ -309,7 +340,7 @@ function App() {
           {/* Overview Tab */}
           {activeTab === 'overview' && (
             <>
-              <GlobalClusterSummary 
+              <GlobalClusterSummary
                 onRecommendationsGenerated={null}
                 onClusterCostUpdate={setClusterCost}
               />
@@ -323,17 +354,19 @@ function App() {
                       <div>
                         <p className="text-sm text-muted-foreground">Current Nodes</p>
                         <p className="text-2xl font-bold">
-                          {clusterCost.clusterNodes?.current ?? recommendations.reduce((sum, rec) => {
-                            const isNewFormat = rec.nodePoolName !== undefined;
-                            return sum + (isNewFormat ? rec.currentNodes : (rec.currentState?.totalNodes || 0));
-                          }, 0)}
+                          {clusterCost.clusterNodes?.current ??
+                            recommendations.reduce((sum, rec) => {
+                              const isNewFormat = rec.nodePoolName !== undefined;
+                              return (
+                                sum +
+                                (isNewFormat ? rec.currentNodes : rec.currentState?.totalNodes || 0)
+                              );
+                            }, 0)}
                         </p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Current Cost</p>
-                        <p className="text-2xl font-bold">
-                          ${clusterCost.current.toFixed(2)}/hr
-                        </p>
+                        <p className="text-2xl font-bold">${clusterCost.current.toFixed(2)}/hr</p>
                         <p className="text-xs text-muted-foreground">
                           ${(clusterCost.current * 24).toFixed(2)}/day
                         </p>
@@ -341,14 +374,15 @@ function App() {
                       <div>
                         <p className="text-sm text-muted-foreground">Recommended Nodes</p>
                         <p className="text-2xl font-bold text-green-600">
-                          {clusterCost.clusterNodes?.recommended ?? recommendations.reduce((sum, rec) => {
-                            const isNewFormat = rec.nodePoolName !== undefined;
-                            if (isNewFormat) {
-                              return sum + (rec.recommendedNodes || 0);
-                            } else {
-                              return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
-                            }
-                          }, 0)}
+                          {clusterCost.clusterNodes?.recommended ??
+                            recommendations.reduce((sum, rec) => {
+                              const isNewFormat = rec.nodePoolName !== undefined;
+                              if (isNewFormat) {
+                                return sum + (rec.recommendedNodes || 0);
+                              } else {
+                                return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
+                              }
+                            }, 0)}
                         </p>
                       </div>
                       <div>
@@ -362,12 +396,24 @@ function App() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Potential Savings</p>
-                        <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                          {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
+                        <p
+                          className={cn(
+                            'text-2xl font-bold',
+                            clusterCost.savings > 0 ? 'text-green-600' : 'text-yellow-600'
+                          )}
+                        >
+                          {clusterCost.savings > 0 ? '-' : '+'}$
+                          {Math.abs(clusterCost.savings).toFixed(2)}/hr
                         </p>
                         {clusterCost.current > 0 && (
-                          <p className={cn("text-xs mt-1", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                            {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+                          <p
+                            className={cn(
+                              'text-xs mt-1',
+                              clusterCost.savings > 0 ? 'text-green-600' : 'text-yellow-600'
+                            )}
+                          >
+                            {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}%{' '}
+                            {clusterCost.savings > 0 ? 'reduction' : 'increase'}
                             {' • '}${(Math.abs(clusterCost.savings) * 24).toFixed(2)}/day
                           </p>
                         )}
@@ -376,7 +422,8 @@ function App() {
                         <div>
                           <p className="text-sm text-muted-foreground">NodePools with Changes</p>
                           <p className="text-2xl font-bold">
-                            {clusterCost.recommendedCount ?? recommendations.length} / {clusterCost.totalNodePools}
+                            {clusterCost.recommendedCount ?? recommendations.length} /{' '}
+                            {clusterCost.totalNodePools}
                           </p>
                         </div>
                       )}
@@ -397,6 +444,9 @@ function App() {
           {/* Nodes Tab */}
           {activeTab === 'nodes' && <NodeUsageView />}
 
+          {/* Topology Tab */}
+          {activeTab === 'topology' && <TopologyView />}
+
           {/* Workloads Tab */}
           {activeTab === 'workloads' && <WorkloadUsageView />}
 
@@ -408,7 +458,7 @@ function App() {
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (
-            <AgentRecommendations 
+            <AgentRecommendations
               onRecommendationsGenerated={setRecommendations}
               onClusterCostUpdate={setClusterCost}
             />
@@ -425,17 +475,19 @@ function App() {
                   <div>
                     <p className="text-sm text-muted-foreground">Current Nodes</p>
                     <p className="text-2xl font-bold">
-                      {clusterCost.clusterNodes?.current ?? recommendations.reduce((sum, rec) => {
-                        const isNewFormat = rec.nodePoolName !== undefined;
-                        return sum + (isNewFormat ? rec.currentNodes : (rec.currentState?.totalNodes || 0));
-                      }, 0)}
+                      {clusterCost.clusterNodes?.current ??
+                        recommendations.reduce((sum, rec) => {
+                          const isNewFormat = rec.nodePoolName !== undefined;
+                          return (
+                            sum +
+                            (isNewFormat ? rec.currentNodes : rec.currentState?.totalNodes || 0)
+                          );
+                        }, 0)}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Current Cost</p>
-                    <p className="text-2xl font-bold">
-                      ${clusterCost.current.toFixed(2)}/hr
-                    </p>
+                    <p className="text-2xl font-bold">${clusterCost.current.toFixed(2)}/hr</p>
                     <p className="text-xs text-muted-foreground">
                       ${(clusterCost.current * 24).toFixed(2)}/day
                     </p>
@@ -443,14 +495,15 @@ function App() {
                   <div>
                     <p className="text-sm text-muted-foreground">Recommended Nodes</p>
                     <p className="text-2xl font-bold text-green-600">
-                      {clusterCost.clusterNodes?.recommended ?? recommendations.reduce((sum, rec) => {
-                        const isNewFormat = rec.nodePoolName !== undefined;
-                        if (isNewFormat) {
-                          return sum + (rec.recommendedNodes || 0);
-                        } else {
-                          return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
-                        }
-                      }, 0)}
+                      {clusterCost.clusterNodes?.recommended ??
+                        recommendations.reduce((sum, rec) => {
+                          const isNewFormat = rec.nodePoolName !== undefined;
+                          if (isNewFormat) {
+                            return sum + (rec.recommendedNodes || 0);
+                          } else {
+                            return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
+                          }
+                        }, 0)}
                     </p>
                   </div>
                   <div>
@@ -464,12 +517,24 @@ function App() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Potential Savings</p>
-                    <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                      {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
+                    <p
+                      className={cn(
+                        'text-2xl font-bold',
+                        clusterCost.savings > 0 ? 'text-green-600' : 'text-yellow-600'
+                      )}
+                    >
+                      {clusterCost.savings > 0 ? '-' : '+'}$
+                      {Math.abs(clusterCost.savings).toFixed(2)}/hr
                     </p>
                     {clusterCost.current > 0 && (
-                      <p className={cn("text-xs mt-1", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+                      <p
+                        className={cn(
+                          'text-xs mt-1',
+                          clusterCost.savings > 0 ? 'text-green-600' : 'text-yellow-600'
+                        )}
+                      >
+                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}%{' '}
+                        {clusterCost.savings > 0 ? 'reduction' : 'increase'}
                         {' • '}${(Math.abs(clusterCost.savings) * 24).toFixed(2)}/day
                       </p>
                     )}
@@ -478,7 +543,8 @@ function App() {
                     <div>
                       <p className="text-sm text-muted-foreground">NodePools with Changes</p>
                       <p className="text-2xl font-bold">
-                        {clusterCost.recommendedCount ?? recommendations.length} / {clusterCost.totalNodePools}
+                        {clusterCost.recommendedCount ?? recommendations.length} /{' '}
+                        {clusterCost.totalNodePools}
                       </p>
                     </div>
                   )}
@@ -493,7 +559,6 @@ function App() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-
         </div>
       </main>
     </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getPrice, getBulkPrices, getCacheStats } from '../lib/pricingCache';
+import { logger } from '../lib/logger';
 
 /**
  * React hook for managing AWS EC2 instance pricing
@@ -17,25 +18,28 @@ export function usePricing(instanceTypes = [], capacityType = 'on-demand', autoF
   }, []);
 
   // Fetch prices for instance types
-  const fetchPrices = useCallback(async (forceRefresh = false) => {
-    if (!instanceTypes || instanceTypes.length === 0) {
-      return;
-    }
+  const fetchPrices = useCallback(
+    async (forceRefresh = false) => {
+      if (!instanceTypes || instanceTypes.length === 0) {
+        return;
+      }
 
-    setLoading(true);
-    setError(null);
+      setLoading(true);
+      setError(null);
 
-    try {
-      const results = await getBulkPrices(instanceTypes, capacityType, forceRefresh);
-      setPrices(results);
-      setCacheStats(getCacheStats());
-    } catch (err) {
-      setError(err.message || 'Failed to fetch prices');
-      console.error('Error fetching prices:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [instanceTypes, capacityType]);
+      try {
+        const results = await getBulkPrices(instanceTypes, capacityType, forceRefresh);
+        setPrices(results);
+        setCacheStats(getCacheStats());
+      } catch (err) {
+        setError(err.message || 'Failed to fetch prices');
+        logger.error('Error fetching prices:', err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [instanceTypes, capacityType]
+  );
 
   // Auto-fetch on mount and when dependencies change
   useEffect(() => {
@@ -45,23 +49,26 @@ export function usePricing(instanceTypes = [], capacityType = 'on-demand', autoF
   }, [autoFetch, instanceTypes, capacityType, fetchPrices]);
 
   // Get price for a single instance type
-  const getInstancePrice = useCallback(async (instanceType, forceRefresh = false) => {
-    try {
-      const result = await getPrice(instanceType, capacityType, forceRefresh);
-      if (result) {
-        setPrices(prev => ({
-          ...prev,
-          [instanceType]: result,
-        }));
-        setCacheStats(getCacheStats());
-        return result;
+  const getInstancePrice = useCallback(
+    async (instanceType, forceRefresh = false) => {
+      try {
+        const result = await getPrice(instanceType, capacityType, forceRefresh);
+        if (result) {
+          setPrices((prev) => ({
+            ...prev,
+            [instanceType]: result,
+          }));
+          setCacheStats(getCacheStats());
+          return result;
+        }
+        return null;
+      } catch (err) {
+        logger.error(`Error fetching price for ${instanceType}:`, err);
+        return null;
       }
-      return null;
-    } catch (err) {
-      console.error(`Error fetching price for ${instanceType}:`, err);
-      return null;
-    }
-  }, [capacityType]);
+    },
+    [capacityType]
+  );
 
   // Refresh all prices
   const refresh = useCallback(() => {
@@ -87,24 +94,27 @@ export function useInstancePrice(instanceType, capacityType = 'on-demand', autoF
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchPrice = useCallback(async (forceRefresh = false) => {
-    if (!instanceType) {
-      return;
-    }
+  const fetchPrice = useCallback(
+    async (forceRefresh = false) => {
+      if (!instanceType) {
+        return;
+      }
 
-    setLoading(true);
-    setError(null);
+      setLoading(true);
+      setError(null);
 
-    try {
-      const result = await getPrice(instanceType, capacityType, forceRefresh);
-      setPrice(result);
-    } catch (err) {
-      setError(err.message || 'Failed to fetch price');
-      console.error(`Error fetching price for ${instanceType}:`, err);
-    } finally {
-      setLoading(false);
-    }
-  }, [instanceType, capacityType]);
+      try {
+        const result = await getPrice(instanceType, capacityType, forceRefresh);
+        setPrice(result);
+      } catch (err) {
+        setError(err.message || 'Failed to fetch price');
+        logger.error(`Error fetching price for ${instanceType}:`, err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [instanceType, capacityType]
+  );
 
   useEffect(() => {
     if (autoFetch && instanceType) {
@@ -126,4 +136,3 @@ export function useInstancePrice(instanceType, capacityType = 'on-demand', autoF
     refresh,
   };
 }
-

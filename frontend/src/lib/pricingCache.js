@@ -4,9 +4,10 @@
  * Fetches prices from backend API and caches them locally
  */
 
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 const CACHE_KEY_PREFIX = 'aws_pricing_';
 const CACHE_VERSION = '1.0';
@@ -33,7 +34,7 @@ export function getCachedPrice(instanceType, capacityType = 'on-demand') {
   try {
     const cacheKey = getCacheKey(instanceType, capacityType);
     const cached = localStorage.getItem(cacheKey);
-    
+
     if (!cached) {
       return null;
     }
@@ -54,7 +55,7 @@ export function getCachedPrice(instanceType, capacityType = 'on-demand') {
       expiresAt: data.expiresAt,
     };
   } catch (error) {
-    console.error('Error reading pricing cache:', error);
+    // Best-effort cache; ignore read issues.
     return null;
   }
 }
@@ -66,7 +67,7 @@ export function setCachedPrice(instanceType, capacityType, price, source) {
   try {
     const cacheKey = getCacheKey(instanceType, capacityType);
     const now = Date.now();
-    
+
     const data = {
       price,
       source,
@@ -76,14 +77,12 @@ export function setCachedPrice(instanceType, capacityType, price, source) {
     };
 
     localStorage.setItem(cacheKey, JSON.stringify(data));
-    
+
     // Update metadata
     updateCacheMetadata(instanceType, capacityType);
   } catch (error) {
-    console.error('Error writing pricing cache:', error);
     // Handle quota exceeded error
     if (error.name === 'QuotaExceededError') {
-      console.warn('localStorage quota exceeded, clearing old cache entries');
       clearExpiredCache();
     }
   }
@@ -96,7 +95,7 @@ function updateCacheMetadata(instanceType, capacityType) {
   try {
     const metadataKey = getMetadataKey();
     const metadata = JSON.parse(localStorage.getItem(metadataKey) || '{}');
-    
+
     if (!metadata.entries) {
       metadata.entries = [];
     }
@@ -109,7 +108,7 @@ function updateCacheMetadata(instanceType, capacityType) {
     metadata.lastUpdated = Date.now();
     localStorage.setItem(metadataKey, JSON.stringify(metadata));
   } catch (error) {
-    console.error('Error updating cache metadata:', error);
+    // Best-effort.
   }
 }
 
@@ -122,33 +121,28 @@ export function clearExpiredCache() {
     const metadata = JSON.parse(localStorage.getItem(metadataKey) || '{}');
     const entries = metadata.entries || [];
     const now = Date.now();
-    let cleared = 0;
 
-    entries.forEach(entryKey => {
+    entries.forEach((entryKey) => {
       const [instanceType, capacityType] = entryKey.split('_');
       const cacheKey = getCacheKey(instanceType, capacityType);
       const cached = localStorage.getItem(cacheKey);
-      
+
       if (cached) {
         try {
           const data = JSON.parse(cached);
           if (now > data.expiresAt) {
             localStorage.removeItem(cacheKey);
-            cleared++;
           }
         } catch (error) {
           // Invalid cache entry, remove it
           localStorage.removeItem(cacheKey);
-          cleared++;
         }
       }
     });
 
-    if (cleared > 0) {
-      console.log(`Cleared ${cleared} expired cache entries`);
-    }
+    // Intentionally no logging.
   } catch (error) {
-    console.error('Error clearing expired cache:', error);
+    // Best-effort.
   }
 }
 
@@ -161,16 +155,15 @@ export function clearAllCache() {
     const metadata = JSON.parse(localStorage.getItem(metadataKey) || '{}');
     const entries = metadata.entries || [];
 
-    entries.forEach(entryKey => {
+    entries.forEach((entryKey) => {
       const [instanceType, capacityType] = entryKey.split('_');
       const cacheKey = getCacheKey(instanceType, capacityType);
       localStorage.removeItem(cacheKey);
     });
 
     localStorage.removeItem(metadataKey);
-    console.log('Cleared all pricing cache');
   } catch (error) {
-    console.error('Error clearing all cache:', error);
+    // Best-effort.
   }
 }
 
@@ -183,16 +176,16 @@ export function getCacheStats() {
     const metadata = JSON.parse(localStorage.getItem(metadataKey) || '{}');
     const entries = metadata.entries || [];
     const now = Date.now();
-    
+
     let total = 0;
     let expired = 0;
     let valid = 0;
 
-    entries.forEach(entryKey => {
+    entries.forEach((entryKey) => {
       const [instanceType, capacityType] = entryKey.split('_');
       const cacheKey = getCacheKey(instanceType, capacityType);
       const cached = localStorage.getItem(cacheKey);
-      
+
       if (cached) {
         total++;
         try {
@@ -215,7 +208,6 @@ export function getCacheStats() {
       lastUpdated: metadata.lastUpdated || null,
     };
   } catch (error) {
-    console.error('Error getting cache stats:', error);
     return { total: 0, valid: 0, expired: 0, lastUpdated: null };
   }
 }
@@ -227,13 +219,13 @@ export async function fetchAndCachePrice(instanceType, capacityType = 'on-demand
   try {
     const url = `${API_URL}/api/v1/pricing/${instanceType}?capacityType=${capacityType}`;
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       throw new Error(`API returned ${response.status}: ${response.statusText}`);
     }
 
     const data = await response.json();
-    
+
     if (data.pricePerHour !== undefined) {
       setCachedPrice(instanceType, capacityType, data.pricePerHour, data.source || 'unknown');
       return {
@@ -244,7 +236,6 @@ export async function fetchAndCachePrice(instanceType, capacityType = 'on-demand
 
     throw new Error('Invalid API response');
   } catch (error) {
-    console.error(`Error fetching price for ${instanceType}:`, error);
     throw error;
   }
 }
@@ -257,7 +248,7 @@ export async function fetchAndCacheBulkPrices(instanceTypes, capacityType = 'on-
     const instanceTypesParam = instanceTypes.join(',');
     const url = `${API_URL}/api/v1/pricing?instanceTypes=${encodeURIComponent(instanceTypesParam)}&capacityType=${capacityType}`;
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       throw new Error(`API returned ${response.status}: ${response.statusText}`);
     }
@@ -268,7 +259,12 @@ export async function fetchAndCacheBulkPrices(instanceTypes, capacityType = 'on-
     if (data.prices) {
       Object.entries(data.prices).forEach(([instanceType, priceInfo]) => {
         if (priceInfo.pricePerHour !== undefined) {
-          setCachedPrice(instanceType, capacityType, priceInfo.pricePerHour, priceInfo.source || 'unknown');
+          setCachedPrice(
+            instanceType,
+            capacityType,
+            priceInfo.pricePerHour,
+            priceInfo.source || 'unknown'
+          );
           results[instanceType] = {
             price: priceInfo.pricePerHour,
             source: priceInfo.source || 'unknown',
@@ -279,7 +275,6 @@ export async function fetchAndCacheBulkPrices(instanceTypes, capacityType = 'on-
 
     return results;
   } catch (error) {
-    console.error('Error fetching bulk prices:', error);
     throw error;
   }
 }
@@ -316,13 +311,17 @@ export async function getPrice(instanceType, capacityType = 'on-demand', forceRe
 /**
  * Get prices for multiple instance types (from cache or API)
  */
-export async function getBulkPrices(instanceTypes, capacityType = 'on-demand', forceRefresh = false) {
+export async function getBulkPrices(
+  instanceTypes,
+  capacityType = 'on-demand',
+  forceRefresh = false
+) {
   // Check cache first (unless forcing refresh)
   const results = {};
   const missingTypes = [];
 
   if (!forceRefresh) {
-    instanceTypes.forEach(instanceType => {
+    instanceTypes.forEach((instanceType) => {
       const cached = getCachedPrice(instanceType, capacityType);
       if (cached) {
         results[instanceType] = {
@@ -349,7 +348,6 @@ export async function getBulkPrices(instanceTypes, capacityType = 'on-demand', f
         };
       });
     } catch (error) {
-      console.error('Error fetching bulk prices:', error);
       // Continue with cached results only
     }
   }
@@ -361,4 +359,3 @@ export async function getBulkPrices(instanceTypes, capacityType = 'on-demand', f
 if (typeof window !== 'undefined') {
   clearExpiredCache();
 }
-

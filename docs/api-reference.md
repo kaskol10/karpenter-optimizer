@@ -187,6 +187,63 @@ Get all nodes with usage data.
 ]
 ```
 
+### Topology (Pods on Nodes)
+
+```http
+GET /api/v1/topology
+```
+
+Get a bird’s-eye topology view of **pods scheduled on each node**, including per-pod resource requests for visualization.
+
+**Query Parameters**:
+- `maxPodsPerNode` (optional): Maximum pods returned per node (default: 200, max: 1000)
+
+**Response**:
+
+```json
+{
+  "nodes": [
+    {
+      "name": "node-1",
+      "nodePool": "general-pool",
+      "instanceType": "m5.large",
+      "architecture": "amd64",
+      "capacityType": "spot",
+      "zone": "us-west-2a",
+      "cpuUsage": {
+        "used": 1.5,
+        "capacity": 2.0,
+        "allocatable": 2.0,
+        "percent": 75.0
+      },
+      "memoryUsage": {
+        "used": 4.0,
+        "capacity": 8.0,
+        "allocatable": 8.0,
+        "percent": 50.0
+      },
+      "podCount": 10,
+      "pods": [
+        {
+          "namespace": "default",
+          "name": "web-abc123",
+          "nodeName": "node-1",
+          "workloadType": "deployment",
+          "workloadName": "web",
+          "qosClass": "Burstable",
+          "requests": {
+            "cpuCores": 0.25,
+            "memoryGiB": 0.5
+          }
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "maxPodsPerNode": 200
+}
+```
+
 ### Get Node Disruptions
 
 ```http

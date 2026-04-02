@@ -8,10 +8,12 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Loader2, AlertTriangle, CheckCircle, Info, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { logger } from '../lib/logger';
 
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 function KarpenterLogAnalyzer() {
   const [karpenterPods, setKarpenterPods] = useState([]);
@@ -36,7 +38,7 @@ function KarpenterLogAnalyzer() {
       const response = await axios.get(`${API_URL}/api/v1/karpenter/pods`);
       const pods = response.data.pods || [];
       setKarpenterPods(pods);
-      
+
       // Auto-select first pod if available
       if (pods.length > 0 && !selectedPod) {
         const firstPod = `${pods[0].namespace}/${pods[0].name}`;
@@ -45,7 +47,7 @@ function KarpenterLogAnalyzer() {
       }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch Karpenter pods');
-      console.error('Karpenter pods error:', err);
+      logger.error('Karpenter pods error:', err);
     } finally {
       setLoadingPods(false);
     }
@@ -66,20 +68,20 @@ function KarpenterLogAnalyzer() {
           namespace,
           pod: podName,
           errorOnly: true,
-          tailLines: 500
-        }
+          tailLines: 500,
+        },
       });
 
       const logs = response.data.logs || [];
       setErrorLogs(logs);
-      
+
       // Auto-select first error log if available
       if (logs.length > 0) {
         setSelectedLog(logs[0]);
       }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch logs');
-      console.error('Logs fetch error:', err);
+      logger.error('Logs fetch error:', err);
     } finally {
       setLoadingLogs(false);
     }
@@ -108,13 +110,13 @@ function KarpenterLogAnalyzer() {
 
     try {
       const response = await axios.post(`${API_URL}/api/v1/karpenter/logs/analyze`, {
-        log: selectedLog.trim()
+        log: selectedLog.trim(),
       });
 
       setAnalysis(response.data);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to analyze log');
-      console.error('Log analysis error:', err);
+      logger.error('Log analysis error:', err);
     } finally {
       setLoadingAnalysis(false);
     }
@@ -173,7 +175,9 @@ function KarpenterLogAnalyzer() {
                 size="sm"
                 disabled={loadingPods || loadingLogs}
               >
-                <RefreshCw className={cn("h-4 w-4 mr-2", (loadingPods || loadingLogs) && "animate-spin")} />
+                <RefreshCw
+                  className={cn('h-4 w-4 mr-2', (loadingPods || loadingLogs) && 'animate-spin')}
+                />
                 Refresh
               </Button>
             </div>
@@ -183,7 +187,15 @@ function KarpenterLogAnalyzer() {
               disabled={loadingPods || karpenterPods.length === 0}
             >
               <SelectTrigger id="pod-select">
-                <SelectValue placeholder={loadingPods ? "Loading pods..." : karpenterPods.length === 0 ? "No Karpenter pods found" : "Select a pod"} />
+                <SelectValue
+                  placeholder={
+                    loadingPods
+                      ? 'Loading pods...'
+                      : karpenterPods.length === 0
+                        ? 'No Karpenter pods found'
+                        : 'Select a pod'
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {karpenterPods.map((pod, idx) => (
@@ -199,14 +211,11 @@ function KarpenterLogAnalyzer() {
           {selectedPod && (
             <div className="space-y-2">
               <label htmlFor="log-select" className="text-sm font-medium">
-                Error Logs {loadingLogs && <span className="text-muted-foreground">(Loading...)</span>}
+                Error Logs{' '}
+                {loadingLogs && <span className="text-muted-foreground">(Loading...)</span>}
               </label>
               {errorLogs.length > 0 ? (
-                <Select
-                  value={selectedLog}
-                  onValueChange={handleLogSelect}
-                  disabled={loadingLogs}
-                >
+                <Select value={selectedLog} onValueChange={handleLogSelect} disabled={loadingLogs}>
                   <SelectTrigger id="log-select">
                     <SelectValue placeholder={`Select an error log (${errorLogs.length} found)`} />
                   </SelectTrigger>
@@ -238,7 +247,9 @@ function KarpenterLogAnalyzer() {
                 </Select>
               ) : (
                 <div className="text-sm text-muted-foreground">
-                  {loadingLogs ? 'Loading error logs...' : 'No error logs found in the last 500 lines'}
+                  {loadingLogs
+                    ? 'Loading error logs...'
+                    : 'No error logs found in the last 500 lines'}
                 </div>
               )}
             </div>
@@ -262,10 +273,7 @@ function KarpenterLogAnalyzer() {
 
           {/* Analyze Button */}
           <div className="flex gap-2">
-            <Button
-              onClick={handleAnalyze}
-              disabled={loadingAnalysis || !selectedLog.trim()}
-            >
+            <Button onClick={handleAnalyze} disabled={loadingAnalysis || !selectedLog.trim()}>
               {loadingAnalysis ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -314,10 +322,7 @@ function KarpenterLogAnalyzer() {
                       {analysis.errorCauses.map((cause, idx) => (
                         <div
                           key={idx}
-                          className={cn(
-                            "p-3 rounded-lg border",
-                            getSeverityColor(cause.severity)
-                          )}
+                          className={cn('p-3 rounded-lg border', getSeverityColor(cause.severity))}
                         >
                           <div className="flex items-start gap-2">
                             {getSeverityIcon(cause.severity)}
@@ -329,9 +334,10 @@ function KarpenterLogAnalyzer() {
                                 <Badge
                                   variant="outline"
                                   className={cn(
-                                    "text-xs",
-                                    cause.severity === 'critical' && "border-red-500 text-red-700",
-                                    cause.severity === 'warning' && "border-yellow-500 text-yellow-700"
+                                    'text-xs',
+                                    cause.severity === 'critical' && 'border-red-500 text-red-700',
+                                    cause.severity === 'warning' &&
+                                      'border-yellow-500 text-yellow-700'
                                   )}
                                 >
                                   {cause.severity}
@@ -356,7 +362,9 @@ function KarpenterLogAnalyzer() {
                   <CardContent>
                     <ul className="list-disc list-inside space-y-2">
                       {analysis.recommendations.map((rec, idx) => (
-                        <li key={idx} className="text-sm">{rec}</li>
+                        <li key={idx} className="text-sm">
+                          {rec}
+                        </li>
                       ))}
                     </ul>
                   </CardContent>
@@ -372,7 +380,8 @@ function KarpenterLogAnalyzer() {
                     <div className="space-y-2 text-sm">
                       <div>
                         <span className="font-medium">Pod:</span>{' '}
-                        {analysis.parsedError.Pod?.name || 'N/A'} ({analysis.parsedError.Pod?.namespace || 'N/A'})
+                        {analysis.parsedError.Pod?.name || 'N/A'} (
+                        {analysis.parsedError.Pod?.namespace || 'N/A'})
                       </div>
                       <div>
                         <span className="font-medium">NodePool:</span>{' '}
@@ -403,4 +412,3 @@ function KarpenterLogAnalyzer() {
 }
 
 export default KarpenterLogAnalyzer;
-

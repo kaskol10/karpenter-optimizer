@@ -47,17 +47,19 @@ func getLocationForRegion(region string) string {
 
 // Client handles AWS Pricing API requests
 type Client struct {
-	httpClient         *http.Client
-	longHttpClient     *http.Client // Longer timeout for large downloads (instance types list)
-	baseURL            string
-	region             string
-	cache              map[string]cachedPrice
-	cacheMu            sync.RWMutex
-	cacheTTL           time.Duration
-	instanceTypesCache map[string]cachedInstanceTypes // Cache for instance types list
-	instanceTypesMu    sync.RWMutex                   // Mutex for instance types cache
-	pricingClient      *pricing.Client                // AWS SDK Pricing client (REQUIRED)
-	useGetProducts     bool                           // Always true - GetProducts API is the only option
+	httpClient           *http.Client
+	longHttpClient       *http.Client // Longer timeout for large downloads (instance types list)
+	baseURL              string
+	region               string
+	cache                map[string]cachedPrice
+	cacheMu              sync.RWMutex
+	cacheTTL             time.Duration
+	instanceTypesCache   map[string]cachedInstanceTypes // Cache for instance types list
+	instanceTypesMu      sync.RWMutex                   // Mutex for instance types cache
+	pricingClient        *pricing.Client                // AWS SDK Pricing client (REQUIRED)
+	useGetProducts       bool                           // Always true - GetProducts API is the only option
+	spotDiscount         float64                        // Multiplier for spot pricing (e.g., 0.25 = 75% off)
+	savingsPlansDiscount float64                        // Multiplier for Savings Plans (e.g., 0.28 = 72% off)
 }
 
 type cachedInstanceTypes struct {
@@ -73,9 +75,30 @@ type cachedPrice struct {
 // NewClient creates a new AWS Pricing API client
 // REQUIRES AWS credentials - uses GetProducts API to query specific instance types
 // No fallback to public API (which requires downloading 400MB index)
-func NewClient(region, accessKeyID, secretAccessKey, sessionToken string) (*Client, error) {
+// spotDiscount is the multiplier for spot pricing (default 0.25 = 75% off)
+// savingsPlansDiscount is the multiplier for Savings Plans (default 0.28 = 72% off)
+// cacheTTLHours is the cache duration in hours (default 24)
+func NewClient(region, accessKeyID, secretAccessKey, sessionToken string, spotDiscount, savingsPlansDiscount float64, cacheTTLHours ...int) (*Client, error) {
 	if region == "" {
 		region = "eu-west-1"
+	}
+
+	// Set default spot discount if not provided
+	spotDiscountMultiplier := 0.25
+	if spotDiscount > 0 {
+		spotDiscountMultiplier = spotDiscount
+	}
+
+	// Set default savings plans discount if not provided
+	savingsPlansDiscountMultiplier := 0.28
+	if savingsPlansDiscount > 0 {
+		savingsPlansDiscountMultiplier = savingsPlansDiscount
+	}
+
+	// Set default cache TTL if not provided
+	cacheTTL := 24 * time.Hour
+	if len(cacheTTLHours) > 0 && cacheTTLHours[0] > 0 {
+		cacheTTL = time.Duration(cacheTTLHours[0]) * time.Hour
 	}
 
 	client := &Client{
@@ -85,12 +108,14 @@ func NewClient(region, accessKeyID, secretAccessKey, sessionToken string) (*Clie
 		longHttpClient: &http.Client{
 			Timeout: 60 * time.Second, // For instance types list queries (if needed)
 		},
-		baseURL:            "https://pricing.us-east-1.amazonaws.com",
-		region:             region,
-		cache:              make(map[string]cachedPrice),
-		instanceTypesCache: make(map[string]cachedInstanceTypes),
-		cacheTTL:           24 * time.Hour, // Cache prices for 24 hours
-		useGetProducts:     true,           // Always use GetProducts API
+		baseURL:              "https://pricing.us-east-1.amazonaws.com",
+		region:               region,
+		cache:                make(map[string]cachedPrice),
+		instanceTypesCache:   make(map[string]cachedInstanceTypes),
+		cacheTTL:             cacheTTL,
+		useGetProducts:       true, // Always use GetProducts API
+		spotDiscount:         spotDiscountMultiplier,
+		savingsPlansDiscount: savingsPlansDiscountMultiplier,
 	}
 
 	// Initialize AWS SDK client - REQUIRED for GetProducts API
@@ -221,11 +246,13 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 		// Map capacity type to AWS Pricing API capacity status
 		// For on-demand: Use "Used" capacity status
 		// For spot: We'll query on-demand price and apply discount (spot prices are dynamic)
+		// For savings plans: Query on-demand price and apply discount (Savings Plans prices are committed)
 		capacityStatus := "Used" // Used = On-Demand
 
 		// Note: AWS Pricing API doesn't provide real-time spot prices via GetProducts
-		// We'll get on-demand price and apply spot discount
+		// We'll get on-demand price and apply configurable discount
 		querySpot := capacityType == "spot"
+		querySavingsPlans := capacityType == "savings-plans"
 
 		// Build filters for GetProducts API
 		filters := []types.Filter{
@@ -360,7 +387,7 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 							if price, err2 := c.extractPriceFromTerms(terms, termKey, "OnDemand"); err2 == nil {
 								fmt.Printf("Debug: Successfully extracted price using alternative key: %s\n", termKey)
 								if querySpot {
-									return price * 0.25, nil
+									return price * c.spotDiscount, nil
 								}
 								return price, nil
 							}
@@ -370,10 +397,13 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 				return 0, err
 			}
 
-			// Apply spot discount if querying for spot instances
-			// AWS Pricing API doesn't provide real-time spot prices, so we use a conservative estimate
+			// Apply spot or savings plans discount if querying for those capacity types
+			// AWS Pricing API doesn't provide real-time spot/savings plans prices, so we use configurable estimates
 			if querySpot {
-				return onDemandPrice * 0.25, nil // Spot is ~75% cheaper than on-demand
+				return onDemandPrice * c.spotDiscount, nil // Spot discount is configurable (default 25% = 75% off)
+			}
+			if querySavingsPlans {
+				return onDemandPrice * c.savingsPlansDiscount, nil // Savings Plans discount is configurable (default 28% = 72% off)
 			}
 
 			return onDemandPrice, nil

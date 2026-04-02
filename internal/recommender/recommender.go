@@ -23,8 +23,8 @@ type ProgressCallback func(message string, progress float64)
 type PricingSource string
 
 const (
-	PricingSourceAWSPricingAPI PricingSource = "aws-pricing-api"
-	PricingSourceHardcoded     PricingSource = "hardcoded"
+	PricingSourceAWSPricingAPI  PricingSource = "aws-pricing-api"
+	PricingSourceHardcoded      PricingSource = "hardcoded"
 	PricingSourceOllamaCache    PricingSource = "ollama-cache"
 	PricingSourceFamilyEstimate PricingSource = "family-estimate"
 	PricingSourceOllama         PricingSource = "ollama"
@@ -38,12 +38,14 @@ type PricingResult struct {
 }
 
 type Recommender struct {
-	config       *config.Config
-	k8sClient    *kubernetes.Client
-	ollamaClient *ollama.Client
-	awsPricing   *awspricing.Client // AWS Pricing API client
-	priceCache   map[string]float64 // Cache for Ollama-fetched pricing
-	priceCacheMu sync.RWMutex       // Mutex for thread-safe cache access
+	config               *config.Config
+	k8sClient            *kubernetes.Client
+	ollamaClient         *ollama.Client
+	awsPricing           *awspricing.Client // AWS Pricing API client
+	priceCache           map[string]float64 // Cache for Ollama-fetched pricing
+	priceCacheMu         sync.RWMutex       // Mutex for thread-safe cache access
+	spotDiscount         float64            // Multiplier for spot pricing (e.g., 0.25 = 75% off)
+	savingsPlansDiscount float64            // Multiplier for Savings Plans (e.g., 0.28 = 72% off)
 }
 
 // HasLLM returns true if LLM client is configured and available
@@ -60,7 +62,7 @@ func NewRecommender(cfg *config.Config) *Recommender {
 		llmURL = cfg.OllamaURL
 		llmModel = cfg.OllamaModel
 	}
-	
+
 	if llmURL != "" {
 		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.Debug)
 		if cfg.Debug {
@@ -75,6 +77,9 @@ func NewRecommender(cfg *config.Config) *Recommender {
 		cfg.AWSAccessKeyID,
 		cfg.AWSSecretAccessKey,
 		cfg.AWSSessionToken,
+		cfg.SpotDiscount,
+		cfg.SavingsPlansDiscount,
+		cfg.PricingCacheTTL,
 	)
 	if err != nil {
 		fmt.Printf("Error: Failed to initialize AWS Pricing API client: %v\n", err)
@@ -95,10 +100,12 @@ func NewRecommender(cfg *config.Config) *Recommender {
 	}
 
 	return &Recommender{
-		config:       cfg,
-		ollamaClient: ollamaClient,
-		awsPricing:   awsPricingClient,
-		priceCache:   make(map[string]float64),
+		config:               cfg,
+		ollamaClient:         ollamaClient,
+		awsPricing:           awsPricingClient,
+		priceCache:           make(map[string]float64),
+		spotDiscount:         cfg.SpotDiscount,
+		savingsPlansDiscount: cfg.SavingsPlansDiscount,
 	}
 }
 
@@ -889,7 +896,8 @@ func (r *Recommender) GenerateClusterRecommendations() ([]NodePoolRecommendation
 	}
 
 	// Get all workloads across all namespaces
-	allWorkloads, err := r.k8sClient.ListAllWorkloads(ctx)
+	// Pass nil for Prometheus client - recommendations use resource requests, not metrics
+	allWorkloads, err := r.k8sClient.ListAllWorkloads(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
@@ -1285,7 +1293,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 	// Only recommend GPU if workloads actually need GPU
 	if maxGPU == 0 {
 		// No GPU needed - use regular instances
-		cpuPerNode := math.Max(totalCPU/4.0, 1.0) // Rough estimate for general purpose nodes, minimum 1
+		cpuPerNode := math.Max(totalCPU/4.0, 1.0)       // Rough estimate for general purpose nodes, minimum 1
 		memoryPerNode := math.Max(totalMemory/8.0, 1.0) // Minimum 1
 
 		recommendedInstanceTypes := r.selectInstanceTypes(cpuPerNode, memoryPerNode, 0) // Explicitly 0 GPU
@@ -1400,7 +1408,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 	} else {
 		// GPU workloads - handle separately
 		// Calculate instance types based on actual CPU/memory requirements, not hardcoded values
-		cpuPerNode := math.Max(totalCPU/4.0, 1.0) // Minimum 1
+		cpuPerNode := math.Max(totalCPU/4.0, 1.0)       // Minimum 1
 		memoryPerNode := math.Max(totalMemory/8.0, 1.0) // Minimum 1
 
 		recommendedInstanceTypes := r.selectInstanceTypes(cpuPerNode, memoryPerNode, maxGPU)
@@ -1764,7 +1772,7 @@ func (r *Recommender) generateRecommendationForGroup(group []Workload, index int
 	capacityType := r.selectCapacityType(group, false) // Not checking overprovisioning in this path
 	architecture := r.selectArchitecture(group)
 
-		recommendedCost := r.estimateCost(context.Background(), instanceTypes, capacityType, nodesNeeded)
+	recommendedCost := r.estimateCost(context.Background(), instanceTypes, capacityType, nodesNeeded)
 
 	// Try to get actual current state from existing NodePools
 	var currentState *CurrentState
@@ -2147,7 +2155,7 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 			// and apply spot discount internally if capacityType is "spot"
 			awsPrice, err := r.awsPricing.GetProductPrice(pricingCtx, it, capacityType)
 			cancel()
-			
+
 			if err == nil && awsPrice > 0 {
 				instanceCost = awsPrice
 				priceFound = true
@@ -2208,7 +2216,7 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 
 		// Track source for this instance type
 		instanceTypeSources[it] = source
-		
+
 		// Set overall source (prefer AWS Pricing API if any instance type used it)
 		if source == PricingSourceAWSPricingAPI {
 			overallSource = PricingSourceAWSPricingAPI
@@ -2216,13 +2224,17 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 			overallSource = source
 		}
 
-		// Apply spot discount if using spot instances (only for non-AWS Pricing API sources)
-		// AWS Pricing API already applies spot discount internally, so we only need to apply it
+		// Apply spot or savings plans discount if using those capacity types (only for non-AWS Pricing API sources)
+		// AWS Pricing API already applies discounts internally, so we only need to apply it
 		// for hardcoded prices, Ollama cache, family estimates, etc.
 		// Spot instances typically cost 70-90% less than on-demand (spot = 10-30% of on-demand)
-		// Using conservative 75% discount (spot = 25% of on-demand) for cost estimation
+		// Savings Plans offer up to 72% off on-demand pricing
+		// Using configurable discounts for cost estimation
 		if capacityType == "spot" && source != PricingSourceAWSPricingAPI {
-			instanceCost *= 0.25 // Spot instances are ~75% cheaper than on-demand
+			instanceCost *= r.spotDiscount
+		}
+		if capacityType == "savings-plans" && source != PricingSourceAWSPricingAPI {
+			instanceCost *= r.savingsPlansDiscount
 		}
 
 		// Calculate nodes for this instance type (distribute remainder evenly)

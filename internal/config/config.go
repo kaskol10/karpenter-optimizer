@@ -2,8 +2,11 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
+
+var deprecationWarnings []string
 
 type Config struct {
 	KubeconfigPath string
@@ -17,12 +20,17 @@ type Config struct {
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
+	// Prometheus/Mimir Configuration
+	PrometheusURL string // Prometheus or Mimir base URL (e.g., http://prometheus:9090)
 	// AWS Configuration for Pricing API
-	AWSRegion          string // AWS region (defaults to eu-west-1)
-	AWSAccessKeyID     string // AWS access key ID (optional, can use IAM role)
-	AWSSecretAccessKey string // AWS secret access key (optional, can use IAM role)
-	AWSSessionToken    string // AWS session token (for temporary credentials)
-	Debug              bool
+	AWSRegion            string  // AWS region (defaults to eu-west-1)
+	AWSAccessKeyID       string  // AWS access key ID (optional, can use IAM role)
+	AWSSecretAccessKey   string  // AWS secret access key (optional, can use IAM role)
+	AWSSessionToken      string  // AWS session token (for temporary credentials)
+	SpotDiscount         float64 // Discount multiplier for spot instances (default 0.25 = 75% off)
+	SavingsPlansDiscount float64 // Discount multiplier for Savings Plans (default 0.28 = 72% off)
+	PricingCacheTTL      int     // Cache TTL for AWS pricing in hours (default 24)
+	Debug                bool
 }
 
 func Load() *Config {
@@ -35,6 +43,11 @@ func Load() *Config {
 	// Fallback to legacy Ollama configuration if new LLM config not set
 	ollamaURL := getEnv("OLLAMA_URL", "")
 	ollamaModel := getEnv("OLLAMA_MODEL", "")
+
+	// Log deprecation warning if legacy env vars are used
+	if ollamaURL != "" || ollamaModel != "" {
+		deprecationWarnings = append(deprecationWarnings, "OLLAMA_URL and OLLAMA_MODEL are deprecated. Use LLM_URL and LLM_MODEL instead.")
+	}
 
 	// If new LLM config is provided, use it; otherwise use legacy Ollama config
 	if llmURL == "" && ollamaURL != "" {
@@ -76,20 +89,24 @@ func Load() *Config {
 	}
 
 	return &Config{
-		KubeconfigPath:    getEnv("KUBECONFIG", ""),
-		KubeContext:       getEnv("KUBE_CONTEXT", ""),
-		APIPort:           getEnv("PORT", "8080"),
-		LLMProvider:       llmProvider,
-		LLMURL:            llmURL,
-		LLMModel:          llmModel,
-		LLMAPIKey:         llmAPIKey,
-		OllamaURL:         ollamaURL, // Keep for backward compatibility
-		OllamaModel:       ollamaModel,
-		AWSRegion:         getEnv("AWS_REGION", "eu-west-1"),
-		AWSAccessKeyID:    getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		AWSSessionToken:   getEnv("AWS_SESSION_TOKEN", ""),
-		Debug:             getEnvBool("DEBUG", false),
+		KubeconfigPath:       getEnv("KUBECONFIG", ""),
+		KubeContext:          getEnv("KUBE_CONTEXT", ""),
+		APIPort:              getEnv("PORT", "8080"),
+		LLMProvider:          llmProvider,
+		LLMURL:               llmURL,
+		LLMModel:             llmModel,
+		LLMAPIKey:            llmAPIKey,
+		OllamaURL:            ollamaURL, // Keep for backward compatibility
+		OllamaModel:          ollamaModel,
+		PrometheusURL:        getEnv("PROMETHEUS_URL", ""),
+		AWSRegion:            getEnv("AWS_REGION", "eu-west-1"),
+		AWSAccessKeyID:       getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:   getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSSessionToken:      getEnv("AWS_SESSION_TOKEN", ""),
+		SpotDiscount:         getEnvFloat("SPOT_DISCOUNT", 0.25),          // Default: spot = 25% of on-demand (75% off)
+		SavingsPlansDiscount: getEnvFloat("SAVINGS_PLANS_DISCOUNT", 0.28), // Default: Savings Plans = 28% of on-demand (72% off)
+		PricingCacheTTL:      getEnvInt("PRICING_CACHE_TTL_HOURS", 24),    // Default: 24 hours
+		Debug:                getEnvBool("DEBUG", false),
 	}
 }
 
@@ -105,4 +122,26 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return value == "true" || value == "1" || value == "yes" || value == "on"
 	}
 	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+func GetDeprecationWarnings() []string {
+	return deprecationWarnings
 }

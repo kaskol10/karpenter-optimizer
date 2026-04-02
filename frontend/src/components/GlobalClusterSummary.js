@@ -8,12 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { RefreshCw, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { logger } from '../lib/logger';
 import { getCacheStats } from '../lib/pricingCache';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+const API_URL =
+  window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')
+    ? window.ENV.REACT_APP_API_URL
+    : process.env.REACT_APP_API_URL || '';
 
 function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate }) {
   const [summary, setSummary] = useState(null);
@@ -53,7 +55,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
       setSummary(response.data.summary);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to fetch cluster summary');
-      console.error('Cluster summary error:', err);
+      logger.error('Cluster summary error:', err);
     } finally {
       setLoading(false);
     }
@@ -79,24 +81,26 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
     setProgressPercent(0);
 
     try {
-      const eventSource = new EventSource(`${API_URL}/api/v1/recommendations/cluster-summary/stream`);
+      const eventSource = new EventSource(
+        `${API_URL}/api/v1/recommendations/cluster-summary/stream`
+      );
 
       eventSource.addEventListener('progress', (event) => {
         try {
           const data = JSON.parse(event.data);
           const message = data.message || 'Processing...';
           const progress = Math.max(0, Math.min(100, data.progress || 0));
-          console.log(`[Progress] ${progress.toFixed(1)}%: ${message}`);
+          logger.debug(`[Progress] ${progress.toFixed(1)}%: ${message}`);
           setProgressMessage(message);
           setProgressPercent(progress);
         } catch (err) {
-          console.error('Error parsing progress event:', err, 'Raw data:', event.data);
+          logger.error('Error parsing progress event:', err, 'Raw data:', event.data);
         }
       });
 
       eventSource.addEventListener('complete', (event) => {
         try {
-          console.log('[SSE] Received complete event');
+          logger.debug('[SSE] Received complete event');
           const data = JSON.parse(event.data);
           if (onRecommendationsGenerated) {
             onRecommendationsGenerated(data.recommendations || []);
@@ -106,7 +110,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               ...data.clusterCost,
               clusterNodes: data.clusterNodes,
               totalNodePools: data.totalNodePools,
-              recommendedCount: data.count
+              recommendedCount: data.count,
             };
             setClusterCost(costData);
             if (onClusterCostUpdate) {
@@ -122,7 +126,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
             setProgressPercent(0);
           }, 1000);
         } catch (err) {
-          console.error('Error parsing complete event:', err, 'Raw data:', event.data);
+          logger.error('Error parsing complete event:', err, 'Raw data:', event.data);
           eventSource.close();
           setGeneratingRecommendations(false);
           setProgressMessage('');
@@ -132,11 +136,11 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
 
       eventSource.addEventListener('error', (event) => {
         try {
-          console.error('[SSE] Received error event:', event.data);
+          logger.error('[SSE] Received error event:', event.data);
           const data = JSON.parse(event.data);
           setError(data.error || 'Failed to generate recommendations');
         } catch (err) {
-          console.error('[SSE] Error parsing error event:', err, 'Raw data:', event.data);
+          logger.error('[SSE] Error parsing error event:', err, 'Raw data:', event.data);
           setError('Failed to generate recommendations');
         }
         eventSource.close();
@@ -146,8 +150,11 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
       });
 
       eventSource.onerror = (err) => {
-        console.error('EventSource connection error:', err);
-        if (eventSource.readyState === EventSource.CLOSED || (progressPercent < 100 && eventSource.readyState !== EventSource.OPEN)) {
+        logger.error('EventSource connection error:', err);
+        if (
+          eventSource.readyState === EventSource.CLOSED ||
+          (progressPercent < 100 && eventSource.readyState !== EventSource.OPEN)
+        ) {
           setError('Connection error. Please try again.');
           eventSource.close();
           setGeneratingRecommendations(false);
@@ -155,10 +162,9 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
           setProgressPercent(0);
         }
       };
-
     } catch (err) {
       setError(err.message || 'Failed to generate recommendations');
-      console.error('Recommendations error:', err);
+      logger.error('Recommendations error:', err);
       setGeneratingRecommendations(false);
       setProgressMessage('');
       setProgressPercent(0);
@@ -211,7 +217,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={fetchSummary} disabled={loading} size="sm" variant="outline">
-              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
               Refresh
             </Button>
             <div className="flex items-center gap-2">
@@ -219,7 +225,10 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
             </div>
             {autoRefresh && (
-              <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+              <Select
+                value={String(refreshInterval)}
+                onValueChange={(v) => setRefreshInterval(Number(v))}
+              >
                 <SelectTrigger className="w-[120px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -288,12 +297,19 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                   </div>
                   <div>
                     <p className="text-white/80 text-xs mb-1">Potential Savings</p>
-                    <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-300" : "text-yellow-300")}>
-                      {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
+                    <p
+                      className={cn(
+                        'text-2xl font-bold',
+                        clusterCost.savings > 0 ? 'text-green-300' : 'text-yellow-300'
+                      )}
+                    >
+                      {clusterCost.savings > 0 ? '-' : '+'}$
+                      {Math.abs(clusterCost.savings).toFixed(2)}/hr
                     </p>
                     {clusterCost.current > 0 && (
                       <p className="text-white/80 text-xs mt-1">
-                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
+                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}%{' '}
+                        {clusterCost.savings > 0 ? 'reduction' : 'increase'}
                       </p>
                     )}
                   </div>
@@ -323,16 +339,25 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                   </p>
                   {summary.pricingSource && (
                     <p className="text-xs mt-1">
-                      <span className={cn(
-                        "font-semibold",
-                        summary.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
-                      )}>
-                        {summary.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
-                         summary.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
-                         summary.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
-                         summary.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
-                         summary.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
-                         "⚠ Estimated"}
+                      <span
+                        className={cn(
+                          'font-semibold',
+                          summary.pricingSource === 'aws-pricing-api'
+                            ? 'text-green-700'
+                            : 'text-yellow-700'
+                        )}
+                      >
+                        {summary.pricingSource === 'aws-pricing-api'
+                          ? '✓ AWS Pricing API'
+                          : summary.pricingSource === 'hardcoded'
+                            ? '⚠ Estimated (hardcoded)'
+                            : summary.pricingSource === 'family-estimate'
+                              ? '⚠ Estimated (family-based)'
+                              : summary.pricingSource === 'ollama-cache'
+                                ? '⚠ Estimated (cached)'
+                                : summary.pricingSource === 'ollama'
+                                  ? '⚠ Estimated (LLM)'
+                                  : '⚠ Estimated'}
                       </span>
                     </p>
                   )}
@@ -384,11 +409,12 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">CPU Usage</p>
-                <p className={cn("text-2xl font-bold", getUsageColor(summary.cpuPercent))}>
+                <p className={cn('text-2xl font-bold', getUsageColor(summary.cpuPercent))}>
                   {summary.cpuPercent.toFixed(1)}%
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {formatResource(summary.cpuUsed, 'cpu')} / {formatResource(summary.cpuAllocatable, 'cpu')}
+                  {formatResource(summary.cpuUsed, 'cpu')} /{' '}
+                  {formatResource(summary.cpuAllocatable, 'cpu')}
                 </p>
               </CardContent>
             </Card>
@@ -396,11 +422,12 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Memory Usage</p>
-                <p className={cn("text-2xl font-bold", getUsageColor(summary.memoryPercent))}>
+                <p className={cn('text-2xl font-bold', getUsageColor(summary.memoryPercent))}>
                   {summary.memoryPercent.toFixed(1)}%
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {formatResource(summary.memoryUsed, 'memory')} / {formatResource(summary.memoryAllocatable, 'memory')}
+                  {formatResource(summary.memoryUsed, 'memory')} /{' '}
+                  {formatResource(summary.memoryAllocatable, 'memory')}
                 </p>
               </CardContent>
             </Card>

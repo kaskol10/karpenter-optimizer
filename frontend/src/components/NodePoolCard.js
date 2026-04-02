@@ -11,67 +11,67 @@ function NodePoolCard({ recommendation }) {
   if (!recommendation) {
     return <div>Error: No recommendation data</div>;
   }
-  
+
   // Support both old format (NodePoolRecommendation) and new format (NodePoolCapacityRecommendation)
   const isNewFormat = recommendation.nodePoolName !== undefined;
-  
+
   const nodePoolName = isNewFormat ? recommendation.nodePoolName : recommendation.name;
-  const currentNodes = isNewFormat 
-    ? recommendation.currentNodes 
-    : (recommendation.currentState?.totalNodes || 0);
+  const currentNodes = isNewFormat
+    ? recommendation.currentNodes
+    : recommendation.currentState?.totalNodes || 0;
   const recommendedNodes = isNewFormat
     ? recommendation.recommendedNodes
-    : (recommendation.maxSize > 0 ? Math.ceil(recommendation.maxSize / 2) : 0);
+    : recommendation.maxSize > 0
+      ? Math.ceil(recommendation.maxSize / 2)
+      : 0;
   const currentInstanceTypes = isNewFormat
     ? recommendation.currentInstanceTypes || []
-    : (recommendation.currentState?.instanceTypes || []);
+    : recommendation.currentState?.instanceTypes || [];
   const recommendedInstanceTypes = isNewFormat
     ? recommendation.recommendedInstanceTypes || []
-    : (recommendation.instanceTypes || []);
+    : recommendation.instanceTypes || [];
   const currentCapacityType = isNewFormat
     ? recommendation.capacityType || ''
-    : (recommendation.currentState?.capacityType || '');
+    : recommendation.currentState?.capacityType || '';
   const recommendedCapacityType = recommendation.capacityType || '';
   const currentCost = isNewFormat
     ? recommendation.currentCost || 0
-    : (recommendation.currentState?.estimatedCost || 0);
+    : recommendation.currentState?.estimatedCost || 0;
   const recommendedCost = isNewFormat
     ? recommendation.recommendedCost || 0
-    : (recommendation.estimatedCost || 0);
+    : recommendation.estimatedCost || 0;
   const currentCPU = isNewFormat
     ? recommendation.currentCPUCapacity || 0
-    : (recommendation.currentState?.totalCPU || 0);
+    : recommendation.currentState?.totalCPU || 0;
   const currentMemory = isNewFormat
     ? recommendation.currentMemoryCapacity || 0
-    : (recommendation.currentState?.totalMemory || 0);
-  const recommendedCPU = isNewFormat
-    ? recommendation.recommendedTotalCPU || 0
-    : 0;
-  const recommendedMemory = isNewFormat
-    ? recommendation.recommendedTotalMemory || 0
-    : 0;
-  
-  const hasChanges = 
-    currentNodes !== recommendedNodes ||
-    JSON.stringify(currentInstanceTypes.sort()) !== JSON.stringify(recommendedInstanceTypes.sort()) ||
-    currentCapacityType !== recommendedCapacityType;
-  
-  const hasGPU = recommendation.requirements?.gpu > 0 || recommendedInstanceTypes.some(t => t.startsWith('g4') || t.startsWith('g5'));
+    : recommendation.currentState?.totalMemory || 0;
+  const recommendedCPU = isNewFormat ? recommendation.recommendedTotalCPU || 0 : 0;
+  const recommendedMemory = isNewFormat ? recommendation.recommendedTotalMemory || 0 : 0;
 
-  const costSavings = isNewFormat ? (recommendation.costSavings || 0) : (currentCost - recommendedCost);
-  const costSavingsPercent = isNewFormat ? (recommendation.costSavingsPercent || 0) : (currentCost > 0 ? ((costSavings / currentCost) * 100) : 0);
+  const hasChanges =
+    currentNodes !== recommendedNodes ||
+    JSON.stringify(currentInstanceTypes.sort()) !==
+      JSON.stringify(recommendedInstanceTypes.sort()) ||
+    currentCapacityType !== recommendedCapacityType;
+
+  const hasGPU =
+    recommendation.requirements?.gpu > 0 ||
+    recommendedInstanceTypes.some((t) => t.startsWith('g4') || t.startsWith('g5'));
+
+  const costSavings = isNewFormat ? recommendation.costSavings || 0 : currentCost - recommendedCost;
+  const costSavingsPercent = isNewFormat
+    ? recommendation.costSavingsPercent || 0
+    : currentCost > 0
+      ? (costSavings / currentCost) * 100
+      : 0;
 
   // Get taints - handle both formats
   const taints = recommendation?.taints || [];
   const taintsArray = Array.isArray(taints) ? taints : [];
 
   return (
-    <Card
-      className={cn(
-        "h-full",
-        hasChanges && "border-2 border-green-500"
-      )}
-    >
+    <Card className={cn('h-full', hasChanges && 'border-2 border-green-500')}>
       <CardHeader>
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -115,13 +115,13 @@ function NodePoolCard({ recommendation }) {
               <p className="text-xs text-muted-foreground">CPU: {currentCPU.toFixed(2)} cores</p>
             )}
             {currentMemory > 0 && (
-              <p className="text-xs text-muted-foreground">Memory: {currentMemory.toFixed(2)} GiB</p>
+              <p className="text-xs text-muted-foreground">
+                Memory: {currentMemory.toFixed(2)} GiB
+              </p>
             )}
             {currentCost > 0 && (
               <div className="mt-2">
-                <p className="text-sm font-semibold">
-                  ${currentCost.toFixed(2)}/hr
-                </p>
+                <p className="text-sm font-semibold">${currentCost.toFixed(2)}/hr</p>
               </div>
             )}
           </div>
@@ -152,10 +152,14 @@ function NodePoolCard({ recommendation }) {
               </div>
             )}
             {recommendedCPU > 0 && (
-              <p className="text-xs text-muted-foreground">CPU: {recommendedCPU.toFixed(2)} cores</p>
+              <p className="text-xs text-muted-foreground">
+                CPU: {recommendedCPU.toFixed(2)} cores
+              </p>
             )}
             {recommendedMemory > 0 && (
-              <p className="text-xs text-muted-foreground">Memory: {recommendedMemory.toFixed(2)} GiB</p>
+              <p className="text-xs text-muted-foreground">
+                Memory: {recommendedMemory.toFixed(2)} GiB
+              </p>
             )}
             {recommendedCost > 0 && (
               <div className="mt-2">
@@ -213,7 +217,11 @@ function NodePoolCard({ recommendation }) {
               {recommendedInstanceTypes.map((type, idx) => (
                 <Badge
                   key={idx}
-                  variant={hasGPU && (type.startsWith('g4') || type.startsWith('g5')) ? 'destructive' : 'secondary'}
+                  variant={
+                    hasGPU && (type.startsWith('g4') || type.startsWith('g5'))
+                      ? 'destructive'
+                      : 'secondary'
+                  }
                   className="font-mono text-xs"
                 >
                   {type}
@@ -236,10 +244,7 @@ function NodePoolCard({ recommendation }) {
                   <Badge
                     key={idx}
                     variant="outline"
-                    className={cn(
-                      "font-mono text-xs",
-                      !isKept && "line-through opacity-60"
-                    )}
+                    className={cn('font-mono text-xs', !isKept && 'line-through opacity-60')}
                   >
                     {type}
                   </Badge>
@@ -255,31 +260,27 @@ function NodePoolCard({ recommendation }) {
             <AlertTitle>
               {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== ''
                 ? '✨ AI-Enhanced Explanation'
-                : (isNewFormat ? 'Explanation' : 'Why these changes?')}
+                : isNewFormat
+                  ? 'Explanation'
+                  : 'Why these changes?'}
             </AlertTitle>
             <AlertDescription>
               {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== '' ? (
                 <div className="space-y-2">
-                  <p className="text-sm whitespace-pre-wrap">
-                    {recommendation.aiReasoning}
-                  </p>
+                  <p className="text-sm whitespace-pre-wrap">{recommendation.aiReasoning}</p>
                   {recommendation.reasoning && (
                     <Accordion type="single" collapsible>
                       <AccordionItem value="details">
                         <AccordionTrigger>Show technical details</AccordionTrigger>
                         <AccordionContent>
-                          <p className="text-xs whitespace-pre-wrap">
-                            {recommendation.reasoning}
-                          </p>
+                          <p className="text-xs whitespace-pre-wrap">{recommendation.reasoning}</p>
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>
                   )}
                 </div>
               ) : (
-                <p className="text-sm whitespace-pre-wrap">
-                  {recommendation.reasoning}
-                </p>
+                <p className="text-sm whitespace-pre-wrap">{recommendation.reasoning}</p>
               )}
             </AlertDescription>
           </Alert>

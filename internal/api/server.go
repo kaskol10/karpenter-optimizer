@@ -37,15 +37,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/kubernetes"
+	"github.com/karpenter-optimizer/internal/metrics"
+	"github.com/karpenter-optimizer/internal/prometheus"
 	"github.com/karpenter-optimizer/internal/recommender"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/karpenter-optimizer/internal/docs/swagger" // Swagger docs
 )
@@ -62,6 +67,7 @@ type Server struct {
 	config      *config.Config
 	recommender *recommender.Recommender
 	k8sClient   *kubernetes.Client
+	promClient  *prometheus.Client
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -69,7 +75,28 @@ func NewServer(cfg *config.Config) *Server {
 		cfg = config.Load()
 	}
 
+	// Print deprecation warnings if any
+	for _, warning := range config.GetDeprecationWarnings() {
+		fmt.Printf("DEPRECATION WARNING: %s\n", warning)
+	}
+
 	r := gin.Default()
+
+	// Metrics middleware
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.FullPath()
+		if path == "" {
+			path = "unknown"
+		}
+
+		c.Next()
+
+		duration := time.Since(start).Seconds()
+		status := c.Writer.Status()
+		metrics.RecordHTTPRequest(c.Request.Method, path, status)
+		metrics.RecordHTTPRequestDuration(c.Request.Method, path, duration)
+	})
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
@@ -114,11 +141,32 @@ func NewServer(cfg *config.Config) *Server {
 		rec.SetK8sClient(k8sClient)
 	}
 
+	// Initialize Prometheus client
+	var promClient *prometheus.Client
+	if cfg.PrometheusURL != "" {
+		promClient = prometheus.NewClient(cfg.PrometheusURL)
+		debugLog(cfg.Debug, "Prometheus client initialized with URL: %s\n", cfg.PrometheusURL)
+		// Optionally validate the connection (non-blocking)
+		if cfg.Debug {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := promClient.ValidateURL(ctx); err != nil {
+				debugLog(cfg.Debug, "Warning: Prometheus URL validation failed: %v\n", err)
+				debugLog(cfg.Debug, "  Metrics will be unavailable. Check PROMETHEUS_URL setting.\n")
+			} else {
+				debugLog(cfg.Debug, "Successfully validated Prometheus connection\n")
+			}
+			cancel()
+		}
+	} else {
+		debugLog(cfg.Debug, "Prometheus client not configured (PROMETHEUS_URL not set). Real metrics will be unavailable.\n")
+	}
+
 	server := &Server{
 		router:      r,
 		config:      cfg,
 		recommender: rec,
 		k8sClient:   k8sClient,
+		promClient:  promClient,
 	}
 
 	server.setupRoutes()
@@ -211,6 +259,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/disruptions", s.getNodeDisruptions)
 		api.GET("/disruptions/recent", s.getRecentNodeDeletions)
 		api.GET("/nodes", s.getNodesWithUsage)
+		api.GET("/topology", s.getTopology)
 		api.GET("/cluster/summary", s.getClusterSummary)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
@@ -226,10 +275,18 @@ func (s *Server) setupRoutes() {
 		api.GET("/agent/learning/stats", s.getLearningStats)
 		api.GET("/agent/learning/history", s.getOptimizationHistory)
 	}
+
+	// Metrics endpoint (Prometheus)
+	s.router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 }
 
 func (s *Server) Run(addr string) error {
 	return s.router.Run(addr)
+}
+
+// GetHandler returns the HTTP handler for the server
+func (s *Server) GetHandler() http.Handler {
+	return s.router
 }
 
 // HealthCheck godoc
@@ -256,7 +313,72 @@ func (s *Server) healthCheck(c *gin.Context) {
 	// Prometheus support removed - recommendations use Kubernetes resource requests and node usage data
 	health["prometheus"] = "not supported"
 
+	// Add deep health check if requested
+	deep := c.Query("deep") == "true"
+	if deep {
+		deepHealth := s.performDeepHealthCheck()
+		health["checks"] = deepHealth
+	}
+
 	c.JSON(200, health)
+}
+
+type DeepHealthCheck struct {
+	Kubernetes K8sHealthCheck    `json:"kubernetes"`
+	AWS        AWSHealthCheck    `json:"aws"`
+	Ollama     OllamaHealthCheck `json:"ollama"`
+}
+
+type K8sHealthCheck struct {
+	Status  string `json:"status"`
+	Version string `json:"version,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type AWSHealthCheck struct {
+	Status  string `json:"status"`
+	Region  string `json:"region,omitempty"`
+	Pricing string `json:"pricingApi,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type OllamaHealthCheck struct {
+	Status string `json:"status"`
+	Model  string `json:"model,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func (s *Server) performDeepHealthCheck() DeepHealthCheck {
+	result := DeepHealthCheck{}
+
+	// Check Kubernetes
+	if s.k8sClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := s.k8sClient.ListNodePools(ctx)
+		if err != nil {
+			result.Kubernetes = K8sHealthCheck{Status: "unhealthy", Error: err.Error()}
+		} else {
+			result.Kubernetes = K8sHealthCheck{Status: "healthy"}
+		}
+	} else {
+		result.Kubernetes = K8sHealthCheck{Status: "not configured"}
+	}
+
+	// Check AWS (always reports as configured since we have fallback pricing)
+	result.AWS = AWSHealthCheck{
+		Status: "configured",
+		Region: s.config.AWSRegion,
+	}
+
+	// Check Ollama/LLM
+	if s.recommender != nil && s.recommender.HasLLM() {
+		result.Ollama = OllamaHealthCheck{Status: "available", Model: s.config.LLMModel}
+	} else {
+		result.Ollama = OllamaHealthCheck{Status: "not configured"}
+	}
+
+	return result
 }
 
 // GetConfig godoc
@@ -661,7 +783,7 @@ func (s *Server) listAllWorkloads(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	workloads, err := s.k8sClient.ListAllWorkloads(ctx)
+	workloads, err := s.k8sClient.ListAllWorkloads(ctx, s.promClient)
 	if err != nil {
 		// Check if it's a timeout error
 		if ctx.Err() == context.DeadlineExceeded {
@@ -1017,6 +1139,149 @@ func (s *Server) getNodesWithUsage(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"nodes": nodes,
 		"count": len(nodes),
+	})
+}
+
+type TopologyPodResources struct {
+	CPUCores  float64 `json:"cpuCores"`
+	MemoryGiB float64 `json:"memoryGiB"`
+}
+
+type TopologyPod struct {
+	Name         string               `json:"name"`
+	Namespace    string               `json:"namespace"`
+	NodeName     string               `json:"nodeName"`
+	WorkloadName string               `json:"workloadName,omitempty"`
+	WorkloadType string               `json:"workloadType,omitempty"`
+	QOSClass     string               `json:"qosClass,omitempty"`
+	Requests     TopologyPodResources `json:"requests"`
+}
+
+type TopologyNode struct {
+	Name         string                `json:"name"`
+	NodePool     string                `json:"nodePool"`
+	InstanceType string                `json:"instanceType"`
+	CapacityType string                `json:"capacityType"`
+	Architecture string                `json:"architecture"`
+	Zone         string                `json:"zone,omitempty"`
+	CPUUsage     *kubernetes.NodeUsage `json:"cpuUsage,omitempty"`
+	MemoryUsage  *kubernetes.NodeUsage `json:"memoryUsage,omitempty"`
+	PodCount     int                   `json:"podCount"`
+	Pods         []TopologyPod         `json:"pods"`
+	CreationTime string                `json:"creationTime,omitempty"`
+}
+
+// GetTopology godoc
+// @Summary      Get cluster topology (nodes and pods)
+// @Description  Get nodes with usage and the pods scheduled on each node, including per-pod resource requests for visualization
+// @Tags         nodes
+// @Accept       json
+// @Produce      json
+// @Param        maxPodsPerNode  query     int  false  "Maximum pods returned per node (default: 200, max: 1000)" default(200)
+// @Success      200  {object}  map[string]interface{}  "Topology data"
+// @Failure      503  {object}  map[string]interface{}  "Kubernetes client not configured"
+// @Failure      500  {object}  map[string]interface{}  "Internal server error"
+// @Router       /topology [get]
+func (s *Server) getTopology(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+
+	maxPodsPerNode := 200
+	if maxPodsStr := c.Query("maxPodsPerNode"); maxPodsStr != "" {
+		if parsed, err := strconv.Atoi(maxPodsStr); err == nil && parsed > 0 {
+			maxPodsPerNode = parsed
+		}
+	}
+	if maxPodsPerNode > 1000 {
+		maxPodsPerNode = 1000
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	nodeNames := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if n.Name != "" {
+			nodeNames[n.Name] = true
+		}
+	}
+
+	pods, err := s.k8sClient.GetPodsOnNodes(ctx, nodeNames)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	podsByNode := make(map[string][]TopologyPod, len(nodes))
+	for _, p := range pods {
+		// Exclude terminal pods for visualization consistency with node usage.
+		if p.Phase == "Succeeded" || p.Phase == "Failed" {
+			continue
+		}
+
+		cpuCores := 0.0
+		if p.Requests.CPU != "" {
+			if q, parseErr := resource.ParseQuantity(p.Requests.CPU); parseErr == nil {
+				cpuCores = float64(q.MilliValue()) / 1000.0
+			}
+		}
+		memoryGiB := 0.0
+		if p.Requests.Memory != "" {
+			if q, parseErr := resource.ParseQuantity(p.Requests.Memory); parseErr == nil {
+				memoryGiB = float64(q.Value()) / (1024.0 * 1024.0 * 1024.0)
+			}
+		}
+
+		tp := TopologyPod{
+			Name:         p.Name,
+			Namespace:    p.Namespace,
+			NodeName:     p.NodeName,
+			WorkloadName: p.WorkloadName,
+			WorkloadType: p.WorkloadType,
+			QOSClass:     p.QOSClass,
+			Requests: TopologyPodResources{
+				CPUCores:  cpuCores,
+				MemoryGiB: memoryGiB,
+			},
+		}
+
+		podsByNode[p.NodeName] = append(podsByNode[p.NodeName], tp)
+	}
+
+	topologyNodes := make([]TopologyNode, 0, len(nodes))
+	for _, n := range nodes {
+		nodePods := podsByNode[n.Name]
+		if len(nodePods) > maxPodsPerNode {
+			nodePods = nodePods[:maxPodsPerNode]
+		}
+
+		topologyNodes = append(topologyNodes, TopologyNode{
+			Name:         n.Name,
+			NodePool:     n.NodePool,
+			InstanceType: n.InstanceType,
+			CapacityType: n.CapacityType,
+			Architecture: n.Architecture,
+			Zone:         n.Zone,
+			CPUUsage:     n.CPUUsage,
+			MemoryUsage:  n.MemoryUsage,
+			PodCount:     n.PodCount,
+			Pods:         nodePods,
+			CreationTime: n.CreationTime,
+		})
+	}
+
+	c.JSON(200, gin.H{
+		"nodes":          topologyNodes,
+		"count":          len(topologyNodes),
+		"maxPodsPerNode": maxPodsPerNode,
 	})
 }
 
