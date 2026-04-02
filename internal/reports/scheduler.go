@@ -122,15 +122,21 @@ func (r *Reporter) sendReport() {
 	}
 
 	if r.config.SlackChannel != "" {
-		r.sendSlack(report)
+		if err := r.sendSlack(report); err != nil {
+			fmt.Printf("Error sending Slack report: %v\n", err)
+		}
 	}
 
 	if r.config.WebhookURL != "" {
-		r.sendWebhook(report)
+		if err := r.sendWebhook(report); err != nil {
+			fmt.Printf("Error sending webhook report: %v\n", err)
+		}
 	}
 
 	if r.config.EmailTo != "" {
-		r.sendEmail(report)
+		if err := r.sendEmail(report); err != nil {
+			fmt.Printf("Error sending email report: %v\n", err)
+		}
 	}
 }
 
@@ -159,7 +165,11 @@ func (r *Reporter) sendSlack(report Report) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Printf("Warning: failed to close Slack response body: %v\n", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("slack webhook returned status %d", resp.StatusCode)
@@ -177,7 +187,11 @@ func (r *Reporter) sendWebhook(report Report) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Printf("Warning: failed to close webhook response body: %v\n", closeErr)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
