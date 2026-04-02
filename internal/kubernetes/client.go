@@ -1123,57 +1123,18 @@ type PodInfo struct {
 	QOSClass     string       `json:"qosClass,omitempty"` // QoS class (Guaranteed, Burstable, BestEffort)
 }
 
-// GetPodsOnNodes gets all pods running on the specified nodes
+// GetPodsOnNodes gets all pods running on the specified nodes.
+// It fetches per-node so pod resource requests, limits, and QoS are populated (required for topology and cost views).
 func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) ([]PodInfo, error) {
 	var allPods []PodInfo
 
-	// Get pods from all namespaces
-	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pod := range pods.Items {
-		// Check if pod is running on one of our nodes
-		if nodeNames[pod.Spec.NodeName] {
-			// Extract workload name from pod name (remove pod-specific suffix)
-			workloadName := pod.Name
-			workloadType := ""
-
-			// Try to get workload from owner references
-			for _, owner := range pod.OwnerReferences {
-				switch owner.Kind {
-				case "ReplicaSet":
-					// ReplicaSet name format: workloadname-randomstring
-					// Extract workload name
-					parts := strings.Split(owner.Name, "-")
-					if len(parts) > 1 {
-						// Remove the random suffix (last part)
-						workloadName = strings.Join(parts[:len(parts)-1], "-")
-					}
-					workloadType = "deployment"
-				case "StatefulSet":
-					// StatefulSet pod name format: workloadname-ordinal
-					parts := strings.Split(pod.Name, "-")
-					if len(parts) > 1 {
-						// Remove the ordinal (last part)
-						workloadName = strings.Join(parts[:len(parts)-1], "-")
-					}
-					workloadType = "statefulset"
-				case "DaemonSet":
-					workloadName = pod.Name
-					workloadType = "daemonset"
-				}
-			}
-
-			allPods = append(allPods, PodInfo{
-				Name:         pod.Name,
-				Namespace:    pod.Namespace,
-				NodeName:     pod.Spec.NodeName,
-				WorkloadName: workloadName,
-				WorkloadType: workloadType,
-			})
+	for nodeName := range nodeNames {
+		pods, err := c.getPodsOnNode(ctx, nodeName)
+		if err != nil {
+			c.debugLog("Warning: failed to get pods for node %s: %v\n", nodeName, err)
+			continue
 		}
+		allPods = append(allPods, pods...)
 	}
 
 	return allPods, nil

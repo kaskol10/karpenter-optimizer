@@ -13,6 +13,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 
 - 🎯 **Automatic Workload Discovery**: Automatically fetch workloads from your Kubernetes cluster
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
+- 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool)
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
 - 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama/LiteLLM/VLLM
 - 💰 **AWS Pricing Integration**: Real-time pricing from AWS Pricing API for accurate cost calculations
@@ -233,6 +234,7 @@ make swagger
 - `GET /api/v1/nodepools/:name` - Get specific NodePool details
 - `GET /api/v1/nodepools/recommendations` - Get NodePool recommendations
 - `GET /api/v1/nodes` - Get nodes with usage data
+- `GET /api/v1/topology` - Get nodes with scheduled pods and per-pod requests (topology view)
 - `GET /api/v1/cluster/summary` - Get cluster-wide statistics
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions
@@ -405,6 +407,7 @@ For detailed architecture documentation, see [docs/architecture.md](docs/archite
 - `GET /api/v1/nodepools/recommendations` - Get NodePool recommendations
 - `GET /api/v1/recommendations/cluster-summary` - Get cluster-wide recommendations with AI explanations
 - `GET /api/v1/nodes` - List nodes with usage data
+- `GET /api/v1/topology` - Nodes with pods and request sizes for topology visualization
 - `GET /api/v1/disruptions` - Get node disruption information
 
 See the [Swagger UI](http://localhost:8080/swagger/index.html) for complete interactive API documentation with request/response schemas, or generate the docs with `make swagger`.

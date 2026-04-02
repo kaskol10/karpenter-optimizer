@@ -187,6 +187,50 @@ Get all nodes with usage data.
 ]
 ```
 
+### Topology (pods on nodes)
+
+```http
+GET /api/v1/topology
+```
+
+Returns every node (same metadata as `/api/v1/nodes`) plus the pods scheduled on that node, with **CPU and memory requests** parsed to floats for visualization.
+
+**Query parameters**:
+- `maxPodsPerNode` (optional): Maximum pods returned per node after sorting by CPU request (default `200`, max `1000`). Use this to cap payload size on large nodes.
+
+**Response**:
+```json
+{
+  "count": 2,
+  "nodes": [
+    {
+      "name": "ip-10-0-1-2.ec2.internal",
+      "nodePool": "general",
+      "instanceType": "m6i.large",
+      "capacityType": "on-demand",
+      "architecture": "amd64",
+      "zone": "us-east-1a",
+      "cpuUsage": { "used": 1.2, "allocatable": 1.93, "capacity": 2.0, "percent": 62.0 },
+      "memoryUsage": { "used": 4.1, "allocatable": 6.9, "capacity": 8.0, "percent": 59.0 },
+      "podCount": 12,
+      "pods": [
+        {
+          "name": "myapp-7d9f8c6b5-xk2j4",
+          "namespace": "prod",
+          "nodeName": "ip-10-0-1-2.ec2.internal",
+          "workloadName": "myapp",
+          "workloadType": "deployment",
+          "qosClass": "Burstable",
+          "requests": { "cpuCores": 0.25, "memoryGiB": 0.5 }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Pods in terminal phases (`Succeeded`, `Failed`) are omitted.
+
 ### Get Node Disruptions
 
 ```http

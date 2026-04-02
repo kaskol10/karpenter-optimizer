@@ -37,6 +37,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -48,6 +49,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"github.com/karpenter-optimizer/internal/docs/swagger" // Swagger docs
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // debugLog prints debug messages only if debug logging is enabled
@@ -211,6 +213,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/disruptions", s.getNodeDisruptions)
 		api.GET("/disruptions/recent", s.getRecentNodeDeletions)
 		api.GET("/nodes", s.getNodesWithUsage)
+		api.GET("/topology", s.getTopology)
 		api.GET("/cluster/summary", s.getClusterSummary)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
@@ -1024,6 +1027,153 @@ func (s *Server) getNodesWithUsage(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"nodes": nodes,
 		"count": len(nodes),
+	})
+}
+
+// TopologyPodResources is per-pod request totals for topology visualization.
+type TopologyPodResources struct {
+	CPUCores  float64 `json:"cpuCores"`
+	MemoryGiB float64 `json:"memoryGiB"`
+}
+
+// TopologyPod is a pod scheduled on a node with parsed request sizes.
+type TopologyPod struct {
+	Name         string               `json:"name"`
+	Namespace    string               `json:"namespace"`
+	NodeName     string               `json:"nodeName"`
+	WorkloadName string               `json:"workloadName,omitempty"`
+	WorkloadType string               `json:"workloadType,omitempty"`
+	QOSClass     string               `json:"qosClass,omitempty"`
+	Requests     TopologyPodResources `json:"requests"`
+}
+
+// TopologyNode is a node with its pods for the topology view.
+type TopologyNode struct {
+	Name         string                `json:"name"`
+	NodePool     string                `json:"nodePool"`
+	InstanceType string                `json:"instanceType"`
+	CapacityType string                `json:"capacityType"`
+	Architecture string                `json:"architecture"`
+	Zone         string                `json:"zone,omitempty"`
+	CPUUsage     *kubernetes.NodeUsage `json:"cpuUsage,omitempty"`
+	MemoryUsage  *kubernetes.NodeUsage `json:"memoryUsage,omitempty"`
+	PodCount     int                   `json:"podCount"`
+	Pods         []TopologyPod         `json:"pods"`
+	CreationTime string                `json:"creationTime,omitempty"`
+}
+
+func topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
+	var out TopologyPodResources
+	if p.Requests.CPU != "" {
+		if q, err := resource.ParseQuantity(p.Requests.CPU); err == nil {
+			out.CPUCores = float64(q.MilliValue()) / 1000.0
+		}
+	}
+	if p.Requests.Memory != "" {
+		if q, err := resource.ParseQuantity(p.Requests.Memory); err == nil {
+			out.MemoryGiB = float64(q.Value()) / (1024 * 1024 * 1024)
+		}
+	}
+	return out
+}
+
+// GetTopology godoc
+// @Summary      Get cluster topology (nodes and pods)
+// @Description  Nodes with scheduled pods and per-pod resource requests for topology visualization
+// @Tags         nodes
+// @Accept       json
+// @Produce      json
+// @Param        maxPodsPerNode  query     int  false  "Max pods per node (default 200, max 1000)"
+// @Success      200  {object}  map[string]interface{}  "Topology data"
+// @Failure      503  {object}  map[string]interface{}  "Kubernetes client not configured"
+// @Failure      500  {object}  map[string]interface{}  "Internal server error"
+// @Router       /topology [get]
+func (s *Server) getTopology(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+
+	maxPodsPerNode := 200
+	if v := c.Query("maxPodsPerNode"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxPodsPerNode = n
+			if maxPodsPerNode > 1000 {
+				maxPodsPerNode = 1000
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	nodeNames := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		nodeNames[n.Name] = true
+	}
+
+	allPods, err := s.k8sClient.GetPodsOnNodes(ctx, nodeNames)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	podsByNode := make(map[string][]kubernetes.PodInfo)
+	for _, p := range allPods {
+		if p.Phase == "Succeeded" || p.Phase == "Failed" {
+			continue
+		}
+		podsByNode[p.NodeName] = append(podsByNode[p.NodeName], p)
+	}
+
+	out := make([]TopologyNode, 0, len(nodes))
+	for _, node := range nodes {
+		list := podsByNode[node.Name]
+		sort.Slice(list, func(i, j int) bool {
+			return topologyRequestsFromPod(list[i]).CPUCores > topologyRequestsFromPod(list[j]).CPUCores
+		})
+		if len(list) > maxPodsPerNode {
+			list = list[:maxPodsPerNode]
+		}
+
+		topPods := make([]TopologyPod, 0, len(list))
+		for _, p := range list {
+			req := topologyRequestsFromPod(p)
+			topPods = append(topPods, TopologyPod{
+				Name:         p.Name,
+				Namespace:    p.Namespace,
+				NodeName:     p.NodeName,
+				WorkloadName: p.WorkloadName,
+				WorkloadType: p.WorkloadType,
+				QOSClass:     p.QOSClass,
+				Requests:     req,
+			})
+		}
+
+		out = append(out, TopologyNode{
+			Name:         node.Name,
+			NodePool:     node.NodePool,
+			InstanceType: node.InstanceType,
+			CapacityType: node.CapacityType,
+			Architecture: node.Architecture,
+			Zone:         node.Zone,
+			CPUUsage:     node.CPUUsage,
+			MemoryUsage:  node.MemoryUsage,
+			PodCount:     node.PodCount,
+			Pods:         topPods,
+			CreationTime: node.CreationTime,
+		})
+	}
+
+	c.JSON(200, gin.H{
+		"nodes": out,
+		"count": len(out),
 	})
 }
 
