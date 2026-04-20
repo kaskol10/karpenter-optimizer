@@ -192,6 +192,7 @@ export default function TopologyView() {
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [fallbackMode, setFallbackMode] = useState(false);
   const [metric, setMetric] = useState('cpu');
   const [nodePoolFilter, setNodePoolFilter] = useState('');
   const [zoneFilter, setZoneFilter] = useState('');
@@ -199,13 +200,53 @@ export default function TopologyView() {
   const [podNsFilter, setPodNsFilter] = useState('');
   const [podNameFilter, setPodNameFilter] = useState('');
 
+  const mapNodesFallback = (nodeItems) =>
+    nodeItems.map((node) => ({
+      ...node,
+      // Older backends don't provide /topology; synthesize minimal pod objects from podNames.
+      pods: (node.podNames || []).map((qualifiedName) => {
+        const slashIdx = qualifiedName.indexOf('/');
+        const namespace = slashIdx > 0 ? qualifiedName.slice(0, slashIdx) : 'default';
+        const name = slashIdx > 0 ? qualifiedName.slice(slashIdx + 1) : qualifiedName;
+        return {
+          name,
+          namespace,
+          nodeName: node.name,
+          workloadName: '',
+          workloadType: '',
+          qosClass: '',
+          // Equal weights in fallback mode; accurate requests require /topology support.
+          requests: {
+            cpuCores: 1,
+            memoryGiB: 1,
+          },
+        };
+      }),
+    }));
+
   const fetchTopology = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setFallbackMode(false);
     try {
       const response = await axios.get(`${API_URL}/api/v1/topology`);
       setNodes(response.data.nodes || []);
     } catch (err) {
+      if (err.response?.status === 404) {
+        try {
+          const nodesResponse = await axios.get(`${API_URL}/api/v1/nodes`);
+          setNodes(mapNodesFallback(nodesResponse.data.nodes || []));
+          setFallbackMode(true);
+          return;
+        } catch (fallbackErr) {
+          setError(
+            fallbackErr.response?.data?.error ||
+              fallbackErr.message ||
+              'Failed to load topology',
+          );
+          return;
+        }
+      }
       setError(err.response?.data?.error || err.message || 'Failed to load topology');
     } finally {
       setLoading(false);
@@ -377,6 +418,16 @@ export default function TopologyView() {
         <Alert variant="destructive">
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {fallbackMode && (
+        <Alert>
+          <AlertTitle>Compatibility mode</AlertTitle>
+          <AlertDescription>
+            Backend endpoint <code>/api/v1/topology</code> is not available. Showing pod placement
+            using <code>/api/v1/nodes</code> data with equal pod sizing. Upgrade backend image to a
+            version that includes topology support for accurate request-based sizing.
+          </AlertDescription>
         </Alert>
       )}
 

@@ -1062,16 +1062,34 @@ type TopologyNode struct {
 	CreationTime string                `json:"creationTime,omitempty"`
 }
 
-func topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
+func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
 	var out TopologyPodResources
 	if p.Requests.CPU != "" {
 		if q, err := resource.ParseQuantity(p.Requests.CPU); err == nil {
 			out.CPUCores = float64(q.MilliValue()) / 1000.0
+		} else {
+			debugLog(
+				s.config.Debug,
+				"[topology] failed to parse CPU request for pod %s/%s (%q): %v\n",
+				p.Namespace,
+				p.Name,
+				p.Requests.CPU,
+				err,
+			)
 		}
 	}
 	if p.Requests.Memory != "" {
 		if q, err := resource.ParseQuantity(p.Requests.Memory); err == nil {
 			out.MemoryGiB = float64(q.Value()) / (1024 * 1024 * 1024)
+		} else {
+			debugLog(
+				s.config.Debug,
+				"[topology] failed to parse memory request for pod %s/%s (%q): %v\n",
+				p.Namespace,
+				p.Name,
+				p.Requests.Memory,
+				err,
+			)
 		}
 	}
 	return out
@@ -1101,17 +1119,32 @@ func (s *Server) getTopology(c *gin.Context) {
 			if maxPodsPerNode > 1000 {
 				maxPodsPerNode = 1000
 			}
+		} else {
+			debugLog(
+				s.config.Debug,
+				"[topology] invalid maxPodsPerNode query value %q, using default %d\n",
+				v,
+				maxPodsPerNode,
+			)
 		}
 	}
+	debugLog(
+		s.config.Debug,
+		"[topology] request received remote=%s maxPodsPerNode=%d\n",
+		c.ClientIP(),
+		maxPodsPerNode,
+	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
 	if err != nil {
+		debugLog(s.config.Debug, "[topology] failed to fetch nodes: %v\n", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	debugLog(s.config.Debug, "[topology] fetched %d nodes\n", len(nodes))
 
 	nodeNames := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
@@ -1120,39 +1153,68 @@ func (s *Server) getTopology(c *gin.Context) {
 
 	allPods, err := s.k8sClient.GetPodsOnNodes(ctx, nodeNames)
 	if err != nil {
+		debugLog(s.config.Debug, "[topology] failed to fetch pods on nodes: %v\n", err)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	debugLog(s.config.Debug, "[topology] fetched %d pods across selected nodes\n", len(allPods))
 
 	podsByNode := make(map[string][]kubernetes.PodInfo)
+	var terminalSkipped int
 	for _, p := range allPods {
 		if p.Phase == "Succeeded" || p.Phase == "Failed" {
+			terminalSkipped++
 			continue
 		}
 		podsByNode[p.NodeName] = append(podsByNode[p.NodeName], p)
 	}
+	debugLog(
+		s.config.Debug,
+		"[topology] grouped pods by node: nodesWithPods=%d terminalPodsSkipped=%d\n",
+		len(podsByNode),
+		terminalSkipped,
+	)
 
 	out := make([]TopologyNode, 0, len(nodes))
 	for _, node := range nodes {
-		list := podsByNode[node.Name]
+		type podWithReq struct {
+			pod kubernetes.PodInfo
+			req TopologyPodResources
+		}
+
+		list := make([]podWithReq, 0, len(podsByNode[node.Name]))
+		for _, p := range podsByNode[node.Name] {
+			list = append(list, podWithReq{
+				pod: p,
+				req: s.topologyRequestsFromPod(p),
+			})
+		}
+
 		sort.Slice(list, func(i, j int) bool {
-			return topologyRequestsFromPod(list[i]).CPUCores > topologyRequestsFromPod(list[j]).CPUCores
+			return list[i].req.CPUCores > list[j].req.CPUCores
 		})
+		originalLen := len(list)
 		if len(list) > maxPodsPerNode {
 			list = list[:maxPodsPerNode]
+			debugLog(
+				s.config.Debug,
+				"[topology] truncated pods for node=%s from %d to %d by maxPodsPerNode\n",
+				node.Name,
+				originalLen,
+				len(list),
+			)
 		}
 
 		topPods := make([]TopologyPod, 0, len(list))
-		for _, p := range list {
-			req := topologyRequestsFromPod(p)
+		for _, entry := range list {
 			topPods = append(topPods, TopologyPod{
-				Name:         p.Name,
-				Namespace:    p.Namespace,
-				NodeName:     p.NodeName,
-				WorkloadName: p.WorkloadName,
-				WorkloadType: p.WorkloadType,
-				QOSClass:     p.QOSClass,
-				Requests:     req,
+				Name:         entry.pod.Name,
+				Namespace:    entry.pod.Namespace,
+				NodeName:     entry.pod.NodeName,
+				WorkloadName: entry.pod.WorkloadName,
+				WorkloadType: entry.pod.WorkloadType,
+				QOSClass:     entry.pod.QOSClass,
+				Requests:     entry.req,
 			})
 		}
 
@@ -1170,6 +1232,7 @@ func (s *Server) getTopology(c *gin.Context) {
 			CreationTime: node.CreationTime,
 		})
 	}
+	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
 
 	c.JSON(200, gin.H{
 		"nodes": out,
