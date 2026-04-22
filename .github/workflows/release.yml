@@ -149,7 +149,7 @@ jobs:
           echo "Updated Chart.yaml:"
           cat charts/karpenter-optimizer/Chart.yaml
           echo "Updated values.yaml image tags:"
-          rg -n "^[[:space:]]*tag:" charts/karpenter-optimizer/values.yaml
+          grep -nE "^[[:space:]]*tag:" charts/karpenter-optimizer/values.yaml
 
       - name: Configure Git
         run: |
