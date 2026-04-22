@@ -140,27 +140,30 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
-      - name: Update Chart.yaml version
+      - name: Update chart and image tags
         run: |
           VERSION=${{ steps.version.outputs.version }}
           sed -i "s/^version:.*/version: $VERSION/" charts/karpenter-optimizer/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/karpenter-optimizer/Chart.yaml
+          sed -i "s|^\(\s*tag:\s*\).*|\1\"$VERSION\"|" charts/karpenter-optimizer/values.yaml
           echo "Updated Chart.yaml:"
           cat charts/karpenter-optimizer/Chart.yaml
+          echo "Updated values.yaml image tags:"
+          rg -n "^[[:space:]]*tag:" charts/karpenter-optimizer/values.yaml
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit Chart.yaml changes
+      - name: Commit chart and values changes
         run: |
-          git add charts/karpenter-optimizer/Chart.yaml
+          git add charts/karpenter-optimizer/Chart.yaml charts/karpenter-optimizer/values.yaml
           if git diff --staged --quiet; then
-            echo "No changes to Chart.yaml"
+            echo "No chart/version changes to commit"
           else
-            git commit -m "chore: bump Helm chart version to ${{ steps.version.outputs.version }}"
-            git push origin HEAD:main || echo "Failed to push Chart.yaml changes (may already be committed)"
+            git commit -m "chore: bump Helm chart and image tags to ${{ steps.version.outputs.version }}"
+            git push origin HEAD:main || echo "Failed to push chart/value changes (may already be committed)"
           fi
 
       - name: Package Chart

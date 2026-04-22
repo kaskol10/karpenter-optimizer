@@ -41,6 +41,10 @@ function getMetricFields(metric) {
   };
 }
 
+function isDaemonSetPod(pod) {
+  return (pod.workloadType || '').toLowerCase() === 'daemonset';
+}
+
 function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
   const { format, label } = getMetricFields(metric);
   const weight = metric === 'cpu' ? pod.requests?.cpuCores || 0 : pod.requests?.memoryGiB || 0;
@@ -78,7 +82,7 @@ function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
   );
 }
 
-function NodePodBar({ node, pods, metric }) {
+function NodePodBar({ node, pods, metric, showAllPodsInList }) {
   const { weight: weightFn, format, label } = getMetricFields(metric);
   const [hoveredPod, setHoveredPod] = useState(null);
 
@@ -159,7 +163,7 @@ function NodePodBar({ node, pods, metric }) {
         <div className="space-y-1">
           <p className="text-xs font-semibold">Pods (top by {label} request)</p>
           <div className="flex flex-col gap-1">
-            {podsSorted.slice(0, 8).map((pod) => {
+            {(showAllPodsInList ? podsSorted : podsSorted.slice(0, 8)).map((pod) => {
               const w = weightFn(pod);
               return (
                 <div
@@ -178,7 +182,7 @@ function NodePodBar({ node, pods, metric }) {
                 </div>
               );
             })}
-            {podsSorted.length > 8 && (
+            {!showAllPodsInList && podsSorted.length > 8 && (
               <p className="text-xs text-muted-foreground italic">+{podsSorted.length - 8} more</p>
             )}
           </div>
@@ -199,6 +203,31 @@ export default function TopologyView() {
   const [nodeNameFilter, setNodeNameFilter] = useState('');
   const [podNsFilter, setPodNsFilter] = useState('');
   const [podNameFilter, setPodNameFilter] = useState('');
+  const [showAllPodsInOverview, setShowAllPodsInOverview] = useState(false);
+  const [hideDaemonSets, setHideDaemonSets] = useState(false);
+  const [expandedNodeName, setExpandedNodeName] = useState(null);
+  const [nodeDetailFilters, setNodeDetailFilters] = useState({});
+
+  const getNodeDetailFilters = useCallback(
+    (nodeName) =>
+      nodeDetailFilters[nodeName] || {
+        daemonSetsOnly: false,
+        search: '',
+      },
+    [nodeDetailFilters],
+  );
+
+  const setNodeDetailFilter = useCallback((nodeName, partial) => {
+    setNodeDetailFilters((prev) => ({
+      ...prev,
+      [nodeName]: {
+        daemonSetsOnly: false,
+        search: '',
+        ...(prev[nodeName] || {}),
+        ...partial,
+      },
+    }));
+  }, []);
 
   const mapNodesFallback = (nodeItems) =>
     nodeItems.map((node) => ({
@@ -347,6 +376,20 @@ export default function TopologyView() {
             >
               Memory
             </Button>
+            <Button
+              size="sm"
+              variant={showAllPodsInOverview ? 'default' : 'outline'}
+              onClick={() => setShowAllPodsInOverview((prev) => !prev)}
+            >
+              {showAllPodsInOverview ? 'Overview: all pods' : 'Overview: top 8 pods'}
+            </Button>
+            <Button
+              size="sm"
+              variant={hideDaemonSets ? 'default' : 'outline'}
+              onClick={() => setHideDaemonSets((prev) => !prev)}
+            >
+              {hideDaemonSets ? 'DaemonSets hidden' : 'Hide daemonsets'}
+            </Button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
@@ -445,9 +488,14 @@ export default function TopologyView() {
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {poolNodes.map((node) => {
-                  const pods = (node.pods || []).filter(
-                    (p) => podNsMatch(p) && podNameMatch(p),
-                  );
+                  const nodePods = node.pods || [];
+                  const pods = nodePods.filter((p) => {
+                    if (!podNsMatch(p) || !podNameMatch(p)) return false;
+                    if (hideDaemonSets && isDaemonSetPod(p)) return false;
+                    return true;
+                  });
+                  const showDrilldown = expandedNodeName === node.name;
+
                   return (
                     <Card key={node.name}>
                       <CardHeader className="pb-2">
@@ -463,11 +511,109 @@ export default function TopologyView() {
                             {node.zone && <Badge variant="secondary">{node.zone}</Badge>}
                           </div>
                         </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setExpandedNodeName((prev) => (prev === node.name ? null : node.name))
+                            }
+                          >
+                            {showDrilldown ? 'Hide node details' : 'Drill into node'}
+                          </Button>
+                          <span className="text-xs text-muted-foreground">
+                            Full node pods: {nodePods.length}
+                          </span>
+                        </div>
                       </CardHeader>
                       <CardContent>
-                        <NodePodBar node={node} pods={pods} metric={metric} />
+                        <NodePodBar
+                          node={node}
+                          pods={pods}
+                          metric={metric}
+                          showAllPodsInList={showAllPodsInOverview}
+                        />
                         {pods.length === 0 && (
                           <p className="text-xs text-muted-foreground mt-2">No pods match filters.</p>
+                        )}
+                        {showDrilldown && (
+                          <div className="mt-4 space-y-2 border-t pt-3">
+                            {(() => {
+                              const detail = getNodeDetailFilters(node.name);
+                              return (
+                                <>
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-xs font-semibold">
+                                      Node detail pods (includes daemonsets)
+                                    </p>
+                                    <Badge variant="outline">{nodePods.length} pods</Badge>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 items-center">
+                                    <Button
+                                      size="sm"
+                                      variant={detail.daemonSetsOnly ? 'default' : 'outline'}
+                                      onClick={() =>
+                                        setNodeDetailFilter(node.name, {
+                                          daemonSetsOnly: !detail.daemonSetsOnly,
+                                        })
+                                      }
+                                    >
+                                      {detail.daemonSetsOnly ? 'DaemonSets only' : 'All pod types'}
+                                    </Button>
+                                    <Input
+                                      value={detail.search}
+                                      onChange={(e) =>
+                                        setNodeDetailFilter(node.name, { search: e.target.value })
+                                      }
+                                      placeholder="Search in selected node"
+                                      className="h-8 max-w-xs"
+                                    />
+                                  </div>
+                                  <div className="max-h-72 overflow-y-auto space-y-1 pr-1">
+                                    {nodePods
+                                      .filter((pod) => {
+                                        if (detail.daemonSetsOnly && !isDaemonSetPod(pod)) return false;
+                                        if (!detail.search) return true;
+                                        const q = detail.search.toLowerCase();
+                                        return (
+                                          pod.name.toLowerCase().includes(q) ||
+                                          pod.namespace.toLowerCase().includes(q) ||
+                                          (pod.workloadType || '').toLowerCase().includes(q)
+                                        );
+                                      })
+                                      .map((pod) => (
+                                        <div
+                                          key={`detail-${getPodKey(pod)}`}
+                                          className="flex items-center gap-2 text-xs rounded-md border bg-card/60 px-2 py-1 min-w-0"
+                                          title={`${pod.namespace}/${pod.name}`}
+                                        >
+                                          <span
+                                            className="inline-block w-2 h-2 rounded-full border border-foreground/10 shrink-0"
+                                            style={{
+                                              background: `hsl(${hashToHue(getPodKey(pod))} 70% 50% / 0.55)`,
+                                            }}
+                                          />
+                                          <span className="font-mono truncate">
+                                            {pod.namespace}/{pod.name}
+                                          </span>
+                                          {pod.workloadType && (
+                                            <Badge variant="secondary" className="text-[10px]">
+                                              {pod.workloadType}
+                                            </Badge>
+                                          )}
+                                          <span className="ml-auto font-mono text-muted-foreground shrink-0">
+                                            CPU {(pod.requests?.cpuCores || 0).toFixed(3)}
+                                          </span>
+                                          <span className="font-mono text-muted-foreground shrink-0">
+                                            MEM {(pod.requests?.memoryGiB || 0).toFixed(2)}Gi
+                                          </span>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
                         )}
                       </CardContent>
                     </Card>
