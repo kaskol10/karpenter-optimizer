@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /app/bin/karpenter-optimizer ./cmd/cli
 
 # Final stage
-FROM alpine:3.19
+FROM alpine:3.23
 
 RUN apk --no-cache add ca-certificates
 
