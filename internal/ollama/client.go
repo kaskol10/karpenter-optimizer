@@ -9,17 +9,26 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	model      string
-	provider   string // "ollama" or "litellm"
+	provider   string // "ollama", "litellm" or "bedrock"
 	apiKey     string // Optional API key for LiteLLM
 	debug      bool   // Enable debug logging
+	// Bedrock provider state (nil unless provider == "bedrock")
+	bedrockClient *bedrockruntime.Client
+	bedrockErr    error
 }
 
 type ChatRequest struct {
@@ -46,15 +55,17 @@ type ChatResponse struct {
 	EvalDuration       int64   `json:"eval_duration"`
 }
 
-// NewClient creates a new LLM client supporting both Ollama and LiteLLM
-// provider: "ollama" or "litellm" (default: "ollama")
-// apiKey: Optional API key for LiteLLM authentication
+// NewClient creates a new LLM client supporting Ollama, LiteLLM and AWS Bedrock
+// provider: "ollama", "litellm" or "bedrock" (default: "ollama"; "bedrock" is
+// never auto-detected and must be set explicitly)
+// apiKey: Optional API key for LiteLLM authentication (unused for Bedrock,
+// which signs requests with the AWS default credential chain)
 // debug: Enable debug logging
 func NewClient(baseURL, model, provider, apiKey string, debug bool) *Client {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
-	if model == "" {
+	if model == "" && provider != "bedrock" {
 		model = "gemma3:1b" // Default model
 	}
 	if provider == "" {
@@ -81,11 +92,37 @@ func NewClient(baseURL, model, provider, apiKey string, debug bool) *Client {
 		debug:    debug,
 	}
 
+	if provider == "bedrock" {
+		client.initBedrock()
+	}
+
 	if debug {
 		log.Printf("[LLM] Initialized client: provider=%s, url=%s, model=%s", provider, baseURL, model)
 	}
 
 	return client
+}
+
+// initBedrock creates the Bedrock Runtime client using the AWS default
+// credential chain (env keys, IRSA/web identity, instance profile, ...),
+// so no API key is needed. The region comes from the standard AWS
+// env/config; LLM_AWS_REGION overrides it for setups where Bedrock lives
+// in a different region than the cluster.
+func (c *Client) initBedrock() {
+	var opts []func(*config.LoadOptions) error
+	if region := os.Getenv("LLM_AWS_REGION"); region != "" {
+		opts = append(opts, config.WithRegion(region))
+	}
+	awsCfg, err := config.LoadDefaultConfig(context.Background(), opts...)
+	if err != nil {
+		c.bedrockErr = fmt.Errorf("failed to load AWS config for Bedrock: %w", err)
+		log.Printf("[LLM] %v", c.bedrockErr)
+		return
+	}
+	c.bedrockClient = bedrockruntime.NewFromConfig(awsCfg)
+	if c.debug {
+		log.Printf("[LLM] Bedrock client initialized: region=%s, model=%s", awsCfg.Region, c.model)
+	}
 }
 
 // LiteLLMChatRequest is the OpenAI-compatible request format for LiteLLM
@@ -114,6 +151,10 @@ type LiteLLMChatResponse struct {
 }
 
 func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
+	if c.provider == "bedrock" {
+		return c.chatBedrock(ctx, prompt)
+	}
+
 	var url string
 	var reqBody interface{}
 
@@ -264,6 +305,73 @@ func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
 
 		return content, nil
 	}
+}
+
+// chatBedrock sends the prompt via the Bedrock Converse API. Requests are
+// signed with SigV4, so it works with IAM roles (e.g. IRSA on EKS) and needs
+// neither an API key nor an endpoint URL.
+func (c *Client) chatBedrock(ctx context.Context, prompt string) (string, error) {
+	if c.bedrockClient == nil {
+		if c.bedrockErr != nil {
+			return "", c.bedrockErr
+		}
+		return "", errors.New("bedrock client is not initialized")
+	}
+	if c.model == "" {
+		return "", errors.New("LLM_MODEL must be set to a Bedrock model ID or inference profile ID (e.g. eu.anthropic.claude-3-5-haiku-20241022-v1:0)")
+	}
+
+	if c.debug {
+		log.Printf("[LLM] Sending Bedrock Converse request with model %s", c.model)
+		log.Printf("[LLM] Prompt length: %d characters", len(prompt))
+	}
+
+	startTime := time.Now()
+	resp, err := c.bedrockClient.Converse(ctx, &bedrockruntime.ConverseInput{
+		ModelId: aws.String(c.model),
+		Messages: []types.Message{
+			{
+				Role: types.ConversationRoleUser,
+				Content: []types.ContentBlock{
+					&types.ContentBlockMemberText{Value: prompt},
+				},
+			},
+		},
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		if c.debug {
+			log.Printf("[LLM] Bedrock request failed after %v: %v", duration, err)
+		}
+		return "", fmt.Errorf("bedrock request failed: %w", err)
+	}
+
+	output, ok := resp.Output.(*types.ConverseOutputMemberMessage)
+	if !ok {
+		return "", fmt.Errorf("unexpected Bedrock response type %T", resp.Output)
+	}
+
+	var sb strings.Builder
+	for _, block := range output.Value.Content {
+		if text, ok := block.(*types.ContentBlockMemberText); ok {
+			sb.WriteString(text.Value)
+		}
+	}
+	content := sb.String()
+	if content == "" {
+		return "", errors.New("no text content in Bedrock response")
+	}
+
+	if c.debug {
+		var totalTokens int32
+		if resp.Usage != nil && resp.Usage.TotalTokens != nil {
+			totalTokens = *resp.Usage.TotalTokens
+		}
+		log.Printf("[LLM] Bedrock response received in %v: %d tokens used, response length: %d characters",
+			duration, totalTokens, len(content))
+	}
+
+	return content, nil
 }
 
 // truncateString truncates a string to a maximum length, adding "..." if truncated

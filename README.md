@@ -15,7 +15,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
 - 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool)
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
-- 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama/LiteLLM/VLLM
+- 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama/LiteLLM/VLLM/AWS Bedrock
 - 💰 **AWS Pricing Integration**: Real-time pricing from AWS Pricing API for accurate cost calculations
 - 🔄 **Spot vs On-Demand Optimization**: Automatically recommends optimal capacity types (spot/on-demand)
 - 📈 **Cost Savings Analysis**: Detailed cost breakdown showing potential savings per NodePool and cluster-wide
@@ -145,6 +145,9 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 - `PORT`: Port for the API server (default: 8080)
 - `OLLAMA_URL`: URL to Ollama instance for AI explanations (optional)
 - `OLLAMA_MODEL`: Ollama model to use (default: `granite4:latest`)
+- `LLM_PROVIDER`: `ollama`, `litellm` or `bedrock` (auto-detected from `LLM_URL`, except `bedrock` which must be set explicitly)
+- `LLM_URL` / `LLM_MODEL` / `LLM_API_KEY`: generic LLM configuration superseding the `OLLAMA_*` variables
+- `LLM_AWS_REGION`: AWS region for Bedrock, if different from the default AWS region (optional; the `bedrock` provider signs Converse API requests with the AWS default credential chain — e.g. IRSA on EKS — so it needs no URL or API key, just `bedrock:InvokeModel` permissions and `LLM_MODEL` set to a model or inference profile ID)
 
 ## 📖 Documentation
 

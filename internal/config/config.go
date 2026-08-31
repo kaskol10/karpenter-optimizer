@@ -9,8 +9,8 @@ type Config struct {
 	KubeconfigPath string
 	KubeContext    string
 	APIPort        string
-	// LLM Configuration (supports Ollama or LiteLLM)
-	LLMProvider string // "ollama" or "litellm"
+	// LLM Configuration (supports Ollama, LiteLLM or AWS Bedrock)
+	LLMProvider string // "ollama", "litellm" or "bedrock"
 	LLMURL      string
 	LLMModel    string
 	LLMAPIKey   string
@@ -59,7 +59,9 @@ func Load() *Config {
 	if llmURL == "" {
 		llmURL = "http://localhost:11434"
 	}
-	if llmModel == "" {
+	// No sensible default model exists for Bedrock (model access is
+	// account-specific), so leave it empty and let the client report it.
+	if llmModel == "" && llmProvider != "bedrock" {
 		llmModel = "granite4:latest"
 	}
 	if llmProvider == "" {
