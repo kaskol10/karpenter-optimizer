@@ -255,6 +255,16 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 				Value: aws.String(capacityStatus),
 			},
 			{
+				// Without this filter the query also matches SKUs with
+				// pre-installed SQL Server (SQL Ent/Std/Web), and with
+				// MaxResults=1 the API may return one of those instead of
+				// plain Linux (e.g. c5a.8xlarge: $13.376/hr SQL Ent vs
+				// $1.376/hr plain Linux in EU (Ireland)).
+				Type:  types.FilterTypeTermMatch,
+				Field: aws.String("preInstalledSw"),
+				Value: aws.String("NA"),
+			},
+			{
 				Type:  types.FilterTypeTermMatch,
 				Field: aws.String("location"),
 				Value: aws.String(getLocationForRegion(c.region)),
