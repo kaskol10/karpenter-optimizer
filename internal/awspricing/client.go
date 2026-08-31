@@ -26,15 +26,35 @@ func getLocationForRegion(region string) string {
 		"us-east-2":      "US East (Ohio)",
 		"us-west-1":      "US West (N. California)",
 		"us-west-2":      "US West (Oregon)",
+		"af-south-1":     "Africa (Cape Town)",
+		"ap-east-1":      "Asia Pacific (Hong Kong)",
+		"ap-east-2":      "Asia Pacific (Taipei)",
+		"ap-south-1":     "Asia Pacific (Mumbai)",
+		"ap-south-2":     "Asia Pacific (Hyderabad)",
+		"ap-southeast-1": "Asia Pacific (Singapore)",
+		"ap-southeast-2": "Asia Pacific (Sydney)",
+		"ap-southeast-3": "Asia Pacific (Jakarta)",
+		"ap-southeast-4": "Asia Pacific (Melbourne)",
+		"ap-southeast-5": "Asia Pacific (Malaysia)",
+		"ap-southeast-6": "Asia Pacific (New Zealand)",
+		"ap-southeast-7": "Asia Pacific (Thailand)",
+		"ap-northeast-1": "Asia Pacific (Tokyo)",
+		"ap-northeast-2": "Asia Pacific (Seoul)",
+		"ap-northeast-3": "Asia Pacific (Osaka)",
+		"ca-central-1":   "Canada (Central)",
+		"ca-west-1":      "Canada West (Calgary)",
 		"eu-west-1":      "EU (Ireland)",
 		"eu-west-2":      "EU (London)",
 		"eu-west-3":      "EU (Paris)",
 		"eu-central-1":   "EU (Frankfurt)",
-		"ap-southeast-1": "Asia Pacific (Singapore)",
-		"ap-southeast-2": "Asia Pacific (Sydney)",
-		"ap-northeast-1": "Asia Pacific (Tokyo)",
-		"ap-south-1":     "Asia Pacific (Mumbai)",
-		"ca-central-1":   "Canada (Central)",
+		"eu-central-2":   "Europe (Zurich)",
+		"eu-north-1":     "EU (Stockholm)",
+		"eu-south-1":     "EU (Milan)",
+		"eu-south-2":     "Europe (Spain)",
+		"il-central-1":   "Israel (Tel Aviv)",
+		"me-central-1":   "Middle East (UAE)",
+		"me-south-1":     "Middle East (Bahrain)",
+		"mx-central-1":   "Mexico (Central)",
 		"sa-east-1":      "South America (Sao Paulo)",
 	}
 
@@ -253,6 +273,16 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 				Type:  types.FilterTypeTermMatch,
 				Field: aws.String("capacitystatus"),
 				Value: aws.String(capacityStatus),
+			},
+			{
+				// Without this filter the query also matches SKUs with
+				// pre-installed SQL Server (SQL Ent/Std/Web), and with
+				// MaxResults=1 the API may return one of those instead of
+				// plain Linux (e.g. c5a.8xlarge: $13.376/hr SQL Ent vs
+				// $1.376/hr plain Linux in EU (Ireland)).
+				Type:  types.FilterTypeTermMatch,
+				Field: aws.String("preInstalledSw"),
+				Value: aws.String("NA"),
 			},
 			{
 				Type:  types.FilterTypeTermMatch,
