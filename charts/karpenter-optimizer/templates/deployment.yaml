@@ -55,7 +55,7 @@ spec:
               value: "true"
             {{- end }}
             {{- if .Values.config.llm.enabled }}
-            # LLM Provider Configuration (supports Ollama or LiteLLM)
+            # LLM Provider Configuration (supports Ollama, LiteLLM or AWS Bedrock)
             - name: LLM_PROVIDER
               value: {{ .Values.config.llm.provider | default "ollama" | quote }}
             {{- if .Values.config.llm.url }}
@@ -69,6 +69,14 @@ spec:
             {{- if .Values.config.llm.apiKey }}
             - name: LLM_API_KEY
               value: {{ .Values.config.llm.apiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.llm.awsRegion }}
+            - name: LLM_AWS_REGION
+              value: {{ .Values.config.llm.awsRegion | quote }}
+            {{- end }}
+            {{- if .Values.config.llm.maxTokens }}
+            - name: LLM_MAX_TOKENS
+              value: {{ .Values.config.llm.maxTokens | quote }}
             {{- end }}
             {{- else if .Values.config.ollama.enabled }}
             # Legacy Ollama Configuration (for backward compatibility)

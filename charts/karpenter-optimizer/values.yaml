@@ -114,21 +114,29 @@ config:
   # Set to true to enable verbose debug logging
   debug: false
   
-  # LLM Configuration (supports Ollama or LiteLLM)
-  # Set llm.provider to "ollama" or "litellm"
+  # LLM Configuration (supports Ollama, LiteLLM or AWS Bedrock)
+  # Set llm.provider to "ollama", "litellm" or "bedrock"
   llm:
-    # Provider: "ollama" or "litellm" (default: "ollama" for backward compatibility)
+    # Provider: "ollama", "litellm" or "bedrock" (default: "ollama" for backward compatibility)
+    # "bedrock" calls the Bedrock Converse API with SigV4 auth using the AWS
+    # default credential chain (e.g. IRSA on EKS) — no url/apiKey needed.
     provider: "ollama"
-    # Base URL for LLM service
+    # Base URL for LLM service (not used for Bedrock)
     # For Ollama: http://ollama-service:11434
     # For LiteLLM: http://litellm-service:4000
     url: ""
     # Model name
     # For Ollama: e.g., "granite4:latest", "gemma2:2b"
     # For LiteLLM: e.g., "gpt-3.5-turbo", "claude-3-sonnet"
+    # For Bedrock: a model or inference profile ID, e.g. "eu.anthropic.claude-3-haiku-20240307-v1:0"
     model: ""
-    # API key (optional, mainly for LiteLLM with authentication)
+    # API key (optional, mainly for LiteLLM with authentication; not used for Bedrock)
     apiKey: ""
+    # AWS region for Bedrock, if different from the pricing region (optional)
+    awsRegion: ""
+    # Response token cap for Bedrock requests, bounds the worst-case cost per
+    # request (optional; unset = model default, i.e. the model's maximum)
+    maxTokens: ""
     # Set to true to enable LLM features
     enabled: false
   

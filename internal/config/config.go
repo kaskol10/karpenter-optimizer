@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -9,11 +10,13 @@ type Config struct {
 	KubeconfigPath string
 	KubeContext    string
 	APIPort        string
-	// LLM Configuration (supports Ollama or LiteLLM)
-	LLMProvider string // "ollama" or "litellm"
-	LLMURL      string
-	LLMModel    string
-	LLMAPIKey   string
+	// LLM Configuration (supports Ollama, LiteLLM or AWS Bedrock)
+	LLMProvider  string // "ollama", "litellm" or "bedrock"
+	LLMURL       string
+	LLMModel     string
+	LLMAPIKey    string
+	LLMAWSRegion string // AWS region override for the Bedrock provider (optional)
+	LLMMaxTokens int    // Response token cap for the Bedrock provider (0 = model default)
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -59,7 +62,9 @@ func Load() *Config {
 	if llmURL == "" {
 		llmURL = "http://localhost:11434"
 	}
-	if llmModel == "" {
+	// No sensible default model exists for Bedrock (model access is
+	// account-specific), so leave it empty and let the client report it.
+	if llmModel == "" && llmProvider != "bedrock" {
 		llmModel = "granite4:latest"
 	}
 	if llmProvider == "" {
@@ -83,6 +88,8 @@ func Load() *Config {
 		LLMURL:            llmURL,
 		LLMModel:          llmModel,
 		LLMAPIKey:         llmAPIKey,
+		LLMAWSRegion:      getEnv("LLM_AWS_REGION", ""),
+		LLMMaxTokens:      getEnvInt("LLM_MAX_TOKENS", 0),
 		OllamaURL:         ollamaURL, // Keep for backward compatibility
 		OllamaModel:       ollamaModel,
 		AWSRegion:         getEnv("AWS_REGION", "eu-west-1"),
@@ -96,6 +103,15 @@ func Load() *Config {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
 	}
 	return defaultValue
 }

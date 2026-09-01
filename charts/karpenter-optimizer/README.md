@@ -63,6 +63,17 @@ helm install karpenter-optimizer karpenter-optimizer/karpenter-optimizer \
   --set config.llm.apiKey=your-api-key
 ```
 
+**With AWS Bedrock (via IRSA):**
+```bash
+helm install karpenter-optimizer karpenter-optimizer/karpenter-optimizer \
+  --namespace karpenter-optimizer \
+  --create-namespace \
+  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::ACCOUNT_ID:role/karpenter-optimizer-role \
+  --set config.llm.enabled=true \
+  --set config.llm.provider=bedrock \
+  --set config.llm.model=eu.anthropic.claude-3-haiku-20240307-v1:0
+```
+
 ## Configuration
 
 ### LLM Provider Configuration
@@ -81,6 +92,23 @@ config:
     url: "http://litellm-service:4000"
     model: "gpt-3.5-turbo"
     apiKey: "your-api-key"  # Optional, if LiteLLM requires authentication
+```
+
+#### AWS Bedrock
+
+The `bedrock` provider calls the Bedrock Converse API and signs requests with
+SigV4 via the AWS default credential chain (e.g. IRSA on EKS), so it needs no
+URL or API key — just `bedrock:InvokeModel` /
+`bedrock:InvokeModelWithResponseStream` permissions on the role and a model or
+inference profile ID:
+
+```yaml
+config:
+  llm:
+    enabled: true
+    provider: "bedrock"
+    model: "eu.anthropic.claude-3-haiku-20240307-v1:0"
+    # awsRegion: "eu-central-1"  # only if Bedrock lives in a different region
 ```
 
 #### Ollama (Legacy)
@@ -120,10 +148,12 @@ The following table lists the configurable parameters and their default values:
 | `service.port` | Service port | `8080` |
 | `ingress.enabled` | Enable ingress | `false` |
 | `config.llm.enabled` | Enable LLM integration | `false` |
-| `config.llm.provider` | LLM provider (`ollama` or `litellm`) | `ollama` |
-| `config.llm.url` | LLM service URL | `""` |
-| `config.llm.model` | Model name | `""` |
-| `config.llm.apiKey` | API key (for LiteLLM) | `""` |
+| `config.llm.provider` | LLM provider (`ollama`, `litellm` or `bedrock`) | `ollama` |
+| `config.llm.url` | LLM service URL (not used for Bedrock) | `""` |
+| `config.llm.model` | Model name (for Bedrock: a model or inference profile ID) | `""` |
+| `config.llm.apiKey` | API key (for LiteLLM; not used for Bedrock) | `""` |
+| `config.llm.awsRegion` | AWS region for Bedrock, if different from the default region | `""` |
+| `config.llm.maxTokens` | Response token cap for Bedrock (optional; bounds worst-case cost, unset = model default) | `""` |
 | `config.ollama.enabled` | Enable Ollama integration (legacy) | `false` |
 | `config.ollama.url` | Ollama URL (legacy) | `""` |
 | `config.ollama.model` | Ollama model (legacy) | `granite4:latest` |
