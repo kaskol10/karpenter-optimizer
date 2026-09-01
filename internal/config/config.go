@@ -10,10 +10,11 @@ type Config struct {
 	KubeContext    string
 	APIPort        string
 	// LLM Configuration (supports Ollama, LiteLLM or AWS Bedrock)
-	LLMProvider string // "ollama", "litellm" or "bedrock"
-	LLMURL      string
-	LLMModel    string
-	LLMAPIKey   string
+	LLMProvider  string // "ollama", "litellm" or "bedrock"
+	LLMURL       string
+	LLMModel     string
+	LLMAPIKey    string
+	LLMAWSRegion string // AWS region override for the Bedrock provider (optional)
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -85,6 +86,7 @@ func Load() *Config {
 		LLMURL:            llmURL,
 		LLMModel:          llmModel,
 		LLMAPIKey:         llmAPIKey,
+		LLMAWSRegion:      getEnv("LLM_AWS_REGION", ""),
 		OllamaURL:         ollamaURL, // Keep for backward compatibility
 		OllamaModel:       ollamaModel,
 		AWSRegion:         getEnv("AWS_REGION", "eu-west-1"),

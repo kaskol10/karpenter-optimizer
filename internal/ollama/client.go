@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -25,10 +24,17 @@ type Client struct {
 	model      string
 	provider   string // "ollama", "litellm" or "bedrock"
 	apiKey     string // Optional API key for LiteLLM
+	awsRegion  string // Optional AWS region override for Bedrock
 	debug      bool   // Enable debug logging
 	// Bedrock provider state (nil unless provider == "bedrock")
-	bedrockClient *bedrockruntime.Client
+	bedrockClient bedrockAPI
 	bedrockErr    error
+}
+
+// bedrockAPI is the subset of the Bedrock Runtime client used by this
+// package, extracted as an interface so tests can substitute a fake.
+type bedrockAPI interface {
+	Converse(ctx context.Context, params *bedrockruntime.ConverseInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseOutput, error)
 }
 
 type ChatRequest struct {
@@ -60,8 +66,9 @@ type ChatResponse struct {
 // never auto-detected and must be set explicitly)
 // apiKey: Optional API key for LiteLLM authentication (unused for Bedrock,
 // which signs requests with the AWS default credential chain)
+// awsRegion: Optional AWS region override for Bedrock (unused otherwise)
 // debug: Enable debug logging
-func NewClient(baseURL, model, provider, apiKey string, debug bool) *Client {
+func NewClient(baseURL, model, provider, apiKey, awsRegion string, debug bool) *Client {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -86,10 +93,11 @@ func NewClient(baseURL, model, provider, apiKey string, debug bool) *Client {
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second, // Longer timeout for LLM
 		},
-		model:    model,
-		provider: provider,
-		apiKey:   apiKey,
-		debug:    debug,
+		model:     model,
+		provider:  provider,
+		apiKey:    apiKey,
+		awsRegion: awsRegion,
+		debug:     debug,
 	}
 
 	if provider == "bedrock" {
@@ -106,12 +114,15 @@ func NewClient(baseURL, model, provider, apiKey string, debug bool) *Client {
 // initBedrock creates the Bedrock Runtime client using the AWS default
 // credential chain (env keys, IRSA/web identity, instance profile, ...),
 // so no API key is needed. The region comes from the standard AWS
-// env/config; LLM_AWS_REGION overrides it for setups where Bedrock lives
-// in a different region than the cluster.
+// env/config; awsRegion (LLM_AWS_REGION) overrides it for setups where
+// Bedrock lives in a different region than the cluster.
 func (c *Client) initBedrock() {
+	if c.model == "" {
+		log.Printf("[LLM] Warning: LLM_MODEL is not set; Bedrock requests will fail until a model or inference profile ID is configured")
+	}
 	var opts []func(*config.LoadOptions) error
-	if region := os.Getenv("LLM_AWS_REGION"); region != "" {
-		opts = append(opts, config.WithRegion(region))
+	if c.awsRegion != "" {
+		opts = append(opts, config.WithRegion(c.awsRegion))
 	}
 	awsCfg, err := config.LoadDefaultConfig(context.Background(), opts...)
 	if err != nil {
@@ -311,14 +322,16 @@ func (c *Client) Chat(ctx context.Context, prompt string) (string, error) {
 // signed with SigV4, so it works with IAM roles (e.g. IRSA on EKS) and needs
 // neither an API key nor an endpoint URL.
 func (c *Client) chatBedrock(ctx context.Context, prompt string) (string, error) {
+	// Check configuration before client state so a missing model is reported
+	// even when AWS config loading failed too.
+	if c.model == "" {
+		return "", errors.New("LLM_MODEL must be set to a Bedrock model ID or inference profile ID (e.g. eu.anthropic.claude-3-5-haiku-20241022-v1:0)")
+	}
 	if c.bedrockClient == nil {
 		if c.bedrockErr != nil {
 			return "", c.bedrockErr
 		}
 		return "", errors.New("bedrock client is not initialized")
-	}
-	if c.model == "" {
-		return "", errors.New("LLM_MODEL must be set to a Bedrock model ID or inference profile ID (e.g. eu.anthropic.claude-3-5-haiku-20241022-v1:0)")
 	}
 
 	if c.debug {

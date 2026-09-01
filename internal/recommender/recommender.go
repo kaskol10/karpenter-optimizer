@@ -62,7 +62,7 @@ func NewRecommender(cfg *config.Config) *Recommender {
 	}
 	
 	if llmURL != "" {
-		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.Debug)
+		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMAWSRegion, cfg.Debug)
 		if cfg.Debug {
 			fmt.Printf("LLM client initialized: provider=%s, url=%s, model=%s\n", cfg.LLMProvider, llmURL, llmModel)
 		}

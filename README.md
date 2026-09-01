@@ -147,7 +147,7 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 - `OLLAMA_MODEL`: Ollama model to use (default: `granite4:latest`)
 - `LLM_PROVIDER`: `ollama`, `litellm` or `bedrock` (auto-detected from `LLM_URL`, except `bedrock` which must be set explicitly)
 - `LLM_URL` / `LLM_MODEL` / `LLM_API_KEY`: generic LLM configuration superseding the `OLLAMA_*` variables
-- `LLM_AWS_REGION`: AWS region for Bedrock, if different from the default AWS region (optional; the `bedrock` provider signs Converse API requests with the AWS default credential chain — e.g. IRSA on EKS — so it needs no URL or API key, just `bedrock:InvokeModel` permissions and `LLM_MODEL` set to a model or inference profile ID)
+- `LLM_AWS_REGION`: AWS region for Bedrock, if different from the default AWS region (optional; the `bedrock` provider signs Converse API requests with the AWS default credential chain — e.g. IRSA on EKS — so it needs no URL or API key, just `bedrock:InvokeModel` permissions and `LLM_MODEL` set to a model or inference profile ID). The standard AWS SDK endpoint variables (`AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`) are honored for VPC endpoints or gateways; set `AWS_IGNORE_CONFIGURED_ENDPOINT_URLS=true` in hardened deployments to pin the SDK to the regional AWS endpoints.
 
 ## 📖 Documentation
 
