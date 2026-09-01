@@ -61,7 +61,9 @@ func NewRecommender(cfg *config.Config) *Recommender {
 		llmModel = cfg.OllamaModel
 	}
 	
-	if llmURL != "" {
+	// Bedrock needs no URL (it uses the AWS SDK), so create the client for it
+	// explicitly instead of relying on the default URL from config.Load().
+	if llmURL != "" || cfg.LLMProvider == "bedrock" {
 		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMAWSRegion, cfg.Debug)
 		if cfg.Debug {
 			fmt.Printf("LLM client initialized: provider=%s, url=%s, model=%s\n", cfg.LLMProvider, llmURL, llmModel)

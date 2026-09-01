@@ -70,7 +70,7 @@ func textResponse(text string) *bedrockruntime.ConverseOutput {
 func TestBedrockChat(t *testing.T) {
 	t.Run("sends configured model and prompt", func(t *testing.T) {
 		fake := &fakeBedrock{out: textResponse("explanation")}
-		c := &Client{provider: "bedrock", model: "eu.anthropic.claude-3-5-haiku-20241022-v1:0", bedrockClient: fake}
+		c := &Client{provider: "bedrock", model: "eu.anthropic.claude-3-haiku-20240307-v1:0", bedrockClient: fake}
 
 		resp, err := c.Chat(context.Background(), "why is this nodepool overprovisioned?")
 
@@ -78,7 +78,7 @@ func TestBedrockChat(t *testing.T) {
 		assert.Equal(t, "explanation", resp)
 		require.NotNil(t, fake.input)
 		require.NotNil(t, fake.input.ModelId)
-		assert.Equal(t, "eu.anthropic.claude-3-5-haiku-20241022-v1:0", *fake.input.ModelId)
+		assert.Equal(t, "eu.anthropic.claude-3-haiku-20240307-v1:0", *fake.input.ModelId)
 		require.Len(t, fake.input.Messages, 1)
 		assert.Equal(t, types.ConversationRoleUser, fake.input.Messages[0].Role)
 		require.Len(t, fake.input.Messages[0].Content, 1)

@@ -325,7 +325,7 @@ func (c *Client) chatBedrock(ctx context.Context, prompt string) (string, error)
 	// Check configuration before client state so a missing model is reported
 	// even when AWS config loading failed too.
 	if c.model == "" {
-		return "", errors.New("LLM_MODEL must be set to a Bedrock model ID or inference profile ID (e.g. eu.anthropic.claude-3-5-haiku-20241022-v1:0)")
+		return "", errors.New("LLM_MODEL must be set to a Converse-compatible Bedrock model ID or inference profile ID")
 	}
 	if c.bedrockClient == nil {
 		if c.bedrockErr != nil {

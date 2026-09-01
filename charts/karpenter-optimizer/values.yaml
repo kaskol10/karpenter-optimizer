@@ -128,7 +128,7 @@ config:
     # Model name
     # For Ollama: e.g., "granite4:latest", "gemma2:2b"
     # For LiteLLM: e.g., "gpt-3.5-turbo", "claude-3-sonnet"
-    # For Bedrock: a model or inference profile ID, e.g. "eu.anthropic.claude-3-5-haiku-20241022-v1:0"
+    # For Bedrock: a model or inference profile ID, e.g. "eu.anthropic.claude-3-haiku-20240307-v1:0"
     model: ""
     # API key (optional, mainly for LiteLLM with authentication; not used for Bedrock)
     apiKey: ""
