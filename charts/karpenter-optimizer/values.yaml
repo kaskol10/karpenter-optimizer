@@ -8,7 +8,7 @@ image:
   repository: ghcr.io/kaskol10/karpenter-optimizer
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "0.0.41"
+  tag: "0.0.42"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -197,7 +197,7 @@ frontend:
   port: 80
   image:
     repository: ghcr.io/kaskol10/karpenter-optimizer-frontend
-    tag: "0.0.41"
+    tag: "0.0.42"
     pullPolicy: IfNotPresent
   # API URL configuration for frontend
   # Set to empty string (default) to use relative URLs (recommended when nginx proxy is enabled)
