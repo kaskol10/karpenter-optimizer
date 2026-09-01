@@ -74,6 +74,10 @@ spec:
             - name: LLM_AWS_REGION
               value: {{ .Values.config.llm.awsRegion | quote }}
             {{- end }}
+            {{- if .Values.config.llm.maxTokens }}
+            - name: LLM_MAX_TOKENS
+              value: {{ .Values.config.llm.maxTokens | quote }}
+            {{- end }}
             {{- else if .Values.config.ollama.enabled }}
             # Legacy Ollama Configuration (for backward compatibility)
             - name: OLLAMA_URL

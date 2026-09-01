@@ -134,6 +134,9 @@ config:
     apiKey: ""
     # AWS region for Bedrock, if different from the pricing region (optional)
     awsRegion: ""
+    # Response token cap for Bedrock requests, bounds the worst-case cost per
+    # request (optional; unset = model default, i.e. the model's maximum)
+    maxTokens: ""
     # Set to true to enable LLM features
     enabled: false
   

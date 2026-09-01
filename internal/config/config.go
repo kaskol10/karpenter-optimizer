@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,7 @@ type Config struct {
 	LLMModel     string
 	LLMAPIKey    string
 	LLMAWSRegion string // AWS region override for the Bedrock provider (optional)
+	LLMMaxTokens int    // Response token cap for the Bedrock provider (0 = model default)
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -87,6 +89,7 @@ func Load() *Config {
 		LLMModel:          llmModel,
 		LLMAPIKey:         llmAPIKey,
 		LLMAWSRegion:      getEnv("LLM_AWS_REGION", ""),
+		LLMMaxTokens:      getEnvInt("LLM_MAX_TOKENS", 0),
 		OllamaURL:         ollamaURL, // Keep for backward compatibility
 		OllamaModel:       ollamaModel,
 		AWSRegion:         getEnv("AWS_REGION", "eu-west-1"),
@@ -100,6 +103,15 @@ func Load() *Config {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
 	}
 	return defaultValue
 }

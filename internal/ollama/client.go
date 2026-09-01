@@ -25,6 +25,7 @@ type Client struct {
 	provider   string // "ollama", "litellm" or "bedrock"
 	apiKey     string // Optional API key for LiteLLM
 	awsRegion  string // Optional AWS region override for Bedrock
+	maxTokens  int32  // Response token cap for Bedrock (0 = model default)
 	debug      bool   // Enable debug logging
 	// Bedrock provider state (nil unless provider == "bedrock")
 	bedrockClient bedrockAPI
@@ -67,8 +68,9 @@ type ChatResponse struct {
 // apiKey: Optional API key for LiteLLM authentication (unused for Bedrock,
 // which signs requests with the AWS default credential chain)
 // awsRegion: Optional AWS region override for Bedrock (unused otherwise)
+// maxTokens: Response token cap for Bedrock, 0 = model default (unused otherwise)
 // debug: Enable debug logging
-func NewClient(baseURL, model, provider, apiKey, awsRegion string, debug bool) *Client {
+func NewClient(baseURL, model, provider, apiKey, awsRegion string, maxTokens int, debug bool) *Client {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -97,6 +99,7 @@ func NewClient(baseURL, model, provider, apiKey, awsRegion string, debug bool) *
 		provider:  provider,
 		apiKey:    apiKey,
 		awsRegion: awsRegion,
+		maxTokens: int32(maxTokens),
 		debug:     debug,
 	}
 
@@ -339,8 +342,7 @@ func (c *Client) chatBedrock(ctx context.Context, prompt string) (string, error)
 		log.Printf("[LLM] Prompt length: %d characters", len(prompt))
 	}
 
-	startTime := time.Now()
-	resp, err := c.bedrockClient.Converse(ctx, &bedrockruntime.ConverseInput{
+	input := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(c.model),
 		Messages: []types.Message{
 			{
@@ -350,7 +352,17 @@ func (c *Client) chatBedrock(ctx context.Context, prompt string) (string, error)
 				},
 			},
 		},
-	})
+	}
+	// Without an explicit cap Converse defaults to the model's maximum output
+	// length, which makes the worst-case cost per request unbounded.
+	if c.maxTokens > 0 {
+		input.InferenceConfig = &types.InferenceConfiguration{
+			MaxTokens: aws.Int32(c.maxTokens),
+		}
+	}
+
+	startTime := time.Now()
+	resp, err := c.bedrockClient.Converse(ctx, input)
 	duration := time.Since(startTime)
 	if err != nil {
 		if c.debug {

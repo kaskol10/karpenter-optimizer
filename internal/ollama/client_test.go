@@ -13,7 +13,7 @@ import (
 
 func TestNewClient(t *testing.T) {
 	t.Run("applies defaults", func(t *testing.T) {
-		c := NewClient("", "", "", "", "", false)
+		c := NewClient("", "", "", "", "", 0, false)
 
 		assert.Equal(t, "ollama", c.provider)
 		assert.Equal(t, "http://localhost:11434", c.baseURL)
@@ -21,20 +21,20 @@ func TestNewClient(t *testing.T) {
 	})
 
 	t.Run("auto-detects litellm from URL", func(t *testing.T) {
-		c := NewClient("http://litellm-service:4000", "gpt-4o-mini", "", "", "", false)
+		c := NewClient("http://litellm-service:4000", "gpt-4o-mini", "", "", "", 0, false)
 
 		assert.Equal(t, "litellm", c.provider)
 	})
 
 	t.Run("never auto-detects bedrock", func(t *testing.T) {
-		c := NewClient("", "some-model", "", "", "", false)
+		c := NewClient("", "some-model", "", "", "", 0, false)
 
 		assert.NotEqual(t, "bedrock", c.provider)
 		assert.Nil(t, c.bedrockClient)
 	})
 
 	t.Run("bedrock has no default model", func(t *testing.T) {
-		c := NewClient("", "", "bedrock", "", "", false)
+		c := NewClient("", "", "bedrock", "", "", 0, false)
 
 		assert.Equal(t, "bedrock", c.provider)
 		assert.Empty(t, c.model)
@@ -70,7 +70,7 @@ func textResponse(text string) *bedrockruntime.ConverseOutput {
 func TestBedrockChat(t *testing.T) {
 	t.Run("sends configured model and prompt", func(t *testing.T) {
 		fake := &fakeBedrock{out: textResponse("explanation")}
-		c := &Client{provider: "bedrock", model: "eu.anthropic.claude-3-haiku-20240307-v1:0", bedrockClient: fake}
+		c := &Client{provider: "bedrock", model: "eu.anthropic.claude-3-haiku-20240307-v1:0", maxTokens: 2048, bedrockClient: fake}
 
 		resp, err := c.Chat(context.Background(), "why is this nodepool overprovisioned?")
 
@@ -85,6 +85,19 @@ func TestBedrockChat(t *testing.T) {
 		text, ok := fake.input.Messages[0].Content[0].(*types.ContentBlockMemberText)
 		require.True(t, ok, "first content block should be text")
 		assert.Equal(t, "why is this nodepool overprovisioned?", text.Value)
+		require.NotNil(t, fake.input.InferenceConfig)
+		require.NotNil(t, fake.input.InferenceConfig.MaxTokens)
+		assert.Equal(t, int32(2048), *fake.input.InferenceConfig.MaxTokens)
+	})
+
+	t.Run("omits inference config when maxTokens is unset", func(t *testing.T) {
+		fake := &fakeBedrock{out: textResponse("ok")}
+		c := &Client{provider: "bedrock", model: "some-model", bedrockClient: fake}
+
+		_, err := c.Chat(context.Background(), "hello")
+
+		require.NoError(t, err)
+		assert.Nil(t, fake.input.InferenceConfig)
 	})
 
 	t.Run("requires model even without a client", func(t *testing.T) {

@@ -153,6 +153,7 @@ The following table lists the configurable parameters and their default values:
 | `config.llm.model` | Model name (for Bedrock: a model or inference profile ID) | `""` |
 | `config.llm.apiKey` | API key (for LiteLLM; not used for Bedrock) | `""` |
 | `config.llm.awsRegion` | AWS region for Bedrock, if different from the default region | `""` |
+| `config.llm.maxTokens` | Response token cap for Bedrock (optional; bounds worst-case cost, unset = model default) | `""` |
 | `config.ollama.enabled` | Enable Ollama integration (legacy) | `false` |
 | `config.ollama.url` | Ollama URL (legacy) | `""` |
 | `config.ollama.model` | Ollama model (legacy) | `granite4:latest` |
