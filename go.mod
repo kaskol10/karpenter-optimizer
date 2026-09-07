@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.6
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.59.1
-	github.com/aws/aws-sdk-go-v2/service/pricing v1.40.10
+	github.com/aws/aws-sdk-go-v2/service/pricing v1.47.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
