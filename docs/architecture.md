@@ -1,6 +1,6 @@
 # Architecture
 
-Karpenter Optimizer is built with a modern microservices architecture, consisting of a React frontend, Go backend API, and integrations with Kubernetes and AWS services.
+Karpenter Optimizer is a two-tier application consisting of a React frontend, a Go backend API, and integrations with Kubernetes and AWS services.
 
 ## High-Level Architecture
 
@@ -37,7 +37,7 @@ Karpenter Optimizer is built with a modern microservices architecture, consistin
   - `recharts` - Chart visualization library
   - `react-scripts` - Build tooling
 - **Deployment**: Nginx container serving static files
-- **Routing**: Client-side routing with React Router (implicit)
+- **Navigation**: Tab-based view switching (client-side state), no router dependency
 
 ### Backend (Go)
 - **Location**: `cmd/api/` (entry), `internal/` (core logic)
@@ -64,10 +64,10 @@ Karpenter Optimizer is built with a modern microservices architecture, consistin
 - **Fallback**: Hardcoded pricing map if API unavailable
 - **Region**: Defaults to `us-east-1`, configurable
 
-### Ollama Integration
+### LLM Integration
 - **Purpose**: Generate AI-powered explanations for recommendations
-- **Optional**: Works without Ollama (recommendations still generated)
-- **Model**: Configurable (default: `gemma2:2b`)
+- **Optional**: Works without an LLM (recommendations still generated)
+- **Model**: Configurable via `LLM_MODEL` (default: `granite4:latest`); provider-agnostic (Ollama/LiteLLM/VLLM/Bedrock)
 - **Usage**: Enhances recommendation reasoning text
 
 ## Data Flow

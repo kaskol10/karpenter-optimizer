@@ -17,8 +17,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parsed log details showing pod, NodePool, and taint information
   - New API endpoint: `POST /api/v1/karpenter/logs/analyze`
   - New UI tab: "Log Analyzer" in the main navigation
+- **Agent history location** is now configurable via the `AGENT_HISTORY_FILE` environment variable (defaults to `/tmp/karpenter-optimizer-history.json`)
 
-## [Unreleased]
+### Changed
+- **LLM naming**: The recommendation-explanation and agent LLM integration is now named by provider-agnostic "LLM" rather than "Ollama" (`EnhanceRecommendationsWithLLM`, `GetLLMClient`). The `ollama` package name is retained for backward compatibility.
+- **Spot pricing**: The spot discount is now a single shared constant (`awspricing.SpotDiscountFactor`, 25% of on-demand) used consistently across the recommender, Kubernetes client, and agent, instead of per-file literals.
+- **r8i pricing**: Corrected the hardcoded r8i on-demand prices (r8i.xlarge is $0.2778/hr, not the previous r6i copy).
+- **Strategy suggestions**: The cost-optimization agent's `SuggestStrategy` now uses the LLM when available, with the previous rule-based logic as fallback.
+
+### Fixed
+- **Overview recommendations**: The Overview tab's "Generate Recommendations" now actually renders the cluster cost summary and NodePool cards (previously the callback was a no-op).
+- **Removed production debug logging** from the frontend and backend.
+
+### Removed
+- **LLM price fallback**: The recommender no longer asks the LLM to guess EC2 prices when the AWS Pricing API is unavailable; it now falls back to the family-based estimate.
+- **Deprecated Prometheus metrics endpoints** (`GET/POST /api/v1/metrics/workload(s)`) and the CLI `metrics` command (Prometheus support was already removed).
+- **Dead code**: the duplicate `backend/` directory, unused frontend components (`WorkloadForm`, `WorkloadSelector`, `RecommendationCard`, `ComparisonView`, `ClusterSummary`), the unused `usePricing` hook, and unused deprecated pricing/sort functions.
+
+### Documentation
+- Reconciled README, `AGENTS.md`, and `docs/architecture.md` with the actual code (architecture description, Swagger URLs, project tree, default LLM model, and instance-type fallback rules).
+
 
 ## [0.0.29] - 2025-01-26
 

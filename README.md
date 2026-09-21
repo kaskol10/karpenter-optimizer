@@ -56,7 +56,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 
 ![Architecture Diagram](docs/images/ArchitectureDiagram.png)
 
-Karpenter Optimizer follows a modern microservices architecture:
+Karpenter Optimizer is a two-tier application:
 
 - **Backend**: Go-based REST API server with Kubernetes integration
 - **Frontend**: React web application with interactive charts and visualizations
@@ -68,11 +68,11 @@ For detailed architecture documentation, see [docs/architecture.md](docs/archite
 We're actively working on improving Karpenter Optimizer. Here's what's coming next:
 
 - Multi-cluster Support - Manage and compare recommendations across multiple Kubernetes clusters
-- Enchanced filtering - Filter recommendations by cost savings, instance types and capacity types
+- Enhanced filtering - Filter recommendations by cost savings, instance types and capacity types
 - Export Recommendations - Export recommendations as YAML manifests for easy application
 - Performance Improvements - Optimize API response times for large clusters
 - Historical Cost Tracking - Track cost trends over time and measure actual savings
-- Machine Learning Predictions - ML-based workload prediction and proactive optimization
+- Machine Learning Predictions - ML-based workload forecasting and proactive (predictive) optimization
 - Cost Allocation - Show costs by namespace, team, or label for better chargeback
 - Scheduled Recommendations - Automated daily/weekly optimization reports via email or Slack, Discord...
 - Policy Engine - Define optimization policies and constraints (e.g., never use spot for production)
@@ -191,7 +191,7 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 
 ### Interactive API Documentation
 
-**Swagger UI**: Access interactive API documentation at `/swagger/index.html`.
+**Swagger UI**: Access interactive API documentation at `/api/swagger/index.html`.
 
 **Local Development:**
 ```bash
@@ -243,7 +243,7 @@ make swagger
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions
 
-For complete API documentation with request/response schemas, see the [Swagger UI](http://localhost:8080/swagger/index.html) or generate the docs with `make swagger`.
+For complete API documentation with request/response schemas, see the [Swagger UI](http://localhost:8080/api/swagger/index.html) or generate the docs with `make swagger`.
 
 
 ## Recommendation Output
@@ -310,17 +310,24 @@ The tool fetches existing Karpenter NodePool configurations:
 │   └── cli/            # CLI tool
 │       └── main.go
 ├── internal/
+│   ├── agent/          # Cost-optimization agent
 │   ├── api/            # HTTP handlers
+│   ├── awspricing/     # AWS Pricing API client
 │   ├── config/         # Configuration
 │   ├── kubernetes/     # Kubernetes client
+│   ├── ollama/         # LLM client (Ollama/LiteLLM/VLLM/Bedrock)
 │   └── recommender/    # Recommendation logic
 ├── frontend/           # React frontend
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ComparisonView.js
-│   │   │   ├── RecommendationCard.js
-│   │   │   ├── WorkloadForm.js
-│   │   │   └── WorkloadSelector.js
+│   │   │   ├── AgentRecommendations.js
+│   │   │   ├── DisruptionTracker.js
+│   │   │   ├── GlobalClusterSummary.js
+│   │   │   ├── KarpenterLogAnalyzer.js
+│   │   │   ├── NodePoolCard.js
+│   │   │   ├── NodeUsageView.js
+│   │   │   ├── TopologyView.js
+│   │   │   └── WorkloadUsageView.js
 │   │   └── App.js
 │   └── package.json
 ├── examples/           # Example files
@@ -355,7 +362,7 @@ docker build -t karpenter-optimizer-frontend ./frontend
 
 ## Usage Examples
 
-### Example 1: Analyze Workloads from Cluster
+### Example 1: Get NodePool Recommendations
 
 1. Start the backend with Kubernetes access:
    ```bash
@@ -364,11 +371,9 @@ docker build -t karpenter-optimizer-frontend ./frontend
 
 2. Open the frontend at `http://localhost:3000`
 
-3. Select a namespace from the dropdown
+3. On the Overview tab, click "Generate Recommendations"
 
-4. Check workloads to add them
-
-5. Click "Analyze Workloads" to get recommendations
+4. Review the per-NodePool recommendations and cluster-wide cost summary
 
 ### Example 2: Analyze Cluster Usage
 
@@ -387,35 +392,6 @@ docker build -t karpenter-optimizer-frontend ./frontend
 2. The tool automatically fetches existing NodePool configurations
 3. Recommendations show "before" (actual NodePools) vs "after" (recommended)
 4. View detailed cost and node count comparisons
-
-## 🏗️ Architecture
-
-![Architecture Diagram](docs/images/ArchitectureDiagram.png)
-
-Karpenter Optimizer is built with a modern microservices architecture:
-
-- **Backend**: Go-based REST API server with Kubernetes integration
-- **Frontend**: React web application with interactive charts and visualizations
-- **CLI**: Go CLI tool for command-line usage and CI/CD integration
-- **Helm Chart**: Production-ready Kubernetes deployment
-
-For detailed architecture documentation, see [docs/architecture.md](docs/architecture.md).
-
-## 🔌 API Endpoints
-
-### Core Endpoints
-
-- `GET /api/v1/health` - Health check
-- `GET /api/v1/cluster/summary` - Cluster-wide statistics
-- `GET /api/v1/nodepools` - List all NodePools
-- `GET /api/v1/nodepools/recommendations` - Get NodePool recommendations
-- `GET /api/v1/recommendations/cluster-summary` - Get cluster-wide recommendations with AI explanations
-- `GET /api/v1/nodes` - List nodes with usage data
-- `GET /api/v1/topology` - Nodes with pods and request sizes for topology visualization
-- `GET /api/v1/disruptions` - Get node disruption information
-
-See the [Swagger UI](http://localhost:8080/swagger/index.html) for complete interactive API documentation with request/response schemas, or generate the docs with `make swagger`.
-
 
 
 ## 🤝 Contributing
