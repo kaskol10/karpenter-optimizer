@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -265,7 +266,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 		}
 
 		// Generate AI-enhanced reasoning if Ollama is available
-		if r.ollamaClient != nil {
+		if r.llmClient != nil {
 			aiReasoning := r.generateAIReasoning(ctx, reasoning, rec)
 			rec.AIReasoning = aiReasoning
 		}
@@ -278,7 +279,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 
 // generateAIReasoning generates an AI-enhanced explanation from the base reasoning
 func (r *Recommender) generateAIReasoning(ctx context.Context, baseReasoning string, rec NodePoolCapacityRecommendation) string {
-	if r.ollamaClient == nil {
+	if r.llmClient == nil {
 		return ""
 	}
 
@@ -333,7 +334,7 @@ Return only the enhanced explanation text, no additional formatting.`,
 	aiCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	response, err := r.ollamaClient.Chat(aiCtx, prompt)
+	response, err := r.llmClient.Chat(aiCtx, prompt)
 	if err != nil {
 		// If Ollama fails, return empty string (field will be omitted from JSON)
 		return ""
@@ -363,10 +364,10 @@ Return only the enhanced explanation text, no additional formatting.`,
 	return strings.TrimSpace(aiReasoning)
 }
 
-// EnhanceRecommendationsWithOllama enhances recommendations with AI-generated explanations
-func (r *Recommender) EnhanceRecommendationsWithOllama(ctx context.Context, recommendations []NodePoolCapacityRecommendation) ([]NodePoolCapacityRecommendation, error) {
-	if r.ollamaClient == nil {
-		return recommendations, nil // Return original if Ollama not available
+// EnhanceRecommendationsWithLLM enhances recommendations with AI-generated explanations
+func (r *Recommender) EnhanceRecommendationsWithLLM(ctx context.Context, recommendations []NodePoolCapacityRecommendation) ([]NodePoolCapacityRecommendation, error) {
+	if r.llmClient == nil {
+		return recommendations, nil // Return original if LLM not available
 	}
 
 	enhanced := make([]NodePoolCapacityRecommendation, len(recommendations))
@@ -431,7 +432,7 @@ Respond with JSON:
 		}
 		
 		ollamaCtx, cancel := context.WithTimeout(ctx, timeout)
-		response, err := r.ollamaClient.Chat(ollamaCtx, prompt)
+		response, err := r.llmClient.Chat(ollamaCtx, prompt)
 		cancel()
 
 		if err == nil {
@@ -557,8 +558,8 @@ func (r *Recommender) findOptimalInstanceTypes(requiredCPU, requiredMemory float
 func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory float64) []string {
 	// Try to get instance types from AWS Pricing API
 	if r.awsPricing != nil {
-		// Increase timeout to 60 seconds - the pricing index file can be very large (several MB)
-		// The AWS Pricing API client now uses a 60-second HTTP timeout and caches results
+		// Increase timeout to 60 seconds - querying many instance types can be slow
+		// The AWS Pricing API client uses a 60-second HTTP timeout and caches results
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
@@ -571,12 +572,12 @@ func (r *Recommender) getCandidateInstanceTypes(architecture string, cpu, memory
 		if err != nil {
 			// Only log if it's not a context timeout (which is expected on slow connections)
 			if !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "timeout") {
-				fmt.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.\n", err)
+				log.Printf("Warning: Failed to get instance types from AWS API: %v. Using fallback list.", err)
 			} else {
-				fmt.Printf("Info: AWS Pricing API timeout (index file is large). Using fallback instance types list. Subsequent requests will use cached data.\n")
+				log.Printf("Info: AWS Pricing API timed out. Using fallback instance types list. Subsequent requests will use cached data.")
 			}
 		} else if len(availableTypes) == 0 {
-			fmt.Printf("Warning: AWS API returned empty instance types list for architecture %s. Using fallback list.\n", architecture)
+			log.Printf("Warning: AWS API returned empty instance types list for architecture %s. Using fallback list.", architecture)
 		}
 	}
 
