@@ -3,7 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
-	
+
+	"github.com/karpenter-optimizer/internal/awspricing"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
 )
@@ -139,7 +140,7 @@ func (a *Analyzer) identifyOpportunities(ctx context.Context, np kubernetes.Node
 	if state.CapacityType == "on-demand" || (state.CapacityType == "mixed" && state.SpotRatio < 50) {
 		// Estimate potential savings from spot conversion
 		onDemandCost := state.CurrentCost
-		spotCost := onDemandCost * 0.25 // Spot is ~75% cheaper
+		spotCost := onDemandCost * awspricing.SpotDiscountFactor // Spot is ~75% cheaper
 		potentialSavings := onDemandCost - spotCost
 		
 		opportunities = append(opportunities, OptimizationOpportunity{

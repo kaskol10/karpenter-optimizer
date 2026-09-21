@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/karpenter-optimizer/internal/awspricing"
@@ -25,9 +25,7 @@ type PricingSource string
 const (
 	PricingSourceAWSPricingAPI PricingSource = "aws-pricing-api"
 	PricingSourceHardcoded     PricingSource = "hardcoded"
-	PricingSourceOllamaCache    PricingSource = "ollama-cache"
 	PricingSourceFamilyEstimate PricingSource = "family-estimate"
-	PricingSourceOllama         PricingSource = "ollama"
 	PricingSourceUnknown        PricingSource = "unknown"
 )
 
@@ -40,19 +38,17 @@ type PricingResult struct {
 type Recommender struct {
 	config       *config.Config
 	k8sClient    *kubernetes.Client
-	ollamaClient *ollama.Client
+	llmClient *ollama.Client
 	awsPricing   *awspricing.Client // AWS Pricing API client
-	priceCache   map[string]float64 // Cache for Ollama-fetched pricing
-	priceCacheMu sync.RWMutex       // Mutex for thread-safe cache access
 }
 
 // HasLLM returns true if LLM client is configured and available
 func (r *Recommender) HasLLM() bool {
-	return r.ollamaClient != nil
+	return r.llmClient != nil
 }
 
 func NewRecommender(cfg *config.Config) *Recommender {
-	var ollamaClient *ollama.Client
+	var llmClient *ollama.Client
 	// Use new LLM config if available, otherwise fall back to legacy Ollama config
 	llmURL := cfg.LLMURL
 	llmModel := cfg.LLMModel
@@ -64,7 +60,7 @@ func NewRecommender(cfg *config.Config) *Recommender {
 	// Bedrock needs no URL (it uses the AWS SDK), so create the client for it
 	// explicitly instead of relying on the default URL from config.Load().
 	if llmURL != "" || cfg.LLMProvider == "bedrock" {
-		ollamaClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMAWSRegion, cfg.LLMMaxTokens, cfg.Debug)
+		llmClient = ollama.NewClient(llmURL, llmModel, cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMAWSRegion, cfg.LLMMaxTokens, cfg.Debug)
 		if cfg.Debug {
 			fmt.Printf("LLM client initialized: provider=%s, url=%s, model=%s\n", cfg.LLMProvider, llmURL, llmModel)
 		}
@@ -91,16 +87,12 @@ func NewRecommender(cfg *config.Config) *Recommender {
 		} else {
 			fmt.Printf("AWS Pricing API client initialized with default credentials (using GetProducts API)\n")
 		}
-		if cfg.Debug {
-			fmt.Printf("Debug: AWS Region=%s, Pricing API endpoint=us-east-1\n", cfg.AWSRegion)
-		}
 	}
 
 	return &Recommender{
 		config:       cfg,
-		ollamaClient: ollamaClient,
+		llmClient:    llmClient,
 		awsPricing:   awsPricingClient,
-		priceCache:   make(map[string]float64),
 	}
 }
 
@@ -108,14 +100,9 @@ func (r *Recommender) SetK8sClient(client *kubernetes.Client) {
 	r.k8sClient = client
 }
 
-// GetOllamaClient returns the Ollama client if available (for use by API handlers)
-func (r *Recommender) GetOllamaClient() *ollama.Client {
-	return r.ollamaClient
-}
-
-// HasOllama is an alias for HasLLM for backward compatibility
-func (r *Recommender) HasOllama() bool {
-	return r.HasLLM()
+// GetLLMClient returns the LLM client if available (for use by API handlers)
+func (r *Recommender) GetLLMClient() *ollama.Client {
+	return r.llmClient
 }
 
 type Workload struct {
@@ -246,7 +233,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 	allNodesWithUsage, err := r.k8sClient.GetAllNodesWithUsage(ctx)
 	if err != nil {
 		// Fallback to using NodePool data if we can't get node usage
-		fmt.Printf("Warning: Could not fetch node usage data: %v\n", err)
+		log.Printf("Warning: Could not fetch node usage data: %v", err)
 		allNodesWithUsage = []kubernetes.NodeInfo{}
 	}
 
@@ -521,7 +508,7 @@ func (r *Recommender) GenerateRecommendationsFromClusterSummary(clusterCPUUsed, 
 			reasoning += "All nodes are already spot instances - maintaining spot configuration. "
 		}
 
-		if r.ollamaClient != nil {
+		if r.llmClient != nil {
 			if progressCallback != nil {
 				progressCallback(fmt.Sprintf("Generating AI recommendations for '%s'...", np.Name), 20.0+(float64(i)/float64(totalNodePools))*60.0)
 			}
@@ -736,7 +723,7 @@ func (r *Recommender) enhanceWithOllamaFromClusterSummary(ctx context.Context, n
 	prompt := r.buildOllamaPromptFromClusterSummary(np, currentTypes, npCPUUsed, npMemoryUsed, npCPUAllocatable, npMemoryAllocatable,
 		currentNodes, totalNodes, spotNodes, onDemandNodes, totalPods, cpuUtilization, memoryUtilization, isOverprovisioned, disruptionInsights, actualNodes)
 
-	response, err := r.ollamaClient.Chat(ctx, prompt)
+	response, err := r.llmClient.Chat(ctx, prompt)
 	if err != nil {
 		fmt.Printf("Ollama request failed: %v\n", err)
 		return "", currentTypes, nil, nil, ""
@@ -1349,7 +1336,7 @@ func (r *Recommender) optimizeNodePool(np kubernetes.NodePoolInfo, workloads []W
 			recommendedMaxSize = int(math.Ceil(float64(nodesNeeded) * 1.5)) // More conservative max
 		}
 
-		if r.ollamaClient != nil && len(workloads) > 0 {
+		if r.llmClient != nil && len(workloads) > 0 {
 			ollamaCtx, ollamaCancel := context.WithTimeout(context.Background(), 90*time.Second) // Longer timeout for gemma3:1b
 			defer ollamaCancel()
 			enhancedReasoning, enhancedTypes, minSize, maxSize, ollamaCapacityType := r.enhanceWithOllama(ollamaCtx, np, workloads, totalCPU, totalMemory, 0, recommendedInstanceTypes, isOverprovisioned, disruptionInsights)
@@ -1464,7 +1451,7 @@ func (r *Recommender) enhanceWithOllama(ctx context.Context, np kubernetes.NodeP
 	// Build prompt for Ollama
 	prompt := r.buildOllamaPrompt(np, workloads, totalCPU, totalMemory, maxGPU, currentTypes, isOverprovisioned, disruptionInsights)
 
-	response, err := r.ollamaClient.Chat(ctx, prompt)
+	response, err := r.llmClient.Chat(ctx, prompt)
 	if err != nil {
 		// If Ollama fails, return original values
 		fmt.Printf("Ollama request failed: %v\n", err)
@@ -2072,9 +2059,9 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 		"r6a.4xlarge": 0.9072,
 		"r6a.8xlarge": 1.8144,
 		// R8i family (memory optimized, latest gen)
-		"r8i.xlarge":  0.252, // 4 vCPU, 32 GiB
-		"r8i.2xlarge": 0.504, // 8 vCPU, 64 GiB
-		"r8i.4xlarge": 1.008, // 16 vCPU, 128 GiB
+		"r8i.xlarge":  0.2778, // 4 vCPU, 32 GiB
+		"r8i.2xlarge": 0.5556, // 8 vCPU, 64 GiB
+		"r8i.4xlarge": 1.1112, // 16 vCPU, 128 GiB
 		// X2gd family (Graviton2, memory optimized)
 		"x2gd.large":   0.0334, // 2 vCPU, 16 GiB
 		"x2gd.xlarge":  0.0669, // 4 vCPU, 32 GiB
@@ -2132,9 +2119,6 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 			instanceCost = cost
 			priceFound = true
 			source = PricingSourceHardcoded
-			if r.config != nil && r.config.Debug {
-				fmt.Printf("Debug: Using hardcoded price for %s: $%.4f/hr\n", it, cost)
-			}
 		}
 
 		// Only call AWS Pricing API if we don't have a hardcoded price
@@ -2142,40 +2126,24 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 		// Pass the actual capacityType so AWS Pricing client can apply spot discount correctly
 		if !priceFound && r.awsPricing != nil && ctx != nil {
 			// Use a longer timeout for pricing queries
-			// GetProducts API: 30 seconds (queries specific instance type)
-			// Public API: 60 seconds (downloads full 400MB index)
 			pricingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			// Pass the actual capacityType - AWS Pricing client will query on-demand price
 			// and apply spot discount internally if capacityType is "spot"
 			awsPrice, err := r.awsPricing.GetProductPrice(pricingCtx, it, capacityType)
 			cancel()
-			
+
 			if err == nil && awsPrice > 0 {
 				instanceCost = awsPrice
 				priceFound = true
 				source = PricingSourceAWSPricingAPI
-				fmt.Printf("Successfully fetched AWS Pricing API price for %s (%s): $%.4f/hr\n", it, capacityType, awsPrice)
 			} else if err != nil {
 				// Only log if it's not a "not found" error (those are expected for some instance types)
 				if !strings.Contains(err.Error(), "not found") {
-					fmt.Printf("Warning: AWS Pricing API failed for %s (%s): %v\n", it, capacityType, err)
+					log.Printf("Warning: AWS Pricing API failed for %s (%s): %v", it, capacityType, err)
 				}
 			} else if awsPrice <= 0 {
 				// This shouldn't happen - if err is nil, price should be > 0
-				fmt.Printf("Warning: AWS Pricing API returned zero price for %s (%s) (this may indicate a parsing issue)\n", it, capacityType)
-			}
-		}
-
-		// If still not found, try Ollama cache
-		if !priceFound {
-			r.priceCacheMu.RLock()
-			cachedPrice, cached := r.priceCache[itLower]
-			r.priceCacheMu.RUnlock()
-
-			if cached {
-				instanceCost = cachedPrice
-				priceFound = true
-				source = PricingSourceOllamaCache
+				log.Printf("Warning: AWS Pricing API returned zero price for %s (%s) (this may indicate a parsing issue)", it, capacityType)
 			}
 		}
 
@@ -2188,22 +2156,7 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 			}
 		}
 
-		// Last resort: try Ollama if available
-		if !priceFound && r.ollamaClient != nil {
-			// Use background context for pricing queries (they're quick and cached)
-			ollamaPrice := r.getPricingFromOllama(context.Background(), it)
-			if ollamaPrice > 0 {
-				instanceCost = ollamaPrice
-				priceFound = true
-				source = PricingSourceOllama
-				// Cache the result
-				r.priceCacheMu.Lock()
-				r.priceCache[itLower] = ollamaPrice
-				r.priceCacheMu.Unlock()
-			}
-		}
-
-		// Skip this instance type if we couldn't find a price
+	// Skip this instance type if we couldn't find a price
 		if !priceFound {
 			continue
 		}
@@ -2220,11 +2173,9 @@ func (r *Recommender) estimateCostWithSource(ctx context.Context, instanceTypes 
 
 		// Apply spot discount if using spot instances (only for non-AWS Pricing API sources)
 		// AWS Pricing API already applies spot discount internally, so we only need to apply it
-		// for hardcoded prices, Ollama cache, family estimates, etc.
-		// Spot instances typically cost 70-90% less than on-demand (spot = 10-30% of on-demand)
-		// Using conservative 75% discount (spot = 25% of on-demand) for cost estimation
+		// for hardcoded prices and family estimates.
 		if capacityType == "spot" && source != PricingSourceAWSPricingAPI {
-			instanceCost *= 0.25 // Spot instances are ~75% cheaper than on-demand
+			instanceCost *= awspricing.SpotDiscountFactor
 		}
 
 		// Calculate nodes for this instance type (distribute remainder evenly)
@@ -2286,7 +2237,7 @@ func (r *Recommender) estimateCostFromFamily(instanceType string) float64 {
 	} else if strings.HasPrefix(it, "r6a") {
 		baseCost = 0.2268 // r6a.xlarge on-demand
 	} else if strings.HasPrefix(it, "r8i") {
-		baseCost = 0.252 // r8i.xlarge on-demand
+		baseCost = 0.2778 // r8i.xlarge on-demand
 	} else if strings.HasPrefix(it, "x2gd") {
 		baseCost = 0.0669 // x2gd.xlarge on-demand (Graviton2)
 	} else if strings.HasPrefix(it, "x8g") {
@@ -2304,66 +2255,6 @@ func (r *Recommender) estimateCostFromFamily(instanceType string) float64 {
 	}
 
 	return baseCost * multiplier
-}
-
-// getPricingFromOllama queries Ollama for AWS EC2 instance pricing
-func (r *Recommender) getPricingFromOllama(ctx context.Context, instanceType string) float64 {
-	if r.ollamaClient == nil {
-		return 0.0
-	}
-
-	// Create a prompt for Ollama to get AWS EC2 pricing
-	prompt := fmt.Sprintf(`You are an AWS pricing expert. Provide the on-demand hourly cost in USD for AWS EC2 instance type "%s" in the us-east-1 (N. Virginia) region.
-
-Respond ONLY with a JSON object in this exact format:
-{
-  "instanceType": "%s",
-  "pricePerHour": 0.123,
-  "region": "us-east-1"
-}
-
-If you don't know the exact price, estimate it based on similar instance types in the same family. The price should be a positive number representing USD per hour.`, instanceType, instanceType)
-
-	// Use a shorter timeout for pricing queries (10 seconds)
-	pricingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	response, err := r.ollamaClient.Chat(pricingCtx, prompt)
-	if err != nil {
-		fmt.Printf("Warning: Failed to get pricing from Ollama for %s: %v\n", instanceType, err)
-		return 0.0
-	}
-
-	// Parse the response
-	var pricingResp struct {
-		InstanceType string  `json:"instanceType"`
-		PricePerHour float64 `json:"pricePerHour"`
-		Region       string  `json:"region"`
-	}
-
-	// Try to extract JSON from response
-	jsonStart := strings.Index(response, "{")
-	jsonEnd := strings.LastIndex(response, "}")
-	if jsonStart >= 0 && jsonEnd > jsonStart {
-		jsonStr := response[jsonStart : jsonEnd+1]
-		if err := json.Unmarshal([]byte(jsonStr), &pricingResp); err != nil {
-			fmt.Printf("Warning: Failed to parse Ollama pricing response for %s: %v\n", instanceType, err)
-			return 0.0
-		}
-	} else {
-		// Try parsing the whole response
-		if err := json.Unmarshal([]byte(response), &pricingResp); err != nil {
-			fmt.Printf("Warning: Failed to parse Ollama pricing response for %s: %v\n", instanceType, err)
-			return 0.0
-		}
-	}
-
-	if pricingResp.PricePerHour > 0 {
-		fmt.Printf("Info: Got pricing from Ollama for %s: $%.4f/hr\n", instanceType, pricingResp.PricePerHour)
-		return pricingResp.PricePerHour
-	}
-
-	return 0.0
 }
 
 // limitToWords limits a string to approximately n words

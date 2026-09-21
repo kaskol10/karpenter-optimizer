@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
-import { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
+import { Alert, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
 import { Loader2, Settings } from 'lucide-react';
 import './App.css';
@@ -21,19 +21,8 @@ const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
   ? window.ENV.REACT_APP_API_URL 
   : (process.env.REACT_APP_API_URL || '');
 
-if (typeof window !== 'undefined') {
-  console.log('=== Frontend API Configuration Debug ===');
-  console.log('API_URL configured as:', API_URL || '(empty - using relative URLs)');
-  console.log('window.ENV:', window.ENV);
-  console.log('window.ENV.REACT_APP_API_URL:', window.ENV?.REACT_APP_API_URL);
-  console.log('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
-  console.log('Full API URL for requests:', API_URL || '(relative URLs - same origin)');
-  console.log('========================================');
-}
-
 function App() {
   const [recommendations, setRecommendations] = useState([]);
-  const [error] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [clusterCost, setClusterCost] = useState(null);
   const [config, setConfig] = useState(null);
@@ -322,7 +311,7 @@ function App() {
           {activeTab === 'overview' && (
             <>
               <GlobalClusterSummary 
-                onRecommendationsGenerated={null}
+                onRecommendationsGenerated={setRecommendations}
                 onClusterCostUpdate={setClusterCost}
               />
               {recommendations.length > 0 && clusterCost && (
@@ -429,85 +418,6 @@ function App() {
             />
           )}
 
-          {/* Legacy Cluster Cost Summary Card - removed, now in Overview */}
-          {false && recommendations.length > 0 && clusterCost && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Cluster Cost Summary</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Current Nodes</p>
-                    <p className="text-2xl font-bold">
-                      {clusterCost.clusterNodes?.current ?? recommendations.reduce((sum, rec) => {
-                        const isNewFormat = rec.nodePoolName !== undefined;
-                        return sum + (isNewFormat ? rec.currentNodes : (rec.currentState?.totalNodes || 0));
-                      }, 0)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Current Cost</p>
-                    <p className="text-2xl font-bold">
-                      ${clusterCost.current.toFixed(2)}/hr
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      ${(clusterCost.current * 24).toFixed(2)}/day
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Recommended Nodes</p>
-                    <p className="text-2xl font-bold text-green-600">
-                      {clusterCost.clusterNodes?.recommended ?? recommendations.reduce((sum, rec) => {
-                        const isNewFormat = rec.nodePoolName !== undefined;
-                        if (isNewFormat) {
-                          return sum + (rec.recommendedNodes || 0);
-                        } else {
-                          return sum + (rec.maxSize > 0 ? Math.ceil(rec.maxSize / 2) : 0);
-                        }
-                      }, 0)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Recommended Cost</p>
-                    <p className="text-2xl font-bold text-green-600">
-                      ${clusterCost.recommended.toFixed(2)}/hr
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      ${(clusterCost.recommended * 24).toFixed(2)}/day
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Potential Savings</p>
-                    <p className={cn("text-2xl font-bold", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                      {clusterCost.savings > 0 ? '-' : '+'}${Math.abs(clusterCost.savings).toFixed(2)}/hr
-                    </p>
-                    {clusterCost.current > 0 && (
-                      <p className={cn("text-xs mt-1", clusterCost.savings > 0 ? "text-green-600" : "text-yellow-600")}>
-                        {((clusterCost.savings / clusterCost.current) * 100).toFixed(1)}% {clusterCost.savings > 0 ? 'reduction' : 'increase'}
-                        {' • '}${(Math.abs(clusterCost.savings) * 24).toFixed(2)}/day
-                      </p>
-                    )}
-                  </div>
-                  {clusterCost.totalNodePools !== undefined && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">NodePools with Changes</p>
-                      <p className="text-2xl font-bold">
-                        {clusterCost.recommendedCount ?? recommendations.length} / {clusterCost.totalNodePools}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
 
         </div>
       </main>

@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"io"
 
+	"github.com/karpenter-optimizer/internal/awspricing"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1390,12 +1391,6 @@ func (c *Client) parseNodePool(item *unstructured.Unstructured) (*NodePoolInfo, 
 			}
 		}
 	}
-	// Debug: Log taints for this NodePool
-	if len(np.Taints) > 0 {
-		fmt.Printf("Debug: NodePool %s has %d taints: %+v\n", np.Name, len(np.Taints), np.Taints)
-	} else {
-		fmt.Printf("Debug: NodePool %s has no taints (found %d taint interfaces in spec)\n", np.Name, len(taints))
-	}
 
 	// Set defaults
 	if np.CapacityType == "" {
@@ -1450,9 +1445,9 @@ func (c *Client) estimateNodePoolCost(instanceTypes []string, capacityType strin
 		avgCost /= float64(len(instanceTypes))
 	}
 
-	// Spot instances are typically 60-70% cheaper
+	// Spot instances are cheaper than on-demand; use the shared conservative estimate
 	if capacityType == "spot" {
-		avgCost *= 0.65
+		avgCost *= awspricing.SpotDiscountFactor
 	}
 
 	return avgCost
@@ -2141,25 +2136,6 @@ func parseTime(timeStr string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// sortDisruptionsByTime sorts disruptions by LastSeen time (most recent first)
-// Deprecated: Not currently used, kept for potential future use
-//
-//nolint:unused // Kept for potential future use
-func sortDisruptionsByTime(disruptions []NodeDisruptionInfo) {
-	// Simple insertion sort by LastSeen
-	for i := 1; i < len(disruptions); i++ {
-		key := disruptions[i]
-		j := i - 1
-
-		keyTime := parseTime(key.LastSeen)
-		for j >= 0 && parseTime(disruptions[j].LastSeen).Before(keyTime) {
-			disruptions[j+1] = disruptions[j]
-			j--
-		}
-		disruptions[j+1] = key
-	}
 }
 
 // GetRecentNodeDeletions gets information about nodes that were recently deleted

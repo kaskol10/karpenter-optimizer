@@ -25,6 +25,7 @@ type Config struct {
 	AWSAccessKeyID     string // AWS access key ID (optional, can use IAM role)
 	AWSSecretAccessKey string // AWS secret access key (optional, can use IAM role)
 	AWSSessionToken    string // AWS session token (for temporary credentials)
+	AgentHistoryFile   string // Where the cost-optimization agent persists its learning history
 	Debug              bool
 }
 
@@ -96,6 +97,7 @@ func Load() *Config {
 		AWSAccessKeyID:    getEnv("AWS_ACCESS_KEY_ID", ""),
 		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
 		AWSSessionToken:   getEnv("AWS_SESSION_TOKEN", ""),
+		AgentHistoryFile:  getEnv("AGENT_HISTORY_FILE", "/tmp/karpenter-optimizer-history.json"),
 		Debug:             getEnvBool("DEBUG", false),
 	}
 }

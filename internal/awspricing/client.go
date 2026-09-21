@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -18,6 +19,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/pricing/types"
 )
+
+// SpotDiscountFactor is the fraction of on-demand price we estimate spot instances to cost.
+// The AWS Pricing API has no spot prices, so this is a conservative heuristic: spot is
+// typically 60-90% cheaper than on-demand, and 25% of on-demand is a common middle estimate.
+const SpotDiscountFactor = 0.25
 
 // getLocationForRegion maps AWS region to Pricing API location format
 func getLocationForRegion(region string) string {
@@ -179,7 +185,6 @@ func (c *Client) GetProductPrice(ctx context.Context, instanceType, capacityType
 	if cached, ok := c.cache[cacheKey]; ok {
 		if time.Now().Before(cached.expiresAt) {
 			c.cacheMu.RUnlock()
-			fmt.Printf("Debug: Using cached price for %s (%s): $%.4f/hr\n", instanceType, capacityType, cached.price)
 			return cached.price, nil
 		}
 	}
@@ -191,15 +196,11 @@ func (c *Client) GetProductPrice(ctx context.Context, instanceType, capacityType
 	}
 
 	// Make API call only if not in cache
-	fmt.Printf("Debug: Cache miss for %s (%s), calling AWS Pricing API...\n", instanceType, capacityType)
 	price, err := c.queryGetProducts(ctx, instanceType, capacityType)
 	if err != nil {
-		fmt.Printf("Warning: Failed to get price for %s (%s): %v\n", instanceType, capacityType, err)
+		log.Printf("Warning: Failed to get price for %s (%s): %v", instanceType, capacityType, err)
 		return 0, err
 	}
-
-	// Log successful price fetch
-	fmt.Printf("Successfully fetched price from AWS Pricing API for %s (%s): $%.4f/hr\n", instanceType, capacityType, price)
 
 	// Cache the result
 	c.cacheMu.Lock()
@@ -351,7 +352,6 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 				if onDemandTerms, ok := terms["OnDemand"].(map[string]interface{}); ok {
 					for pid := range onDemandTerms {
 						productID = pid
-						fmt.Printf("Debug: Using product ID from terms: %s\n", productID)
 						break
 					}
 				}
@@ -366,44 +366,30 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 			}
 
 			// Extract price (always get on-demand price, then apply spot discount if needed)
-			// Log the product ID for debugging
-			fmt.Printf("Debug: Extracting price for product ID: %s (instance type: %s)\n", productID, instanceType)
 			onDemandPrice, err := c.extractPriceFromTerms(terms, productID, "OnDemand")
 			if err != nil {
-				// Log detailed error information
-				fmt.Printf("Debug: Failed to extract price for product ID %s: %v\n", productID, err)
-				// Try to see what's in the terms structure
+				// Try to find a matching product ID (maybe with different format)
 				if onDemandTerms, ok := terms["OnDemand"].(map[string]interface{}); ok {
-					var termKeys []string
-					for k := range onDemandTerms {
-						termKeys = append(termKeys, k)
-						if len(termKeys) >= 5 { // Limit to first 5 for logging
-							break
-						}
-					}
-					fmt.Printf("Debug: Available OnDemand term keys (first 5): %v\n", termKeys)
-					// Try to find a matching product ID (maybe with different format)
 					for termKey := range onDemandTerms {
 						if strings.Contains(termKey, productID) || strings.Contains(productID, termKey) {
-							fmt.Printf("Debug: Found potential match: %s (original: %s)\n", termKey, productID)
 							// Try with this key
 							if price, err2 := c.extractPriceFromTerms(terms, termKey, "OnDemand"); err2 == nil {
-								fmt.Printf("Debug: Successfully extracted price using alternative key: %s\n", termKey)
 								if querySpot {
-									return price * 0.25, nil
+									return price * SpotDiscountFactor, nil
 								}
 								return price, nil
 							}
 						}
 					}
 				}
+				log.Printf("Warning: Failed to extract price for product ID %s: %v", productID, err)
 				return 0, err
 			}
 
 			// Apply spot discount if querying for spot instances
 			// AWS Pricing API doesn't provide real-time spot prices, so we use a conservative estimate
 			if querySpot {
-				return onDemandPrice * 0.25, nil // Spot is ~75% cheaper than on-demand
+				return onDemandPrice * SpotDiscountFactor, nil
 			}
 
 			return onDemandPrice, nil
@@ -425,27 +411,6 @@ func (c *Client) queryGetProducts(ctx context.Context, instanceType, capacityTyp
 	return 0, fmt.Errorf("GetProducts API failed after %d retries: %w", maxRetries, lastErr)
 }
 
-// DEPRECATED: getPricingIndex is no longer used - GetProducts API is the only option
-// This function is kept for reference but should never be called
-//
-//nolint:unused
-func (c *Client) getPricingIndex(ctx context.Context) (map[string]interface{}, map[string]interface{}, error) {
-	return nil, nil, fmt.Errorf("getPricingIndex is deprecated - GetProducts API is the only option (requires AWS credentials)")
-}
-
-// DEPRECATED: findProductID and queryProductFile are no longer used - GetProducts API doesn't need product IDs
-// These functions are kept for reference but should never be called
-//
-//nolint:unused
-func (c *Client) findProductID(ctx context.Context, instanceType string) (string, error) {
-	return "", fmt.Errorf("findProductID is deprecated - GetProducts API is the only option (requires AWS credentials)")
-}
-
-//nolint:unused
-func (c *Client) queryProductFile(ctx context.Context, productID, capacityType string) (float64, error) {
-	return 0, fmt.Errorf("queryProductFile is deprecated - GetProducts API is the only option (requires AWS credentials)")
-}
-
 // extractPriceFromTerms extracts the on-demand price from the terms structure
 func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, termType string) (float64, error) {
 	onDemand, ok := terms["OnDemand"].(map[string]interface{})
@@ -464,7 +429,6 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 			productIDPrefix := productID[:dotIdx]
 			if pt, ok := onDemand[productIDPrefix].(map[string]interface{}); ok {
 				productTerms = pt
-				fmt.Printf("Debug: Found product terms using prefix %s (from %s)\n", productIDPrefix, productID)
 			}
 		}
 
@@ -485,7 +449,6 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 				if strings.HasPrefix(pid, productIDPrefix) {
 					if pt, ok := onDemand[pid].(map[string]interface{}); ok {
 						productTerms = pt
-						fmt.Printf("Debug: Found product terms using prefix match: %s (from %s)\n", pid, productID)
 						productID = pid // Use the found product ID
 						break
 					}
@@ -494,7 +457,6 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 				if strings.Contains(pid, productIDPrefix) {
 					if pt, ok := onDemand[pid].(map[string]interface{}); ok {
 						productTerms = pt
-						fmt.Printf("Debug: Found product terms using contains match: %s (from %s)\n", pid, productID)
 						productID = pid
 						break
 					}
@@ -515,11 +477,9 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 	// First, try to get priceDimensions directly from productTerms
 	if priceDimensionsRaw, ok := productTerms["priceDimensions"]; ok {
 		if priceDimensions, ok := priceDimensionsRaw.(map[string]interface{}); ok {
-			fmt.Printf("Debug: Found priceDimensions directly in productTerms with %d dimensions\n", len(priceDimensions))
 			// Extract price from these dimensions
-			for dimCode, priceData := range priceDimensions {
+			for _, priceData := range priceDimensions {
 				if price, err := c.extractPriceFromDimension(priceData); err == nil && price > 0 {
-					fmt.Printf("Debug: Successfully extracted price: $%.4f/hr from dimension %s\n", price, dimCode)
 					return price, nil
 				}
 			}
@@ -527,7 +487,7 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 	}
 
 	// Fallback: iterate through productTerms looking for term objects with priceDimensions
-	for termCode, termData := range productTerms {
+	for _, termData := range productTerms {
 		termMap, ok := termData.(map[string]interface{})
 		if !ok {
 			// Skip non-map values (like "sku", "effectiveDate" which are strings)
@@ -544,13 +504,12 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 		for dimCode, priceData := range priceDimensions {
 			priceMap, ok := priceData.(map[string]interface{})
 			if !ok {
-				fmt.Printf("Debug: Price dimension %s is not a map, type: %T\n", dimCode, priceData)
 				continue
 			}
 
 			pricePerUnit, ok := priceMap["pricePerUnit"].(map[string]interface{})
 			if !ok {
-				fmt.Printf("Debug: pricePerUnit not found in dimension %s, available keys: %v\n", dimCode, func() []string {
+				log.Printf("Debug: pricePerUnit not found in dimension %s, available keys: %v", dimCode, func() []string {
 					var keys []string
 					for k := range priceMap {
 						keys = append(keys, k)
@@ -564,18 +523,8 @@ func (c *Client) extractPriceFromTerms(terms map[string]interface{}, productID, 
 			if usdPrice, ok := pricePerUnit["USD"].(string); ok {
 				var price float64
 				if _, err := fmt.Sscanf(usdPrice, "%f", &price); err == nil && price > 0 {
-					fmt.Printf("Debug: Successfully extracted price: $%.4f/hr from term %s, dimension %s\n", price, termCode, dimCode)
 					return price, nil
-				} else {
-					fmt.Printf("Debug: Failed to parse USD price string '%s': %v\n", usdPrice, err)
 				}
-			} else {
-				// Log available currencies
-				var currencies []string
-				for k := range pricePerUnit {
-					currencies = append(currencies, k)
-				}
-				fmt.Printf("Debug: USD not found in pricePerUnit, available currencies: %v\n", currencies)
 			}
 		}
 	}

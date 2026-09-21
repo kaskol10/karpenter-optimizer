@@ -274,7 +274,7 @@ func (s *Server) analyzeKarpenterLogInternal(ctx context.Context, logStr string)
 
 	// Generate AI explanation if Ollama is available
 	explanation := ""
-	if s.recommender != nil && s.recommender.HasOllama() {
+	if s.recommender != nil && s.recommender.HasLLM() {
 		aiExplanation, err := s.generateAIExplanation(ctx, parsedError, errorCauses)
 		if err == nil && aiExplanation != "" {
 			explanation = aiExplanation
@@ -317,13 +317,13 @@ func (s *Server) generateBasicExplanation(parsedError *KarpenterLogError, errorC
 
 // generateAIExplanation uses Ollama to generate an intelligent explanation
 func (s *Server) generateAIExplanation(ctx context.Context, parsedError *KarpenterLogError, errorCauses []ErrorCauseDetail) (string, error) {
-	if s.recommender == nil || !s.recommender.HasOllama() {
+	if s.recommender == nil || !s.recommender.HasLLM() {
 		return "", fmt.Errorf("ollama client not available")
 	}
 
-	ollamaClient := s.recommender.GetOllamaClient()
-	if ollamaClient == nil {
-		return "", fmt.Errorf("ollama client not available")
+	llmClient := s.recommender.GetLLMClient()
+	if llmClient == nil {
+		return "", fmt.Errorf("LLM client not available")
 	}
 
 	// Build prompt with available information
@@ -440,7 +440,7 @@ If pod/namespace information is missing, analyze the error message, error field,
 	aiCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	response, err := ollamaClient.Chat(aiCtx, prompt)
+	response, err := llmClient.Chat(aiCtx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("AI explanation failed: %w", err)
 	}
