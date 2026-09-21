@@ -201,8 +201,6 @@ func (s *Server) setupRoutes() {
 		api.POST("/analyze", s.analyzeWorkloads)
 		api.GET("/recommendations", s.getRecommendations)
 		api.POST("/recommendations", s.generateRecommendations)
-		api.GET("/metrics/workload", s.getWorkloadMetrics)
-		api.POST("/metrics/workloads", s.getWorkloadsMetrics)
 		api.GET("/namespaces", s.listNamespaces)
 		api.GET("/workloads", s.listWorkloads)
 		api.GET("/workloads/all", s.listAllWorkloads)
@@ -528,36 +526,6 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 func (s *Server) generateRecommendations(c *gin.Context) {
 	// Use NodePool-based recommendations (based on actual node capacity)
 	s.getRecommendations(c)
-}
-
-// GetWorkloadMetrics godoc
-// @Summary      Get workload metrics (deprecated)
-// @Description  This endpoint is deprecated. Prometheus support has been removed.
-// @Tags         workloads
-// @Accept       json
-// @Produce      json
-// @Success      501  {object}  map[string]interface{}  "Not implemented"
-// @Router       /metrics/workload [get]
-func (s *Server) getWorkloadMetrics(c *gin.Context) {
-	// Prometheus support removed - metrics endpoints are no longer available
-	c.JSON(501, gin.H{
-		"error": "Prometheus support has been removed. Recommendations now use Kubernetes resource requests and node usage data.",
-	})
-}
-
-// GetWorkloadsMetrics godoc
-// @Summary      Get workloads metrics (deprecated)
-// @Description  This endpoint is deprecated. Prometheus support has been removed.
-// @Tags         workloads
-// @Accept       json
-// @Produce      json
-// @Success      501  {object}  map[string]interface{}  "Not implemented"
-// @Router       /metrics/workloads [post]
-func (s *Server) getWorkloadsMetrics(c *gin.Context) {
-	// Prometheus support removed - metrics endpoints are no longer available
-	c.JSON(501, gin.H{
-		"error": "Prometheus support has been removed. Recommendations now use Kubernetes resource requests and node usage data.",
-	})
 }
 
 // ListNamespaces godoc

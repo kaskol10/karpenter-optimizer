@@ -14,8 +14,6 @@ var (
 	apiURL       string
 	namespace    string
 	outputJSON   bool
-	workloadName string
-	workloadType string
 )
 
 var rootCmd = &cobra.Command{
@@ -38,26 +36,15 @@ var recommendationsCmd = &cobra.Command{
 	RunE:  runRecommendations,
 }
 
-var metricsCmd = &cobra.Command{
-	Use:   "metrics",
-	Short: "Get workload metrics (deprecated)",
-	Long:  `This command is deprecated. Metrics are now calculated from Kubernetes resource requests.`,
-	RunE:  runMetrics,
-}
-
 func init() {
 	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "http://localhost:8080", "API server URL")
 	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 
 	analyzeCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Namespace to analyze")
 	recommendationsCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Namespace to get recommendations for")
-	metricsCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Namespace of the workload")
-	metricsCmd.Flags().StringVar(&workloadName, "name", "", "Name of the workload")
-	metricsCmd.Flags().StringVar(&workloadType, "type", "deployment", "Type of workload (deployment, statefulset, daemonset)")
 
 	rootCmd.AddCommand(analyzeCmd)
 	rootCmd.AddCommand(recommendationsCmd)
-	rootCmd.AddCommand(metricsCmd)
 }
 
 func main() {
@@ -191,81 +178,6 @@ func runRecommendations(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func runMetrics(cmd *cobra.Command, args []string) error {
-	if namespace == "" || workloadName == "" {
-		return fmt.Errorf("namespace and name are required (use --namespace and --name flags)")
-	}
-
-	url := fmt.Sprintf("%s/api/v1/metrics/workload?namespace=%s&name=%s&type=%s",
-		apiURL, namespace, workloadName, workloadType)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to call API: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the command
-			fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API error: %s", string(body))
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if outputJSON {
-		prettyJSON, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(prettyJSON))
-	} else {
-		printMetrics(result["metrics"])
-	}
-
-	return nil
-}
-
-func printMetrics(metrics interface{}) {
-	metricsMap, ok := metrics.(map[string]interface{})
-	if !ok {
-		fmt.Println("No metrics found")
-		return
-	}
-
-	fmt.Printf("\n📈 Metrics for %s/%s:\n\n", metricsMap["namespace"], metricsMap["name"])
-
-	if cpuUsage, ok := metricsMap["cpuUsage"].(float64); ok {
-		fmt.Printf("  CPU Usage:      %.3f cores\n", cpuUsage)
-	}
-
-	if memoryUsage, ok := metricsMap["memoryUsage"].(float64); ok {
-		fmt.Printf("  Memory Usage:   %.2f GiB\n", memoryUsage)
-	}
-
-	if cpuLimit, ok := metricsMap["cpuLimit"].(float64); ok && cpuLimit > 0 {
-		fmt.Printf("  CPU Limit:      %.3f cores\n", cpuLimit)
-	}
-
-	if memoryLimit, ok := metricsMap["memoryLimit"].(float64); ok && memoryLimit > 0 {
-		fmt.Printf("  Memory Limit:   %.2f GiB\n", memoryLimit)
-	}
-
-	if timestamp, ok := metricsMap["timestamp"].(string); ok {
-		fmt.Printf("  Timestamp:      %s\n", timestamp)
-	}
-
-	fmt.Println()
 }
 
 func printRecommendations(recs interface{}) {

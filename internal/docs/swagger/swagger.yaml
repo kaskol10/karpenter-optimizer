@@ -1,0 +1,977 @@
+basePath: /api/v1
+definitions:
+  agent.OptimizationOutcome:
+    properties:
+      accuracy:
+        description: How close prediction was to actual (0-1)
+        type: number
+      actualCapacityType:
+        type: string
+      actualCost:
+        description: Actual cost after optimization
+        type: number
+      actualInstanceTypes:
+        items:
+          type: string
+        type: array
+      actualNodes:
+        description: Metrics
+        type: integer
+      actualSavings:
+        description: Actual outcomes
+        type: number
+      appliedAt:
+        type: string
+      incidents:
+        description: Any incidents/issues encountered
+        items:
+          type: string
+        type: array
+      lessonsLearned:
+        description: Key learnings from this outcome
+        items:
+          type: string
+        type: array
+      nodePoolName:
+        type: string
+      performanceImpact:
+        description: '"positive", "neutral", "negative"'
+        type: string
+      planId:
+        type: string
+      predictedConfidence:
+        type: number
+      predictedRiskLevel:
+        type: string
+      predictedSavings:
+        description: Predicted values (from plan)
+        type: number
+      strategy:
+        $ref: '#/definitions/agent.OptimizationStrategy'
+      success:
+        description: Learning data
+        type: boolean
+      userFeedback:
+        description: 'User feedback: "approved", "rejected", "partial"'
+        type: string
+    type: object
+  agent.OptimizationStrategy:
+    enum:
+    - aggressive
+    - balanced
+    - conservative
+    - spot-first
+    - right-size
+    type: string
+    x-enum-comments:
+      StrategyAggressive: Maximize savings, higher risk
+      StrategyBalanced: Balance savings and stability
+      StrategyConservative: Prioritize stability
+      StrategyRightSize: Focus on right-sizing
+      StrategySpotFirst: Prefer spot instances
+    x-enum-descriptions:
+    - Maximize savings, higher risk
+    - Balance savings and stability
+    - Prioritize stability
+    - Prefer spot instances
+    - Focus on right-sizing
+    x-enum-varnames:
+    - StrategyAggressive
+    - StrategyBalanced
+    - StrategyConservative
+    - StrategySpotFirst
+    - StrategyRightSize
+  api.ErrorCauseDetail:
+    properties:
+      category:
+        type: string
+      error:
+        type: string
+      explanation:
+        type: string
+      severity:
+        description: '"critical", "warning", "info"'
+        type: string
+    type: object
+  api.KarpenterErrorCause:
+    properties:
+      error:
+        type: string
+    type: object
+  api.KarpenterLogError:
+    properties:
+      NodePool:
+        properties:
+          name:
+            type: string
+        type: object
+      Pod:
+        properties:
+          name:
+            type: string
+          namespace:
+            type: string
+        type: object
+      controller:
+        type: string
+      error:
+        type: string
+      errorCauses:
+        items:
+          $ref: '#/definitions/api.KarpenterErrorCause'
+        type: array
+      level:
+        type: string
+      logger:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      taints:
+        items:
+          type: string
+        type: array
+      time:
+        type: string
+    type: object
+  api.LogAnalysisRequest:
+    properties:
+      log:
+        type: string
+    required:
+    - log
+    type: object
+  api.LogAnalysisResponse:
+    properties:
+      error:
+        type: string
+      errorCauses:
+        items:
+          $ref: '#/definitions/api.ErrorCauseDetail'
+        type: array
+      explanation:
+        type: string
+      parsedError:
+        $ref: '#/definitions/api.KarpenterLogError'
+      recommendations:
+        items:
+          type: string
+        type: array
+      summary:
+        type: string
+    type: object
+  api.WorkloadRequest:
+    description: Workload specification for analysis
+    properties:
+      cpu:
+        description: CPU limit (optional)
+        example: 500m
+        type: string
+      cpuRequest:
+        description: CPU request (optional)
+        example: 250m
+        type: string
+      gpu:
+        description: Number of GPUs required
+        example: 0
+        type: integer
+      labels:
+        additionalProperties:
+          type: string
+        description: Workload labels
+        example:
+          app: web
+          tier: frontend
+        type: object
+      memory:
+        description: Memory limit (optional)
+        example: 512Mi
+        type: string
+      memoryRequest:
+        description: Memory request (optional)
+        example: 256Mi
+        type: string
+      name:
+        description: Workload name
+        example: web-app
+        type: string
+      namespace:
+        description: Kubernetes namespace
+        example: default
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: Karpenter Optimizer Support
+    url: https://github.com/kaskol10/karpenter-optimizer/issues
+  description: Cost optimization tool for Karpenter NodePools. Analyzes Kubernetes
+    cluster usage and provides AI-powered recommendations to reduce AWS EC2 costs
+    while maintaining performance.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://github.com/kaskol10/karpenter-optimizer
+  title: Karpenter Optimizer API
+  version: "1.0"
+paths:
+  /agent/cost-optimization:
+    get:
+      consumes:
+      - application/json
+      description: Get AI agent-generated cost optimization recommendations using
+        different strategies
+      parameters:
+      - description: 'Optimization strategy: aggressive, balanced, conservative, spot-first,
+          right-size (default: balanced)'
+        in: query
+        name: strategy
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Optimization plans
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cost optimization recommendations from AI agent
+      tags:
+      - agent
+  /agent/learning/history:
+    get:
+      consumes:
+      - application/json
+      description: Get the history of optimization outcomes for learning
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Optimization history
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get optimization history
+      tags:
+      - agent
+  /agent/learning/stats:
+    get:
+      consumes:
+      - application/json
+      description: Get statistics about what the agent has learned from optimization
+        outcomes
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Learning statistics
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get learning statistics
+      tags:
+      - agent
+  /agent/outcomes:
+    post:
+      consumes:
+      - application/json
+      description: Record the outcome of applying an optimization plan so the agent
+        can learn
+      parameters:
+      - description: Optimization outcome
+        in: body
+        name: outcome
+        required: true
+        schema:
+          $ref: '#/definitions/agent.OptimizationOutcome'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Outcome recorded
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Record optimization outcome for learning
+      tags:
+      - agent
+  /analyze:
+    post:
+      consumes:
+      - application/json
+      description: Analyze provided workloads and get NodePool recommendations
+      parameters:
+      - description: Workloads to analyze
+        in: body
+        name: workloads
+        required: true
+        schema:
+          $ref: '#/definitions/api.WorkloadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Recommendations
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Analyze workloads
+      tags:
+      - recommendations
+  /cluster/summary:
+    get:
+      consumes:
+      - application/json
+      description: Get cluster-wide statistics including node counts, CPU/memory usage,
+        and capacity type distribution
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cluster summary
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cluster summary
+      tags:
+      - cluster
+  /config:
+    get:
+      consumes:
+      - application/json
+      description: Get current API configuration including Kubernetes, Ollama, and
+        AWS settings
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Configuration
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get configuration
+      tags:
+      - health
+  /disruptions:
+    get:
+      consumes:
+      - application/json
+      description: Get information about node disruptions and blocked deletions
+      parameters:
+      - default: 24
+        description: 'Hours to look back (default: 24, max: 168)'
+        in: query
+        name: hours
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Node disruptions
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request - invalid hours parameter
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get node disruptions
+      tags:
+      - nodes
+  /disruptions/recent:
+    get:
+      consumes:
+      - application/json
+      description: Get information about recently deleted nodes
+      parameters:
+      - default: 24
+        description: 'Hours to look back (default: 24, max: 168)'
+        in: query
+        name: hours
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Recent node deletions
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request - invalid hours parameter
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get recent node deletions
+      tags:
+      - nodes
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Check API health and service status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health status
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /karpenter/logs:
+    get:
+      description: Gets logs from a Karpenter pod, optionally filtered for ERROR level
+      parameters:
+      - description: Pod namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: Pod name
+        in: query
+        name: pod
+        required: true
+        type: string
+      - default: false
+        description: Filter for ERROR level logs only
+        in: query
+        name: errorOnly
+        type: boolean
+      - default: 100
+        description: Number of lines to tail
+        in: query
+        name: tailLines
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get Karpenter logs
+      tags:
+      - karpenter
+  /karpenter/logs/analyze:
+    post:
+      consumes:
+      - application/json
+      description: Analyzes a Karpenter error log and provides explanations and recommendations
+      parameters:
+      - description: Karpenter error log (JSON string)
+        in: body
+        name: log
+        required: true
+        schema:
+          $ref: '#/definitions/api.LogAnalysisRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.LogAnalysisResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Analyze Karpenter error log
+      tags:
+      - karpenter
+  /karpenter/pods:
+    get:
+      description: Lists all Karpenter pods in the cluster
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get Karpenter pods
+      tags:
+      - karpenter
+  /namespaces:
+    get:
+      consumes:
+      - application/json
+      description: List all Kubernetes namespaces in the cluster
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of namespaces
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List namespaces
+      tags:
+      - workloads
+  /nodepools:
+    get:
+      consumes:
+      - application/json
+      description: List all Karpenter NodePools in the cluster with actual node data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of NodePools
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List NodePools
+      tags:
+      - nodepools
+  /nodepools/{name}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific Karpenter NodePool
+      parameters:
+      - description: NodePool name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: NodePool details
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get NodePool
+      tags:
+      - nodepools
+  /nodepools/recommendations:
+    get:
+      consumes:
+      - application/json
+      description: Get cost-optimized NodePool recommendations based on actual node
+        capacity and usage
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: NodePool recommendations
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get NodePool recommendations
+      tags:
+      - nodepools
+  /nodes:
+    get:
+      consumes:
+      - application/json
+      description: Get all nodes with CPU and memory usage data calculated from pod
+        resource requests
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Nodes with usage data
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get nodes with usage
+      tags:
+      - nodes
+  /recommendations:
+    get:
+      consumes:
+      - application/json
+      description: Get cost-optimized NodePool recommendations based on actual cluster
+        usage and node capacity
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Recommendations with cluster cost analysis
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get NodePool recommendations
+      tags:
+      - recommendations
+    post:
+      consumes:
+      - application/json
+      description: Generate NodePool recommendations (alias for GET /recommendations)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Recommendations
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Generate recommendations
+      tags:
+      - recommendations
+  /recommendations/cluster-summary:
+    get:
+      consumes:
+      - application/json
+      description: Get NodePool recommendations enhanced with AI-generated explanations
+        about changes and benefits
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Recommendations with AI explanations
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cluster recommendations with AI explanations
+      tags:
+      - recommendations
+  /recommendations/cluster-summary/stream:
+    get:
+      consumes:
+      - application/json
+      description: Get NodePool recommendations with Server-Sent Events for real-time
+        progress updates
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cluster recommendations with SSE progress
+      tags:
+      - recommendations
+  /topology:
+    get:
+      consumes:
+      - application/json
+      description: Nodes with scheduled pods and per-pod resource requests for topology
+        visualization
+      parameters:
+      - description: Max pods per node (default 200, max 1000)
+        in: query
+        name: maxPodsPerNode
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Topology data
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cluster topology (nodes and pods)
+      tags:
+      - nodes
+  /workloads:
+    get:
+      consumes:
+      - application/json
+      description: List all workloads (Deployments, StatefulSets, DaemonSets) in a
+        namespace
+      parameters:
+      - description: Namespace name
+        in: query
+        name: namespace
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of workloads
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request - namespace required
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List workloads
+      tags:
+      - workloads
+  /workloads/{namespace}/{name}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workload (Deployment, StatefulSet, or
+        DaemonSet)
+      parameters:
+      - description: Namespace name
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Workload name
+        in: path
+        name: name
+        required: true
+        type: string
+      - default: deployment
+        description: Workload type (deployment, statefulset, daemonset)
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Workload details
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get workload
+      tags:
+      - workloads
+  /workloads/all:
+    get:
+      consumes:
+      - application/json
+      description: List all workloads (Deployments, StatefulSets, DaemonSets, Jobs)
+        across all namespaces
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of workloads
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Kubernetes client not configured
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all workloads
+      tags:
+      - workloads
+swagger: "2.0"
