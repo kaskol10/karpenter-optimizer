@@ -1507,8 +1507,8 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 		return
 	}
 
-	// Enhance recommendations with Ollama explanations if available
-	enhancedRecommendations, err := s.recommender.EnhanceRecommendationsWithOllama(ctx, recommendations)
+	// Enhance recommendations with AI explanations if available
+	enhancedRecommendations, err := s.recommender.EnhanceRecommendationsWithLLM(ctx, recommendations)
 	if err == nil {
 		recommendations = enhancedRecommendations
 	}

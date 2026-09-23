@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -92,7 +93,7 @@ func NewLearningAgent(historyFile string) (*LearningAgent, error) {
 	
 	// Load existing history (non-blocking - continue even if it fails)
 	if err := agent.loadHistory(); err != nil {
-		fmt.Printf("Warning: Failed to load optimization history: %v (continuing without history)\n", err)
+		log.Printf("Warning: Failed to load optimization history: %v (continuing without history)", err)
 		// Continue with empty history - this is not critical
 	}
 	
@@ -101,7 +102,7 @@ func NewLearningAgent(historyFile string) (*LearningAgent, error) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Warning: Panic in learnFromHistory: %v\n", r)
+				log.Printf("Warning: Panic in learnFromHistory: %v", r)
 			}
 		}()
 		agent.learnFromHistory()

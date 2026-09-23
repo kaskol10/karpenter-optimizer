@@ -49,7 +49,7 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 	defer cancel()
 	
 	// Create agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, strategy)
+	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, strategy, s.config.AgentHistoryFile)
 	
 	// Generate recommendations with error handling
 	plans, err := costAgent.GenerateRecommendations(ctx)
@@ -97,7 +97,7 @@ func (s *Server) recordOptimizationOutcome(c *gin.Context) {
 	defer cancel()
 	
 	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced)
+	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
 	learningAgent := costAgent.GetLearningAgent()
 	
 	if learningAgent == nil {
@@ -133,7 +133,7 @@ func (s *Server) getLearningStats(c *gin.Context) {
 	}
 	
 	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced)
+	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
 	learningAgent := costAgent.GetLearningAgent()
 	
 	if learningAgent == nil {
@@ -186,7 +186,7 @@ func (s *Server) getOptimizationHistory(c *gin.Context) {
 	}
 	
 	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced)
+	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
 	learningAgent := costAgent.GetLearningAgent()
 	
 	if learningAgent == nil {

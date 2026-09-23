@@ -3,8 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
-	
+
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
 )
@@ -27,28 +28,25 @@ func NewCostOptimizationAgent(
 	rec *recommender.Recommender,
 	k8sClient *kubernetes.Client,
 	strategy OptimizationStrategy,
+	historyFile string,
 ) *CostOptimizationAgent {
 	if strategy == "" {
 		strategy = StrategyBalanced // Default
 	}
-	
+
 	llmEnhancer := NewLLMEnhancer(rec)
-	
-	// Initialize learning agent (history stored in /tmp/karpenter-optimizer-history.json)
-	// In production, this could be a database or persistent storage
-	historyFile := "/tmp/karpenter-optimizer-history.json"
+
+	// Initialize learning agent (history file configurable via AGENT_HISTORY_FILE)
 	learningAgent, err := NewLearningAgent(historyFile)
 	if err != nil {
-		fmt.Printf("Warning: Failed to initialize learning agent: %v\n", err)
+		log.Printf("Warning: Failed to initialize learning agent: %v", err)
 		learningAgent = nil
 	}
 	
 	// Check if LLM is actually available
 	useLLM := llmEnhancer.HasLLM()
-	if useLLM {
-		fmt.Printf("LLM enhancement enabled for agent recommendations\n")
-	} else {
-		fmt.Printf("LLM not configured - agent will use rule-based recommendations only\n")
+	if !useLLM {
+		log.Printf("LLM not configured - agent will use rule-based recommendations only")
 	}
 	
 	return &CostOptimizationAgent{
@@ -83,7 +81,7 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 		// Analyze NodePool
 		analysis, err := a.analyzer.AnalyzeNodePool(ctx, np)
 		if err != nil {
-			fmt.Printf("Warning: Failed to analyze NodePool %s: %v\n", np.Name, err)
+			log.Printf("Warning: Failed to analyze NodePool %s: %v", np.Name, err)
 			continue
 		}
 		
@@ -100,7 +98,7 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 		// Plan optimization
 		plan, err := a.planner.PlanOptimization(ctx, analysis, strategy, np)
 		if err != nil {
-			fmt.Printf("Warning: Failed to plan optimization for %s: %v\n", np.Name, err)
+			log.Printf("Warning: Failed to plan optimization for %s: %v", np.Name, err)
 			continue
 		}
 		
@@ -143,12 +141,12 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 			} else if err != nil {
 				// Log but don't fail - continue with non-enhanced recommendations
 				if ctx.Err() == nil { // Only log if parent context is still valid
-					fmt.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v\n", np.Name, err)
+					log.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v", np.Name, err)
 				}
 			}
 		} else if !a.llmEnhancer.HasLLM() && a.useLLM {
 			// Log when LLM is requested but not available
-			fmt.Printf("Info: LLM enhancement requested but LLM client not configured for NodePool %s\n", np.Name)
+			log.Printf("Info: LLM enhancement requested but LLM client not configured for NodePool %s", np.Name)
 		}
 		
 		// Only include plans with recommendations
@@ -200,7 +198,7 @@ func (a *CostOptimizationAgent) GenerateRecommendationsForNodePool(ctx context.C
 			plan.Recommendations = enhancedRecs
 			// AI-enhanced explanations are now in plan.Recommendations[].AIReasoning
 		} else if err != nil {
-			fmt.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v\n", nodePoolName, err)
+			log.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v", nodePoolName, err)
 		}
 	}
 	

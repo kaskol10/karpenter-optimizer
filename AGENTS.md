@@ -206,7 +206,7 @@ type NodeInfo struct {
 4. **Cost validation**: Skip recommendations that increase cost by >10%
 
 ### Instance Type Rules
-1. **Query AWS API first** for available types (future-proof)
+1. **Query the AWS Pricing API first** for available types (future-proof); a hardcoded fallback list is used only when the AWS API is unavailable (offline/no credentials)
 2. **Filter GPU instances** unless workloads require GPU
 3. **Respect architecture** (arm64 vs amd64)
 4. **Limit combinations** to 1-3 instance types
@@ -318,7 +318,7 @@ Before marking any task complete, verify:
 
 ⚠️ **DO NOT**:
 - Use Prometheus for recommendations (removed)
-- Hardcode instance types (use AWS API)
+- Use hardcoded instance types/prices as the *primary* source (the AWS Pricing API is primary; hardcoded maps/lists are a documented offline fallback)
 - Assume capacity type (always check actual nodes)
 - Skip cost validation (prevent cost increases)
 - Recommend for NodePools with 0 nodes
