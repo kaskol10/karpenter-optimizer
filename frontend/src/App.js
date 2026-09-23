@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
-import { Loader2, Settings } from 'lucide-react';
+import { Loader2, Settings, Info, X } from 'lucide-react';
 import './App.css';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
@@ -39,6 +39,11 @@ function App() {
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [showKarpenterBanner, setShowKarpenterBanner] = useState(true);
+
+  const karpenterDetected = config?.karpenter?.detected ?? false;
+  const kubernetesConnected = config?.kubernetes?.connected ?? false;
+  const showNoKarpenterBanner = showKarpenterBanner && kubernetesConnected && !karpenterDetected;
 
   useEffect(() => {
     checkHealth();
@@ -88,6 +93,26 @@ function App() {
           </div>
         </div>
       </header>
+
+      {showNoKarpenterBanner && (
+        <div className="max-w-7xl mx-auto px-6 pt-4">
+          <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+            <Info className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-blue-800 flex-1">
+              Karpenter not detected — NodePool-based features are unavailable.
+              Recommendations use cluster-wide analysis, and node cost is shown as "n/a".
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowKarpenterBanner(false)}
+              className="shrink-0 rounded p-0.5 text-blue-600 hover:bg-blue-100"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-6">

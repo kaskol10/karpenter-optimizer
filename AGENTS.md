@@ -71,9 +71,22 @@ type NodeInfo struct {
     CPUUsage      *ResourceUsage
     MemoryUsage   *ResourceUsage
     PodCount      int
+    GPUCapacity   float64 // nvidia.com/gpu capacity (0 when no GPU)
+    GPUAllocated  float64 // nvidia.com/gpu allocated to scheduled pods
+    GPUModel      string  // from nvidia.com/gpu.product label (may be empty)
     // ...
 }
 ```
+
+### No-Karpenter / On-Prem Mode
+- `kubernetes.Client.HasKarpenter()` probes the `karpenter.sh` API group (cached via `sync.Once`).
+- `Server.karpenterDetected` is set at startup; `/api/v1/config` exposes `karpenter.detected`.
+- NodePool-CRD endpoints (`/recommendations`, `/nodepools`, `/nodepools/recommendations`, `/nodepools/{name}`, `/recommendations/cluster-summary` + SSE, `/agent/cost-optimization`) return **503** `{"code":"karpenter_not_found"}` when Karpenter is absent (the SSE variant emits an `error` event).
+- Cluster cost is reported as `costUnknown: true` (frontend shows "n/a") when no node has an `instance-type` label.
+
+### GPU (allocation-based, core v1 only)
+- Sourced from `nvidia.com/gpu` node capacity/allocatable + scheduled pod requests; model from `nvidia.com/gpu.product` label.
+- `TopologyPodResources.GPU`, `TopologyNode.{GPUCapacity,GPUAllocated,GPUModel}`, and the `gpu` block in `/api/v1/cluster/summary` (`{total, allocated, free, byModel[]}`).
 
 ## API Endpoints
 

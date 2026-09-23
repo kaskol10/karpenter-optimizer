@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
+import { Badge } from './ui/badge';
 import { RefreshCw, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getCacheStats } from '../lib/pricingCache';
@@ -26,6 +27,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
   const [progressMessage, setProgressMessage] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [cacheStats, setCacheStats] = useState(null);
+  const [noKarpenterNotice, setNoKarpenterNotice] = useState(false);
 
   useEffect(() => {
     fetchSummary();
@@ -134,7 +136,12 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
         try {
           console.error('[SSE] Received error event:', event.data);
           const data = JSON.parse(event.data);
-          setError(data.error || 'Failed to generate recommendations');
+          if (data.code === 'karpenter_not_found') {
+            // Not a failure — Karpenter is simply not installed. Show a notice.
+            setNoKarpenterNotice(true);
+          } else {
+            setError(data.error || 'Failed to generate recommendations');
+          }
         } catch (err) {
           console.error('[SSE] Error parsing error event:', err, 'Raw data:', event.data);
           setError('Failed to generate recommendations');
@@ -259,6 +266,16 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
             </Alert>
           )}
 
+          {noKarpenterNotice && (
+            <Alert>
+              <AlertTitle>Karpenter not detected</AlertTitle>
+              <AlertDescription>
+                NodePool-based recommendations require Karpenter. Use the cluster-wide
+                statistics above, or install Karpenter to enable NodePool recommendations.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {error && (
             <Alert variant="destructive">
               <AlertTitle>Error</AlertTitle>
@@ -311,7 +328,18 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               </CardContent>
             </Card>
 
-            {summary.estimatedCost !== undefined && summary.estimatedCost > 0 && (
+            {(summary.estimatedCost !== undefined && summary.estimatedCost > 0) || summary.costUnknown === true ? (
+              summary.costUnknown === true ? (
+                <Card className="bg-gray-50 border-gray-200">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Estimated Cost</p>
+                    <p className="text-2xl font-bold text-gray-500">n/a</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      No instance-type metadata (on-prem)
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
               <Card className="bg-green-50 border-green-200">
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">Estimated Cost</p>
@@ -343,7 +371,8 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                   )}
                 </CardContent>
               </Card>
-            )}
+              )
+            ) : null}
 
             <Card className="bg-yellow-50 border-yellow-200">
               <CardContent className="pt-6">
@@ -405,6 +434,46 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               </CardContent>
             </Card>
           </div>
+
+          {/* GPU Allocation (allocation-based; shown only when GPUs exist) */}
+          {summary.gpu && summary.gpu.total > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                GPU Allocation
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Total GPUs</p>
+                    <p className="text-2xl font-bold text-purple-600">{summary.gpu.total}</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-purple-50 border-purple-200">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">In Use</p>
+                    <p className="text-2xl font-bold text-purple-600">
+                      {summary.gpu.allocated} / {summary.gpu.total}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-green-50 border-green-200">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Free</p>
+                    <p className="text-2xl font-bold text-green-600">{summary.gpu.free}</p>
+                  </CardContent>
+                </Card>
+              </div>
+              {Array.isArray(summary.gpu.byModel) && summary.gpu.byModel.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {summary.gpu.byModel.map((m, i) => (
+                    <Badge key={`${m.model}-${i}`} variant="outline" className="text-xs">
+                      {m.model}: {m.allocated}/{m.total}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -60,10 +60,11 @@ func debugLog(debug bool, format string, args ...interface{}) {
 }
 
 type Server struct {
-	router      *gin.Engine
-	config      *config.Config
-	recommender *recommender.Recommender
-	k8sClient   *kubernetes.Client
+	router           *gin.Engine
+	config           *config.Config
+	recommender      *recommender.Recommender
+	k8sClient        *kubernetes.Client
+	karpenterDetected bool
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -112,15 +113,27 @@ func NewServer(cfg *config.Config) *Server {
 	}
 
 	rec := recommender.NewRecommender(cfg)
+	karpenterDetected := false
 	if k8sClient != nil {
 		rec.SetK8sClient(k8sClient)
+
+		// Detect whether Karpenter is installed. Cached for the process lifetime.
+		detectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		karpenterDetected = k8sClient.HasKarpenter(detectCtx)
+		cancel()
+		if karpenterDetected {
+			debugLog(cfg.Debug, "Karpenter detected in cluster\n")
+		} else {
+			debugLog(cfg.Debug, "Karpenter not detected in cluster\n")
+		}
 	}
 
 	server := &Server{
-		router:      r,
-		config:      cfg,
-		recommender: rec,
-		k8sClient:   k8sClient,
+		router:            r,
+		config:            cfg,
+		recommender:       rec,
+		k8sClient:         k8sClient,
+		karpenterDetected: karpenterDetected,
 	}
 
 	server.setupRoutes()
@@ -277,6 +290,9 @@ func (s *Server) getConfig(c *gin.Context) {
 			"kubeconfigPath": s.config.KubeconfigPath,
 			"kubeContext":    s.config.KubeContext,
 		},
+		"karpenter": gin.H{
+			"detected": s.karpenterDetected,
+		},
 		"llm": gin.H{
 			"provider":   s.config.LLMProvider,
 			"url":        s.config.LLMURL,
@@ -352,6 +368,20 @@ func (s *Server) analyzeWorkloads(c *gin.Context) {
 	})
 }
 
+// karpenterRequired returns true (aborting the request with a 503
+// karpenter_not_found) when the handler depends on Karpenter NodePool CRDs and
+// Karpenter is not installed in the cluster.
+func (s *Server) karpenterRequired(c *gin.Context) bool {
+	if s.karpenterDetected {
+		return true
+	}
+	c.AbortWithStatusJSON(503, gin.H{
+		"error": "Karpenter is not installed in this cluster",
+		"code":  "karpenter_not_found",
+	})
+	return false
+}
+
 // GetRecommendations godoc
 // @Summary      Get NodePool recommendations
 // @Description  Get cost-optimized NodePool recommendations based on actual cluster usage and node capacity
@@ -366,6 +396,9 @@ func (s *Server) getRecommendations(c *gin.Context) {
 	// Use NodePool-based recommendations (based on actual node capacity)
 	if s.k8sClient == nil {
 		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+	if !s.karpenterRequired(c) {
 		return
 	}
 
@@ -435,6 +468,15 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 	// Send initial connection message
 	c.SSEvent("progress", gin.H{"message": "Connecting...", "progress": 0.0})
 	c.Writer.Flush()
+
+	if !s.karpenterDetected {
+		c.SSEvent("error", gin.H{
+			"error": "Karpenter is not installed in this cluster",
+			"code":  "karpenter_not_found",
+		})
+		c.Writer.Flush()
+		return
+	}
 
 	// Get NodePools with actual node data
 	c.SSEvent("progress", gin.H{"message": "Fetching NodePool data...", "progress": 5.0})
@@ -746,6 +788,9 @@ func (s *Server) listNodePools(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
 		return
 	}
+	if !s.karpenterRequired(c) {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for cost calculations
 	defer cancel()
@@ -872,6 +917,9 @@ func (s *Server) getNodePoolRecommendations(c *gin.Context) {
 func (s *Server) getNodePool(c *gin.Context) {
 	if s.k8sClient == nil {
 		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+	if !s.karpenterRequired(c) {
 		return
 	}
 
@@ -1034,6 +1082,7 @@ func (s *Server) getNodesWithUsage(c *gin.Context) {
 type TopologyPodResources struct {
 	CPUCores  float64 `json:"cpuCores"`
 	MemoryGiB float64 `json:"memoryGiB"`
+	GPU       float64 `json:"gpu"`
 }
 
 // TopologyPod is a pod scheduled on a node with parsed request sizes.
@@ -1060,10 +1109,14 @@ type TopologyNode struct {
 	PodCount     int                   `json:"podCount"`
 	Pods         []TopologyPod         `json:"pods"`
 	CreationTime string                `json:"creationTime,omitempty"`
+	GPUCapacity  float64               `json:"gpuCapacity,omitempty"`
+	GPUAllocated float64               `json:"gpuAllocated,omitempty"`
+	GPUModel     string                `json:"gpuModel,omitempty"`
 }
 
 func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
 	var out TopologyPodResources
+	out.GPU = p.GPURequested
 	if p.Requests.CPU != "" {
 		if q, err := resource.ParseQuantity(p.Requests.CPU); err == nil {
 			out.CPUCores = float64(q.MilliValue()) / 1000.0
@@ -1230,6 +1283,9 @@ func (s *Server) getTopology(c *gin.Context) {
 			PodCount:     node.PodCount,
 			Pods:         topPods,
 			CreationTime: node.CreationTime,
+			GPUCapacity:  node.GPUCapacity,
+			GPUAllocated: node.GPUAllocated,
+			GPUModel:     node.GPUModel,
 		})
 	}
 	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
@@ -1268,9 +1324,16 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 	// Aggregate cluster-wide statistics
 	var totalNodes, spotNodes, onDemandNodes, totalPods int
 	var totalCPUUsed, totalCPUAllocatable, totalMemoryUsed, totalMemoryAllocatable float64
+	var totalGPUCapacity, totalGPUAllocated float64
+	gpuByModel := make(map[string]struct{ total, allocated float64 })
+	nodesWithInstanceType := 0
 
 	for _, node := range nodes {
 		totalNodes++
+
+		if node.InstanceType != "" {
+			nodesWithInstanceType++
+		}
 
 		// Count by capacity type
 		switch node.CapacityType {
@@ -1295,6 +1358,20 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		if node.MemoryUsage != nil {
 			totalMemoryUsed += node.MemoryUsage.Used
 			totalMemoryAllocatable += node.MemoryUsage.Allocatable
+		}
+
+		// Sum GPU capacity and allocation
+		if node.GPUCapacity > 0 || node.GPUAllocated > 0 {
+			totalGPUCapacity += node.GPUCapacity
+			totalGPUAllocated += node.GPUAllocated
+			model := node.GPUModel
+			if model == "" {
+				model = "unknown"
+			}
+			m := gpuByModel[model]
+			m.total += node.GPUCapacity
+			m.allocated += node.GPUAllocated
+			gpuByModel[model] = m
 		}
 	}
 
@@ -1364,6 +1441,30 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		summaryData["pricingSource"] = overallPricingSource
 	}
 
+	// When no node has instance-type metadata, costs cannot be calculated
+	// (on-prem nodes). Signal this to the frontend so it shows "n/a" instead of $0.00.
+	if totalNodes > 0 && nodesWithInstanceType == 0 {
+		summaryData["costUnknown"] = true
+	}
+
+	// Add GPU totals if any node reports GPU capacity
+	if totalGPUCapacity > 0 || totalGPUAllocated > 0 {
+		byModel := make([]gin.H, 0, len(gpuByModel))
+		for model, m := range gpuByModel {
+			byModel = append(byModel, gin.H{
+				"model":     model,
+				"total":     m.total,
+				"allocated": m.allocated,
+			})
+		}
+		summaryData["gpu"] = gin.H{
+			"total":     totalGPUCapacity,
+			"allocated": totalGPUAllocated,
+			"free":      totalGPUCapacity - totalGPUAllocated,
+			"byModel":   byModel,
+		}
+	}
+
 	c.JSON(200, gin.H{
 		"summary": summaryData,
 	})
@@ -1383,6 +1484,9 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 	// Get recommendations from nodepools endpoint first
 	if s.k8sClient == nil {
 		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+	if !s.karpenterRequired(c) {
 		return
 	}
 

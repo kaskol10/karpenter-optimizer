@@ -24,7 +24,10 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "Recommender or Kubernetes client not configured"})
 		return
 	}
-	
+	if !s.karpenterRequired(c) {
+		return
+	}
+
 	// Get strategy from query parameter
 	strategyParam := c.Query("strategy")
 	var strategy agent.OptimizationStrategy

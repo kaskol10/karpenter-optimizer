@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -17,8 +17,17 @@ function DisruptionTracker() {
   const [disruptions, setDisruptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [karpenterDetected, setKarpenterDetected] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState(new Set());
   const [showOnlyBlocked, setShowOnlyBlocked] = useState(false);
+
+  // Read Karpenter availability from config to distinguish "no disruptions"
+  // from "no disruption tracking without Karpenter".
+  useEffect(() => {
+    axios.get(`${API_URL}/api/v1/config`)
+      .then(res => setKarpenterDetected(res?.data?.karpenter?.detected ?? false))
+      .catch(() => {});
+  }, []);
 
   const fetchDisruptions = async () => {
     setLoading(true);
@@ -159,7 +168,11 @@ function DisruptionTracker() {
             <p className="text-sm text-muted-foreground">Loading disruptions...</p>
           </div>
         ) : disruptions.length === 0 ? (
-          <p className="text-center text-muted-foreground py-8">No active disruptions found</p>
+          <p className="text-center text-muted-foreground py-8">
+            {karpenterDetected
+              ? 'No active disruptions found'
+              : 'No disruption tracking without Karpenter'}
+          </p>
         ) : (
           <div className="space-y-4">
             {/* Blocked Disruptions Focus Section */}

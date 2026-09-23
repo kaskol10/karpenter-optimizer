@@ -286,6 +286,26 @@ function NodeUsageView() {
     );
   };
 
+  const GPUGauge = ({ gpuCapacity, gpuAllocated, gpuModel }) => {
+    const percent = gpuCapacity > 0 ? Math.min((gpuAllocated / gpuCapacity) * 100, 100) : 0;
+    const modelLabel = gpuModel ? ` ${gpuModel}` : '';
+    return (
+      <div className="space-y-2">
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-semibold">GPU{modelLabel}</span>
+          <span className={cn("font-semibold", percent >= 90 ? "text-red-600" : percent >= 70 ? "text-yellow-600" : "text-green-600")}>
+            {gpuAllocated}/{gpuCapacity} ({percent.toFixed(0)}%)
+          </span>
+        </div>
+        <Progress value={percent} className="h-2" />
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>Capacity: {gpuCapacity}</span>
+          <span>Allocated: {gpuAllocated}</span>
+        </div>
+      </div>
+    );
+  };
+
   const grouped = groupedNodes();
 
   return (
@@ -729,6 +749,14 @@ function NodeUsageView() {
                                 {node.architecture.toUpperCase()}
                               </Badge>
                             )}
+                            {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
+                              <Badge
+                                variant="outline"
+                                className="border-purple-500 text-purple-700"
+                              >
+                                🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated || 0}/{node.gpuCapacity || 0})
+                              </Badge>
+                            )}
                             {node.creationTime && (
                               <Badge variant="outline">Age: {getNodeAge(node.creationTime)}</Badge>
                             )}
@@ -754,6 +782,14 @@ function NodeUsageView() {
                               allocatable={node.memoryUsage.allocatable}
                               percent={node.memoryUsage.percent}
                               type="memory"
+                            />
+                          )}
+
+                          {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
+                            <GPUGauge
+                              gpuCapacity={node.gpuCapacity || 0}
+                              gpuAllocated={node.gpuAllocated || 0}
+                              gpuModel={node.gpuModel}
                             />
                           )}
 

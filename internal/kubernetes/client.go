@@ -31,10 +31,14 @@ import (
 )
 
 type Client struct {
-	clientset       *kubernetes.Clientset
+	clientset       kubernetes.Interface
 	dynamicClient   dynamic.Interface
 	discoveryClient discovery.DiscoveryInterface
 	debug           bool
+
+	karpenterOnce      sync.Once
+	karpenterDetected  bool
+	karpenterCheckedAt bool
 }
 
 type WorkloadInfo struct {
@@ -726,6 +730,9 @@ type NodeInfo struct {
 	PodCount     int        `json:"podCount"`               // Number of pods scheduled on this node
 	PodNames     []string   `json:"podNames,omitempty"`     // Names of pods running on this node (namespace/name format)
 	CreationTime string     `json:"creationTime,omitempty"` // Node creation timestamp
+	GPUCapacity  float64    `json:"gpuCapacity,omitempty"`  // Total nvidia.com/gpu capacity
+	GPUAllocated float64    `json:"gpuAllocated,omitempty"` // nvidia.com/gpu allocated to scheduled pods
+	GPUModel     string     `json:"gpuModel,omitempty"`     // GPU model from nvidia.com/gpu.product label
 }
 
 // NodeUsage represents resource usage for a node
@@ -972,10 +979,21 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			memAllocatable = float64(memAlloc.Value()) / (1024.0 * 1024.0 * 1024.0)
 		}
 
+		// Extract GPU capacity/allocatable and model from labels (core v1 only)
+		var gpuCapacity, gpuAllocatable float64
+		if gpuCap, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpu")]; ok {
+			gpuCapacity = float64(gpuCap.Value())
+		}
+		if gpuAlloc, ok := node.Status.Allocatable[corev1.ResourceName("nvidia.com/gpu")]; ok {
+			gpuAllocatable = float64(gpuAlloc.Value())
+		}
+		gpuModel := node.Labels["nvidia.com/gpu.product"]
+
 		// Get pods on this node once to calculate usage
 		// Initialize usage counters for this node (reset for each node)
 		cpuUsed := 0.0
 		memUsed := 0.0
+		gpuUsed := 0.0
 
 		// Create a per-node context with its own timeout (10 seconds per node)
 		// This prevents one slow node from blocking others, while still allowing retries
@@ -1039,6 +1057,10 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 					if memReq := container.Resources.Requests[corev1.ResourceMemory]; !memReq.IsZero() {
 						memUsed += float64(memReq.Value()) / (1024.0 * 1024.0 * 1024.0)
 					}
+
+					if gpuReq := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; !gpuReq.IsZero() {
+						gpuUsed += float64(gpuReq.Value())
+					}
 				}
 			}
 		}
@@ -1075,6 +1097,14 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				Allocatable: memAllocatable,
 				Percent:     memPercent,
 			}
+		}
+
+		// Populate GPU fields (allocation-based). Capacity/allocatable come from
+		// core v1 node status; allocated is the sum of scheduled pod requests.
+		if gpuCapacity > 0 || gpuAllocatable > 0 {
+			nodeInfo.GPUCapacity = gpuCapacity
+			nodeInfo.GPUAllocated = gpuUsed
+			nodeInfo.GPUModel = gpuModel
 		}
 
 		// Set pod count and pod names (already calculated in the loop above)
@@ -1121,6 +1151,7 @@ type PodInfo struct {
 	Requests     ResourceInfo `json:"requests,omitempty"` // Pod resource requests
 	Limits       ResourceInfo `json:"limits,omitempty"`   // Pod resource limits
 	QOSClass     string       `json:"qosClass,omitempty"` // QoS class (Guaranteed, Burstable, BestEffort)
+	GPURequested float64      `json:"gpuRequested,omitempty"` // nvidia.com/gpu requested across containers
 }
 
 // GetPodsOnNodes gets all pods running on the specified nodes.
@@ -1166,6 +1197,23 @@ func (c *Client) discoverNodePoolResource(ctx context.Context) (schema.GroupVers
 	}
 
 	return schema.GroupVersionResource{}, fmt.Errorf("nodepools resource not found in karpenter.sh API")
+}
+
+// HasKarpenter reports whether the cluster has the Karpenter NodePool resource
+// registered. The result is cached for the client's lifetime because Karpenter
+// does not appear or disappear at runtime.
+func (c *Client) HasKarpenter(ctx context.Context) bool {
+	c.karpenterOnce.Do(func() {
+		_, err := c.discoverNodePoolResource(ctx)
+		c.karpenterDetected = err == nil
+		c.karpenterCheckedAt = true
+	})
+	return c.karpenterDetected
+}
+
+// KarpenterChecked reports whether HasKarpenter has run at least once.
+func (c *Client) KarpenterChecked() bool {
+	return c.karpenterCheckedAt
 }
 
 // splitGroupVersion splits "group/version" into [group, version]
@@ -2066,6 +2114,7 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 		requests := ResourceInfo{}
 		limits := ResourceInfo{}
 		var cpuRequest, memoryRequest, cpuLimit, memoryLimit resource.Quantity
+		var gpuRequested float64
 
 		for _, container := range pod.Spec.Containers {
 			if container.Resources.Requests != nil {
@@ -2074,6 +2123,9 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 				}
 				if mem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
 					memoryRequest.Add(mem)
+				}
+				if gpu, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; ok && !gpu.IsZero() {
+					gpuRequested += float64(gpu.Value())
 				}
 			}
 			if container.Resources.Limits != nil {
@@ -2128,6 +2180,7 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 			Requests:     requests,
 			Limits:       limits,
 			QOSClass:     qosClass,
+			GPURequested: gpuRequested,
 		})
 	}
 

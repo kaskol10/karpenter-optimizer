@@ -17,8 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parsed log details showing pod, NodePool, and taint information
   - New API endpoint: `POST /api/v1/karpenter/logs/analyze`
   - New UI tab: "Log Analyzer" in the main navigation
+- **On-Prem / No-Karpenter Mode**: The app now gracefully degrades when Karpenter is not installed
+  - `HasKarpenter()` discovery check (cached for the process lifetime) on the Kubernetes client
+  - `/api/v1/config` now reports `karpenter.detected`
+  - NodePool-CRD endpoints return **503** with code `karpenter_not_found` (JSON + SSE) instead of 500
+  - Dismissible UI banner, non-error notices in Overview/Agent tabs, and a Disruptions-tab note
+  - Cluster cost shows "n/a" (not `$0.00`) when no node has instance-type metadata
+- **GPU Allocation Visualization** (allocation-based, core v1 only — no DCGM/Prometheus)
+  - `NodeInfo` gains `gpuCapacity`, `gpuAllocated`, `gpuModel`; `PodInfo` gains `gpuRequested`
+  - `/api/v1/topology` nodes/pods and `/api/v1/cluster/summary` now expose GPU capacity/allocated/model
+  - UI: cluster GPU stat tiles (Total/In use/Free/by model), per-node GPU bars, and GPU badges in the topology & node views (hidden when no GPUs)
 
-## [Unreleased]
+### Changed
+- `kubernetes.Client.clientset` is now typed as `kubernetes.Interface` (was `*kubernetes.Clientset`) to allow fake-client injection in tests.
 
 ## [0.0.29] - 2025-01-26
 
