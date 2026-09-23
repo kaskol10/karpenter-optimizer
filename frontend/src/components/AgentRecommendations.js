@@ -51,6 +51,7 @@ function AgentRecommendations({ onRecommendationsGenerated, onClusterCostUpdate 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [noKarpenter, setNoKarpenter] = useState(false);
   const [strategy, setStrategy] = useState('balanced');
   const [selectedPlan, setSelectedPlan] = useState(null);
 
@@ -101,7 +102,13 @@ function AgentRecommendations({ onRecommendationsGenerated, onClusterCostUpdate 
         });
       }
     } catch (err) {
-      setError(err.response?.data?.error || err.message || 'Failed to fetch agent recommendations');
+      const data = err.response?.data;
+      if (data?.code === 'karpenter_not_found') {
+        setNoKarpenter(true);
+        setError(null);
+      } else {
+        setError(data?.error || err.message || 'Failed to fetch agent recommendations');
+      }
       console.error('Agent recommendations error:', err);
     } finally {
       setLoading(false);
@@ -305,8 +312,20 @@ function AgentRecommendations({ onRecommendationsGenerated, onClusterCostUpdate 
           </div>
         )}
 
+        {/* No Karpenter empty state */}
+        {noKarpenter && (
+          <div className="text-center py-10 text-muted-foreground">
+            <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p className="font-medium text-base">Recommendations require Karpenter NodePools</p>
+            <p className="mt-1 text-sm">
+              Karpenter is not installed in this cluster. Use the <strong>Overview</strong> tab
+              for cluster-wide analysis instead.
+            </p>
+          </div>
+        )}
+
         {/* Empty State */}
-        {!loading && plans.length === 0 && !error && (
+        {!loading && plans.length === 0 && !error && !noKarpenter && (
           <div className="text-center py-8 text-muted-foreground">
             <Sparkles className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>Select a strategy and click "Generate" to get AI-powered recommendations</p>

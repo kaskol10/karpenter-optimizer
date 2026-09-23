@@ -56,6 +56,7 @@ function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
       ? `Workload: ${pod.workloadType}${pod.workloadName ? `/${pod.workloadName}` : ''}`
       : null,
     `${label} req: ${format(weight)}`,
+    (pod.requests?.gpu || 0) > 0 ? `GPU req: ${pod.requests.gpu}` : null,
     pod.qosClass ? `QoS: ${pod.qosClass}` : null,
   ].filter(Boolean);
 
@@ -178,6 +179,14 @@ function NodePodBar({ node, pods, metric, showAllPodsInList }) {
                     }}
                   />
                   <span className="font-mono truncate">{pod.namespace}/{pod.name}</span>
+                  {(pod.requests?.gpu || 0) > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] border-purple-500 text-purple-700 shrink-0"
+                    >
+                      {pod.requests.gpu} GPU
+                    </Badge>
+                  )}
                   <span className="ml-auto text-muted-foreground font-mono shrink-0">{format(w)}</span>
                 </div>
               );
@@ -248,6 +257,7 @@ export default function TopologyView() {
           requests: {
             cpuCores: 1,
             memoryGiB: 1,
+            gpu: 0,
           },
         };
       }),
@@ -509,6 +519,15 @@ export default function TopologyView() {
                               <Badge variant="outline">{node.capacityType}</Badge>
                             )}
                             {node.zone && <Badge variant="secondary">{node.zone}</Badge>}
+                            {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
+                              <Badge
+                                variant="outline"
+                                className="border-purple-500 text-purple-700"
+                                title={node.gpuModel || 'GPU'}
+                              >
+                                🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated ?? 0}/{node.gpuCapacity ?? 0})
+                              </Badge>
+                            )}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -607,6 +626,14 @@ export default function TopologyView() {
                                           <span className="font-mono text-muted-foreground shrink-0">
                                             MEM {(pod.requests?.memoryGiB || 0).toFixed(2)}Gi
                                           </span>
+                                          {(pod.requests?.gpu || 0) > 0 && (
+                                            <Badge
+                                              variant="outline"
+                                              className="text-[10px] border-purple-500 text-purple-700 shrink-0"
+                                            >
+                                              {pod.requests.gpu} GPU
+                                            </Badge>
+                                          )}
                                         </div>
                                       ))}
                                   </div>

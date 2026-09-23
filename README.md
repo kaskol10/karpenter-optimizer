@@ -22,6 +22,8 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 🖥️ **Modern Web UI**: React-based interface with real-time updates and progress tracking
 - 🚨 **Disruption Tracking**: Monitor Karpenter node disruptions and identify blocked deletions
 - 🔍 **Karpenter Log Analyzer**: Analyze Karpenter error logs with AI-powered explanations and actionable recommendations
+- 🎮 **GPU Allocation Visualization**: See GPU capacity/allocation per node, pod, and cluster (allocation-based, no DCGM/Prometheus)
+- 🏢 **On-Prem / No-Karpenter Mode**: Gracefully degrades when Karpenter is absent — cluster-wide stats, GPU view, and "n/a" costs instead of errors
 - 📦 **Helm Chart**: Production-ready Helm chart for easy Kubernetes deployment
 - ⚡ **Kubernetes Native**: Uses Kubernetes API directly - no Prometheus required
 

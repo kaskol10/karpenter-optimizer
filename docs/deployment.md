@@ -9,6 +9,7 @@ This guide covers deploying Karpenter Optimizer in various environments.
 - [Docker Deployment](#docker-deployment)
 - [Local Development](#local-development)
 - [Configuration](#configuration)
+- [Running Without Karpenter (On-Prem)](#running-without-karpenter-on-prem)
 - [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
@@ -226,6 +227,29 @@ Ollama is optional but enhances recommendations with AI explanations.
 1. Deploy Ollama instance (can be in same cluster)
 2. Configure `config.ollamaURL` in values.yaml
 3. Ensure network connectivity between pods
+
+## Running Without Karpenter (On-Prem)
+
+Karpenter Optimizer is designed around Karpenter NodePools, but it can also run in
+clusters where Karpenter is **not** installed (e.g. on-prem or static node pools).
+The app detects Karpenter via API discovery at startup and **gracefully degrades**:
+
+| Feature | With Karpenter | Without Karpenter |
+|---|---|---|
+| Cluster-wide stats (nodes, CPU, memory, pods) | ✅ | ✅ |
+| **GPU allocation** (per node, pod, cluster) | ✅ | ✅ |
+| NodePool recommendations | ✅ | 503 `karpenter_not_found` (notice shown) |
+| NodePool list / details | ✅ | 503 `karpenter_not_found` |
+| Agent / AI recommendations | ✅ | 503 `karpenter_not_found` (empty state shown) |
+| Node cost | ✅ (AWS Pricing API) | "n/a" (no instance-type metadata) |
+| Disruption tracking | ✅ | "No disruption tracking without Karpenter" |
+
+- The UI shows a dismissible banner: *"Karpenter not detected — NodePool-based features are unavailable."*
+- NodePool-CRD endpoints return **503** with code `karpenter_not_found` instead of a 500, so the UI can show a friendly notice.
+- Costs render as **"n/a"** rather than `$0.00` when no node has an `instance-type` label.
+- GPU data is sourced entirely from the core v1 API (`nvidia.com/gpu` capacity + pod requests, `nvidia.com/gpu.product` label), so it works with or without Karpenter.
+
+No special configuration is required — the app simply adapts to what the cluster exposes.
 
 ## Troubleshooting
 
