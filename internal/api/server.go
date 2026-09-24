@@ -60,10 +60,10 @@ func debugLog(debug bool, format string, args ...interface{}) {
 }
 
 type Server struct {
-	router           *gin.Engine
-	config           *config.Config
-	recommender      *recommender.Recommender
-	k8sClient        *kubernetes.Client
+	router            *gin.Engine
+	config            *config.Config
+	recommender       *recommender.Recommender
+	k8sClient         *kubernetes.Client
 	karpenterDetected bool
 }
 
@@ -1083,6 +1083,9 @@ type TopologyPodResources struct {
 	CPUCores  float64 `json:"cpuCores"`
 	MemoryGiB float64 `json:"memoryGiB"`
 	GPU       float64 `json:"gpu"`
+	// GPUMemMiB is the pod's GPU memory claim in MiB (explicit gpumem request,
+	// whole-GPU estimate, or hami annotation actuals). 0 when unknown.
+	GPUMemMiB float64 `json:"gpuMemMiB"`
 }
 
 // TopologyPod is a pod scheduled on a node with parsed request sizes.
@@ -1098,25 +1101,33 @@ type TopologyPod struct {
 
 // TopologyNode is a node with its pods for the topology view.
 type TopologyNode struct {
-	Name         string                `json:"name"`
-	NodePool     string                `json:"nodePool"`
-	InstanceType string                `json:"instanceType"`
-	CapacityType string                `json:"capacityType"`
-	Architecture string                `json:"architecture"`
-	Zone         string                `json:"zone,omitempty"`
-	CPUUsage     *kubernetes.NodeUsage `json:"cpuUsage,omitempty"`
-	MemoryUsage  *kubernetes.NodeUsage `json:"memoryUsage,omitempty"`
-	PodCount     int                   `json:"podCount"`
-	Pods         []TopologyPod         `json:"pods"`
-	CreationTime string                `json:"creationTime,omitempty"`
-	GPUCapacity  float64               `json:"gpuCapacity,omitempty"`
-	GPUAllocated float64               `json:"gpuAllocated,omitempty"`
-	GPUModel     string                `json:"gpuModel,omitempty"`
+	Name               string                `json:"name"`
+	NodePool           string                `json:"nodePool"`
+	InstanceType       string                `json:"instanceType"`
+	CapacityType       string                `json:"capacityType"`
+	Architecture       string                `json:"architecture"`
+	Zone               string                `json:"zone,omitempty"`
+	CPUUsage           *kubernetes.NodeUsage `json:"cpuUsage,omitempty"`
+	MemoryUsage        *kubernetes.NodeUsage `json:"memoryUsage,omitempty"`
+	PodCount           int                   `json:"podCount"`
+	Pods               []TopologyPod         `json:"pods"`
+	CreationTime       string                `json:"creationTime,omitempty"`
+	GPUCapacity        float64               `json:"gpuCapacity,omitempty"`
+	GPUAllocated       float64               `json:"gpuAllocated,omitempty"`
+	GPUModel           string                `json:"gpuModel,omitempty"`
+	GPUMemTotalMiB     float64               `json:"gpuMemTotalMiB,omitempty"`
+	GPUMemAllocatedMiB float64               `json:"gpuMemAllocatedMiB,omitempty"`
 }
 
 func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
 	var out TopologyPodResources
 	out.GPU = p.GPURequested
+	// Prefer actual placement from the hami annotation over the request.
+	if mem := p.GPUDeviceMemoryMiB(); mem > 0 {
+		out.GPUMemMiB = mem
+	} else {
+		out.GPUMemMiB = p.GPUMemRequestMiB
+	}
 	if p.Requests.CPU != "" {
 		if q, err := resource.ParseQuantity(p.Requests.CPU); err == nil {
 			out.CPUCores = float64(q.MilliValue()) / 1000.0
@@ -1272,20 +1283,22 @@ func (s *Server) getTopology(c *gin.Context) {
 		}
 
 		out = append(out, TopologyNode{
-			Name:         node.Name,
-			NodePool:     node.NodePool,
-			InstanceType: node.InstanceType,
-			CapacityType: node.CapacityType,
-			Architecture: node.Architecture,
-			Zone:         node.Zone,
-			CPUUsage:     node.CPUUsage,
-			MemoryUsage:  node.MemoryUsage,
-			PodCount:     node.PodCount,
-			Pods:         topPods,
-			CreationTime: node.CreationTime,
-			GPUCapacity:  node.GPUCapacity,
-			GPUAllocated: node.GPUAllocated,
-			GPUModel:     node.GPUModel,
+			Name:               node.Name,
+			NodePool:           node.NodePool,
+			InstanceType:       node.InstanceType,
+			CapacityType:       node.CapacityType,
+			Architecture:       node.Architecture,
+			Zone:               node.Zone,
+			CPUUsage:           node.CPUUsage,
+			MemoryUsage:        node.MemoryUsage,
+			PodCount:           node.PodCount,
+			Pods:               topPods,
+			CreationTime:       node.CreationTime,
+			GPUCapacity:        node.GPUCapacity,
+			GPUAllocated:       node.GPUAllocated,
+			GPUModel:           node.GPUModel,
+			GPUMemTotalMiB:     node.GPUMemTotalMiB,
+			GPUMemAllocatedMiB: node.GPUMemAllocatedMiB,
 		})
 	}
 	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
@@ -1325,7 +1338,8 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 	var totalNodes, spotNodes, onDemandNodes, totalPods int
 	var totalCPUUsed, totalCPUAllocatable, totalMemoryUsed, totalMemoryAllocatable float64
 	var totalGPUCapacity, totalGPUAllocated float64
-	gpuByModel := make(map[string]struct{ total, allocated float64 })
+	var totalGPUMem, totalGPUMemAllocated float64
+	gpuByModel := make(map[string]struct{ total, allocated, memTotal, memAllocated float64 })
 	nodesWithInstanceType := 0
 
 	for _, node := range nodes {
@@ -1364,6 +1378,8 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		if node.GPUCapacity > 0 || node.GPUAllocated > 0 {
 			totalGPUCapacity += node.GPUCapacity
 			totalGPUAllocated += node.GPUAllocated
+			totalGPUMem += node.GPUMemTotalMiB
+			totalGPUMemAllocated += node.GPUMemAllocatedMiB
 			model := node.GPUModel
 			if model == "" {
 				model = "unknown"
@@ -1371,6 +1387,8 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 			m := gpuByModel[model]
 			m.total += node.GPUCapacity
 			m.allocated += node.GPUAllocated
+			m.memTotal += node.GPUMemTotalMiB
+			m.memAllocated += node.GPUMemAllocatedMiB
 			gpuByModel[model] = m
 		}
 	}
@@ -1452,16 +1470,20 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		byModel := make([]gin.H, 0, len(gpuByModel))
 		for model, m := range gpuByModel {
 			byModel = append(byModel, gin.H{
-				"model":     model,
-				"total":     m.total,
-				"allocated": m.allocated,
+				"model":              model,
+				"total":              m.total,
+				"allocated":          m.allocated,
+				"memoryTotalMiB":     m.memTotal,
+				"memoryAllocatedMiB": m.memAllocated,
 			})
 		}
 		summaryData["gpu"] = gin.H{
-			"total":     totalGPUCapacity,
-			"allocated": totalGPUAllocated,
-			"free":      totalGPUCapacity - totalGPUAllocated,
-			"byModel":   byModel,
+			"total":              totalGPUCapacity,
+			"allocated":          totalGPUAllocated,
+			"free":               totalGPUCapacity - totalGPUAllocated,
+			"memoryTotalMiB":     totalGPUMem,
+			"memoryAllocatedMiB": totalGPUMemAllocated,
+			"byModel":            byModel,
 		}
 	}
 

@@ -441,7 +441,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 GPU Allocation
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={cn("grid grid-cols-1 sm:grid-cols-3 gap-4", summary.gpu.memoryTotalMiB > 0 && "sm:grid-cols-4")}>
                 <Card>
                   <CardContent className="pt-6">
                     <p className="text-sm text-muted-foreground">Total GPUs</p>
@@ -462,12 +462,27 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                     <p className="text-2xl font-bold text-green-600">{summary.gpu.free}</p>
                   </CardContent>
                 </Card>
+                {summary.gpu.memoryTotalMiB > 0 && (
+                  <Card className="bg-indigo-50 border-indigo-200">
+                    <CardContent className="pt-6">
+                      <p className="text-sm text-muted-foreground">Memory In Use</p>
+                      <p className="text-2xl font-bold text-indigo-600">
+                        {(summary.gpu.memoryAllocatedMiB / 1024).toFixed(1)} / {(summary.gpu.memoryTotalMiB / 1024).toFixed(1)} GiB
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
               {Array.isArray(summary.gpu.byModel) && summary.gpu.byModel.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {summary.gpu.byModel.map((m, i) => (
                     <Badge key={`${m.model}-${i}`} variant="outline" className="text-xs">
                       {m.model}: {m.allocated}/{m.total}
+                      {m.memoryTotalMiB > 0 && (
+                        <span className="ml-1 text-muted-foreground">
+                          ({(m.memoryAllocatedMiB / 1024).toFixed(1)}/{(m.memoryTotalMiB / 1024).toFixed(1)} GiB)
+                        </span>
+                      )}
                     </Badge>
                   ))}
                 </div>

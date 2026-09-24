@@ -10,7 +10,7 @@ import { Switch } from './ui/switch';
 import { Separator } from './ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { ChevronDown, RefreshCw, Loader2, Package, Search, X, Regex } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatGPUMem } from '../lib/utils';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
@@ -286,9 +286,11 @@ function NodeUsageView() {
     );
   };
 
-  const GPUGauge = ({ gpuCapacity, gpuAllocated, gpuModel }) => {
+  const GPUGauge = ({ gpuCapacity, gpuAllocated, gpuModel, memTotalMiB, memAllocatedMiB }) => {
     const percent = gpuCapacity > 0 ? Math.min((gpuAllocated / gpuCapacity) * 100, 100) : 0;
     const modelLabel = gpuModel ? ` ${gpuModel}` : '';
+    const memTotal = formatGPUMem(memTotalMiB);
+    const memAlloc = formatGPUMem(memAllocatedMiB);
     return (
       <div className="space-y-2">
         <div className="flex justify-between items-center text-xs">
@@ -302,6 +304,11 @@ function NodeUsageView() {
           <span>Capacity: {gpuCapacity}</span>
           <span>Allocated: {gpuAllocated}</span>
         </div>
+        {memTotal && (
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Memory: {memAlloc ?? '0.0'} / {memTotal}</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -755,6 +762,11 @@ function NodeUsageView() {
                                 className="border-purple-500 text-purple-700"
                               >
                                 🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated || 0}/{node.gpuCapacity || 0})
+                                {node.gpuMemTotalMiB > 0 && (
+                                  <span className="ml-1">
+                                    · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
+                                  </span>
+                                )}
                               </Badge>
                             )}
                             {node.creationTime && (
@@ -790,6 +802,8 @@ function NodeUsageView() {
                               gpuCapacity={node.gpuCapacity || 0}
                               gpuAllocated={node.gpuAllocated || 0}
                               gpuModel={node.gpuModel}
+                              memTotalMiB={node.gpuMemTotalMiB}
+                              memAllocatedMiB={node.gpuMemAllocatedMiB}
                             />
                           )}
 

@@ -718,6 +718,72 @@ func (c *Client) extractResourcesFromPodSpec(podSpec *corev1.PodSpec, workload *
 	workload.GPU = gpuCount
 }
 
+// GPUDevice is a single (possibly fractional) GPU allocation on a pod, parsed
+// from the HAMi/KAI `hami.io/vgpu-devices-allocated` annotation.
+type GPUDevice struct {
+	UUID      string `json:"uuid"`
+	Model     string `json:"model"`
+	MemoryMiB int    `json:"memoryMiB"`
+	Index     int    `json:"index"`
+}
+
+// hamiVGPUDevicesAnnotation is set by HAMi/KAI on pods once vGPU devices are
+// allocated. Format (semicolon-delimited, entries may carry a trailing colon):
+//
+//	;GPU-<uuid>,<model>,<memoryMiB>,<index>:;
+const hamiVGPUDevicesAnnotation = "hami.io/vgpu-devices-allocated"
+
+// parseHamiVGPUDevices parses the hami.io/vgpu-devices-allocated annotation.
+// Malformed entries are skipped; an empty/absent annotation yields nil.
+func parseHamiVGPUDevices(annotation string) []GPUDevice {
+	if annotation == "" {
+		return nil
+	}
+	var devices []GPUDevice
+	for _, part := range strings.Split(annotation, ";") {
+		entry := strings.TrimSuffix(strings.TrimSpace(part), ":")
+		if entry == "" {
+			continue
+		}
+		fields := strings.Split(entry, ",")
+		if len(fields) < 4 {
+			continue // not a well-formed device entry
+		}
+		mem, err := strconv.Atoi(strings.TrimSpace(fields[2]))
+		if err != nil {
+			continue
+		}
+		idx, err := strconv.Atoi(strings.TrimSpace(fields[3]))
+		if err != nil {
+			idx = 0
+		}
+		devices = append(devices, GPUDevice{
+			UUID:      strings.TrimSpace(fields[0]),
+			Model:     strings.TrimSpace(fields[1]),
+			MemoryMiB: mem,
+			Index:     idx,
+		})
+	}
+	if len(devices) == 0 {
+		return nil
+	}
+	return devices
+}
+
+// hamiDeviceMemoryMiB returns the total memory (MiB) actually allocated to a pod
+// per its hami.io/vgpu-devices-allocated annotation, or 0 when absent.
+func hamiDeviceMemoryMiB(pod *corev1.Pod) float64 {
+	devices := parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation])
+	if devices == nil {
+		return 0
+	}
+	var total float64
+	for _, d := range devices {
+		total += float64(d.MemoryMiB)
+	}
+	return total
+}
+
 // NodeInfo represents actual node information from the cluster
 type NodeInfo struct {
 	Name         string     `json:"name"`
@@ -731,9 +797,13 @@ type NodeInfo struct {
 	PodCount     int        `json:"podCount"`               // Number of pods scheduled on this node
 	PodNames     []string   `json:"podNames,omitempty"`     // Names of pods running on this node (namespace/name format)
 	CreationTime string     `json:"creationTime,omitempty"` // Node creation timestamp
-	GPUCapacity  float64    `json:"gpuCapacity,omitempty"`  // Total nvidia.com/gpu capacity
+	GPUCapacity  float64    `json:"gpuCapacity,omitempty"`  // Total nvidia.com/gpu capacity (node label preferred, else Status.Capacity)
 	GPUAllocated float64    `json:"gpuAllocated,omitempty"` // nvidia.com/gpu allocated to scheduled pods
 	GPUModel     string     `json:"gpuModel,omitempty"`     // GPU model from nvidia.com/gpu.product label
+	// GPUMemTotalMiB is total GPU memory on the node in MiB (0 when unknown).
+	GPUMemTotalMiB float64 `json:"gpuMemTotalMiB,omitempty"`
+	// GPUMemAllocatedMiB is GPU memory allocated to scheduled pods in MiB.
+	GPUMemAllocatedMiB float64 `json:"gpuMemAllocatedMiB,omitempty"`
 }
 
 // NodeUsage represents resource usage for a node
@@ -980,7 +1050,9 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			memAllocatable = float64(memAlloc.Value()) / (1024.0 * 1024.0 * 1024.0)
 		}
 
-		// Extract GPU capacity/allocatable and model from labels (core v1 only)
+		// Extract GPU count and model. The nvidia.com/gpu.count label (set by
+		// HAMi/KAI or gpu-feature-discovery) is authoritative; Status.Capacity
+		// can be inflated by MIG/time-slicing (e.g. 20 vs 2 physical GPUs).
 		var gpuCapacity, gpuAllocatable float64
 		if gpuCap, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpu")]; ok {
 			gpuCapacity = float64(gpuCap.Value())
@@ -989,6 +1061,37 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			gpuAllocatable = float64(gpuAlloc.Value())
 		}
 		gpuModel := node.Labels["nvidia.com/gpu.product"]
+		gpuCountFromLabel := 0
+		if v, ok := node.Labels["nvidia.com/gpu.count"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				gpuCountFromLabel = n
+			}
+		}
+		if gpuCountFromLabel > 0 {
+			gpuCapacity = float64(gpuCountFromLabel)
+			if gpuAllocatable == 0 {
+				gpuAllocatable = gpuCapacity
+			}
+			if float64(gpuCountFromLabel) != gpuAllocatable {
+				c.debugLog("Node %s: nvidia.com/gpu.count label=%d differs from allocatable=%.0f (using label)\n",
+					node.Name, gpuCountFromLabel, gpuAllocatable)
+			}
+		}
+
+		// Extract GPU memory (MiB). nvidia.com/gpu.memory is per-GPU MiB, so
+		// node total = per-GPU x count. Fallback: nvidia.com/gpumem capacity
+		// (HAMi registers the node total as an extended resource).
+		var gpuMemPer, gpuMemTotalMiB float64
+		if v, ok := node.Labels["nvidia.com/gpu.memory"]; ok {
+			if per, err := strconv.ParseFloat(v, 64); err == nil && per > 0 {
+				gpuMemPer = per
+			}
+		}
+		if gpuMemPer > 0 {
+			gpuMemTotalMiB = gpuMemPer * float64(int(gpuCapacity))
+		} else if gpumem, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
+			gpuMemTotalMiB = float64(gpumem.Value())
+		}
 
 		// Get pods on this node once to calculate usage
 		// Initialize usage counters for this node (reset for each node)
@@ -1021,6 +1124,11 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		// pods is guaranteed to be non-nil after error handling above
 		podCount := 0
 		podNames := make([]string, 0)
+		gpuMemUsed := 0.0
+		gpuMemPerGPU := 0.0
+		if gpuMemTotalMiB > 0 && gpuCapacity > 0 {
+			gpuMemPerGPU = gpuMemTotalMiB / gpuCapacity
+		}
 		if len(pods.Items) > 0 {
 			for i := range pods.Items {
 				pod := &pods.Items[i] // Use pointer to avoid copying pod struct
@@ -1045,6 +1153,8 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				// Store pod name in namespace/name format
 				podNames = append(podNames, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
 
+				var podGPUCount, podGPUMemMiB float64
+
 				// Process only regular containers (exclude init containers per eks-node-viewer)
 				// Init containers are transient and don't contribute to steady-state resource usage
 				for j := range pod.Spec.Containers {
@@ -1060,9 +1170,28 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 					}
 
 					if gpuReq := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; !gpuReq.IsZero() {
-						gpuUsed += float64(gpuReq.Value())
+						podGPUCount += float64(gpuReq.Value())
+					}
+
+					// HAMi: explicit GPU memory request (MiB) for vGPU partitions
+					if gpumemReq := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpumem")]; !gpumemReq.IsZero() {
+						podGPUMemMiB += float64(gpumemReq.Value())
 					}
 				}
+
+				gpuUsed += podGPUCount
+
+				// Resolve the pod's GPU memory claim:
+				//  1. hami.io/vgpu-devices-allocated annotation (actual placement, authoritative)
+				//  2. explicit nvidia.com/gpumem request (HAMi vGPU)
+				//  3. whole-GPU claim: nvidia.com/gpu x per-GPU memory
+				//  4. unknown (0) when per-GPU memory is not reported
+				if actual := hamiDeviceMemoryMiB(pod); actual > 0 {
+					podGPUMemMiB = actual
+				} else if podGPUMemMiB == 0 && podGPUCount > 0 && gpuMemPerGPU > 0 {
+					podGPUMemMiB = podGPUCount * gpuMemPerGPU
+				}
+				gpuMemUsed += podGPUMemMiB
 			}
 		}
 
@@ -1100,12 +1229,14 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			}
 		}
 
-		// Populate GPU fields (allocation-based). Capacity/allocatable come from
-		// core v1 node status; allocated is the sum of scheduled pod requests.
+		// Populate GPU fields (allocation-based). Count prefers the node label
+		// over Status.Capacity; memory comes from labels or the gpumem resource.
 		if gpuCapacity > 0 || gpuAllocatable > 0 {
 			nodeInfo.GPUCapacity = gpuCapacity
 			nodeInfo.GPUAllocated = gpuUsed
 			nodeInfo.GPUModel = gpuModel
+			nodeInfo.GPUMemTotalMiB = gpuMemTotalMiB
+			nodeInfo.GPUMemAllocatedMiB = gpuMemUsed
 		}
 
 		// Set pod count and pod names (already calculated in the loop above)
@@ -1142,17 +1273,29 @@ func (c *Client) GetNodesByNodePool(ctx context.Context, nodePoolName string) ([
 
 // PodInfo represents a pod running on a node
 type PodInfo struct {
-	Name         string       `json:"name"`
-	Namespace    string       `json:"namespace"`
-	NodeName     string       `json:"nodeName"`
-	WorkloadName string       `json:"workloadName"`       // Extracted workload name (e.g., "myapp" from "myapp-abc123")
-	WorkloadType string       `json:"workloadType"`       // deployment, statefulset, daemonset, pod
-	Phase        string       `json:"phase,omitempty"`    // Pod phase (Pending, Running, Succeeded, Failed, Unknown)
-	Status       string       `json:"status,omitempty"`   // Pod status
-	Requests     ResourceInfo `json:"requests,omitempty"` // Pod resource requests
-	Limits       ResourceInfo `json:"limits,omitempty"`   // Pod resource limits
-	QOSClass     string       `json:"qosClass,omitempty"` // QoS class (Guaranteed, Burstable, BestEffort)
-	GPURequested float64      `json:"gpuRequested,omitempty"` // nvidia.com/gpu requested across containers
+	Name             string       `json:"name"`
+	Namespace        string       `json:"namespace"`
+	NodeName         string       `json:"nodeName"`
+	WorkloadName     string       `json:"workloadName"`                 // Extracted workload name (e.g., "myapp" from "myapp-abc123")
+	WorkloadType     string       `json:"workloadType"`                 // deployment, statefulset, daemonset, pod
+	Phase            string       `json:"phase,omitempty"`              // Pod phase (Pending, Running, Succeeded, Failed, Unknown)
+	Status           string       `json:"status,omitempty"`             // Pod status
+	Requests         ResourceInfo `json:"requests,omitempty"`           // Pod resource requests
+	Limits           ResourceInfo `json:"limits,omitempty"`             // Pod resource limits
+	QOSClass         string       `json:"qosClass,omitempty"`           // QoS class (Guaranteed, Burstable, BestEffort)
+	GPURequested     float64      `json:"gpuRequested,omitempty"`       // nvidia.com/gpu requested across containers
+	GPUMemRequestMiB float64      `json:"gpuMemRequestedMiB,omitempty"` // nvidia.com/gpumem requested across containers (MiB, HAMi vGPU)
+	GPUDevices       []GPUDevice  `json:"gpuDevices,omitempty"`         // Devices actually allocated per hami.io/vgpu-devices-allocated
+}
+
+// GPUDeviceMemoryMiB returns the total GPU memory (MiB) actually allocated to the
+// pod per its parsed hami.io/vgpu-devices-allocated devices, or 0 when absent.
+func (p PodInfo) GPUDeviceMemoryMiB() float64 {
+	var total float64
+	for _, d := range p.GPUDevices {
+		total += float64(d.MemoryMiB)
+	}
+	return total
 }
 
 // GetPodsOnNodes gets all pods running on the specified nodes.
@@ -2109,7 +2252,7 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 		requests := ResourceInfo{}
 		limits := ResourceInfo{}
 		var cpuRequest, memoryRequest, cpuLimit, memoryLimit resource.Quantity
-		var gpuRequested float64
+		var gpuRequested, gpuMemRequestedMiB float64
 
 		for _, container := range pod.Spec.Containers {
 			if container.Resources.Requests != nil {
@@ -2121,6 +2264,9 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 				}
 				if gpu, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; ok && !gpu.IsZero() {
 					gpuRequested += float64(gpu.Value())
+				}
+				if gpumem, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
+					gpuMemRequestedMiB += float64(gpumem.Value())
 				}
 			}
 			if container.Resources.Limits != nil {
@@ -2165,17 +2311,19 @@ func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo,
 		}
 
 		podInfos = append(podInfos, PodInfo{
-			Name:         podName,
-			Namespace:    namespace,
-			NodeName:     pod.Spec.NodeName,
-			WorkloadName: workloadName,
-			WorkloadType: workloadType,
-			Phase:        phase,
-			Status:       status,
-			Requests:     requests,
-			Limits:       limits,
-			QOSClass:     qosClass,
-			GPURequested: gpuRequested,
+			Name:             podName,
+			Namespace:        namespace,
+			NodeName:         pod.Spec.NodeName,
+			WorkloadName:     workloadName,
+			WorkloadType:     workloadType,
+			Phase:            phase,
+			Status:           status,
+			Requests:         requests,
+			Limits:           limits,
+			QOSClass:         qosClass,
+			GPURequested:     gpuRequested,
+			GPUMemRequestMiB: gpuMemRequestedMiB,
+			GPUDevices:       parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
 		})
 	}
 
