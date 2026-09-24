@@ -71,9 +71,11 @@ type NodeInfo struct {
     CPUUsage      *ResourceUsage
     MemoryUsage   *ResourceUsage
     PodCount      int
-    GPUCapacity   float64 // nvidia.com/gpu capacity (0 when no GPU)
+    GPUCapacity   float64 // nvidia.com/gpu.count label (preferred) else Status.Capacity
     GPUAllocated  float64 // nvidia.com/gpu allocated to scheduled pods
     GPUModel      string  // from nvidia.com/gpu.product label (may be empty)
+    GPUMemTotalMiB     float64 // total GPU memory (MiB, 0 when unknown)
+    GPUMemAllocatedMiB float64 // GPU memory allocated to scheduled pods (MiB)
     // ...
 }
 ```
@@ -85,8 +87,11 @@ type NodeInfo struct {
 - Cluster cost is reported as `costUnknown: true` (frontend shows "n/a") when no node has an `instance-type` label.
 
 ### GPU (allocation-based, core v1 only)
-- Sourced from `nvidia.com/gpu` node capacity/allocatable + scheduled pod requests; model from `nvidia.com/gpu.product` label.
-- `TopologyPodResources.GPU`, `TopologyNode.{GPUCapacity,GPUAllocated,GPUModel}`, and the `gpu` block in `/api/v1/cluster/summary` (`{total, allocated, free, byModel[]}`).
+- Count: `nvidia.com/gpu.count` **node label wins** (MIG/time-slicing inflates `Status.Capacity`); fallback to `Status.Capacity["nvidia.com/gpu"]`. Model from `nvidia.com/gpu.product` label.
+- Memory (MiB): node total = `nvidia.com/gpu.memory` (per-GPU MiB) x count, else `Status.Capacity["nvidia.com/gpumem"]` (HAMi node total); 0 = unknown (memory UI hidden).
+- Pod memory claim precedence: `hami.io/vgpu-devices-allocated` annotation (actual placement, e.g. `;GPU-<uuid>,NVIDIA,45000,0:;`) > `nvidia.com/gpumem` request (HAMi vGPU) > `nvidia.com/gpu` x per-GPU mem (whole-GPU) > 0 (unknown).
+- `NodeInfo.{GPUCapacity,GPUAllocated,GPUModel,GPUMemTotalMiB,GPUMemAllocatedMiB}`, `PodInfo.{GPURequested,GPUMemRequestMiB,GPUDevices}`, `TopologyPodResources.{GPU,GPUMemMiB}`, `TopologyNode` GPU fields, and the `gpu` block in `/api/v1/cluster/summary` (`{total, allocated, free, memoryTotalMiB, memoryAllocatedMiB, byModel[{model,total,allocated,memoryTotalMiB,memoryAllocatedMiB}]}`).
+- `parseHamiVGPUDevices()` / `PodInfo.GPUDeviceMemoryMiB()` parse the HAMi annotation.
 
 ## API Endpoints
 

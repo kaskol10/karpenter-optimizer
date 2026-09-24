@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { Loader2, RefreshCw } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatGPUMem } from '../lib/utils';
 
 const API_URL =
   window.ENV && Object.prototype.hasOwnProperty.call(window.ENV, 'REACT_APP_API_URL')
@@ -56,7 +56,9 @@ function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
       ? `Workload: ${pod.workloadType}${pod.workloadName ? `/${pod.workloadName}` : ''}`
       : null,
     `${label} req: ${format(weight)}`,
-    (pod.requests?.gpu || 0) > 0 ? `GPU req: ${pod.requests.gpu}` : null,
+    (pod.requests?.gpu || 0) > 0
+      ? `GPU req: ${pod.requests.gpu}${pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}`
+      : null,
     pod.qosClass ? `QoS: ${pod.qosClass}` : null,
   ].filter(Boolean);
 
@@ -184,7 +186,7 @@ function NodePodBar({ node, pods, metric, showAllPodsInList }) {
                       variant="outline"
                       className="text-[10px] border-purple-500 text-purple-700 shrink-0"
                     >
-                      {pod.requests.gpu} GPU
+                      {pod.requests.gpu} GPU{pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}
                     </Badge>
                   )}
                   <span className="ml-auto text-muted-foreground font-mono shrink-0">{format(w)}</span>
@@ -526,6 +528,11 @@ export default function TopologyView() {
                                 title={node.gpuModel || 'GPU'}
                               >
                                 🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated ?? 0}/{node.gpuCapacity ?? 0})
+                                {node.gpuMemTotalMiB > 0 && (
+                                  <span className="ml-1">
+                                    · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
+                                  </span>
+                                )}
                               </Badge>
                             )}
                           </div>
@@ -631,7 +638,7 @@ export default function TopologyView() {
                                               variant="outline"
                                               className="text-[10px] border-purple-500 text-purple-700 shrink-0"
                                             >
-                                              {pod.requests.gpu} GPU
+                                              {pod.requests.gpu} GPU{pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}
                                             </Badge>
                                           )}
                                         </div>

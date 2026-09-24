@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `NodeInfo` gains `gpuCapacity`, `gpuAllocated`, `gpuModel`; `PodInfo` gains `gpuRequested`
   - `/api/v1/topology` nodes/pods and `/api/v1/cluster/summary` now expose GPU capacity/allocated/model
   - UI: cluster GPU stat tiles (Total/In use/Free/by model), per-node GPU bars, and GPU badges in the topology & node views (hidden when no GPUs)
+  - **GPU memory tracking** (MiB): node total from `nvidia.com/gpu.memory` (per-GPU) x count or `nvidia.com/gpumem` capacity; cluster summary `gpu.memoryTotalMiB`/`memoryAllocatedMiB` (+ per model); memory tiles in the UI
+  - **HAMi/KAI scheduler support**: pod `nvidia.com/gpumem` requests are summed; the `hami.io/vgpu-devices-allocated` annotation (e.g. `;GPU-<uuid>,NVIDIA,45000,0:;`) is parsed into `PodInfo.gpuDevices` and its memory is used as the actual allocation (vLLM-ready)
+
+### Fixed
+- **Inflated per-node GPU counts**: GPU count now prefers the `nvidia.com/gpu.count` node label over `Status.Capacity["nvidia.com/gpu"]` (which can be inflated by MIG/time-slicing, e.g. reporting 20 for a 2-GPU node). A debug log is emitted when the two disagree.
 
 ### Changed
 - `kubernetes.Client.clientset` is now typed as `kubernetes.Interface` (was `*kubernetes.Clientset`) to allow fake-client injection in tests.
