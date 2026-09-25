@@ -26,12 +26,29 @@ function hashToHue(str) {
   return Math.abs(h) % 360;
 }
 
-function getMetricFields(metric) {
+function getMetricFields(metric, node) {
   if (metric === 'memory') {
     return {
       weight: (pod) => pod.requests?.memoryGiB || 0,
       format: (v) => `${v.toFixed(2)} GiB`,
       label: 'Memory',
+    };
+  }
+  if (metric === 'gpu' && node) {
+    const memKnown = (node.gpuMemTotalMiB || 0) > 0;
+    const perGpuMiB =
+      memKnown && (node.gpuCapacity || 0) > 0 ? node.gpuMemTotalMiB / node.gpuCapacity : 0;
+    return {
+      // Memory-based (HAMi) when node GPU memory is known; count-based otherwise.
+      // Whole-GPU pods without an explicit gpumem value are estimated from the
+      // node's per-GPU memory so they stay visible in memory-based mode.
+      weight: (pod) => {
+        if (!memKnown) return pod.requests?.gpu || 0;
+        if ((pod.requests?.gpuMemMiB || 0) > 0) return pod.requests.gpuMemMiB;
+        return (pod.requests?.gpu || 0) * perGpuMiB;
+      },
+      format: (v) => (memKnown ? `${(v / 1024).toFixed(1)} GiB` : `${v} GPU`),
+      label: 'GPU',
     };
   }
   return {
@@ -45,9 +62,9 @@ function isDaemonSetPod(pod) {
   return (pod.workloadType || '').toLowerCase() === 'daemonset';
 }
 
-function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
-  const { format, label } = getMetricFields(metric);
-  const weight = metric === 'cpu' ? pod.requests?.cpuCores || 0 : pod.requests?.memoryGiB || 0;
+function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod }) {
+  const { format, label, weight } = getMetricFields(metric, node);
+  const w = weight(pod);
   const hue = hashToHue(getPodKey(pod));
 
   const titleLines = [
@@ -55,8 +72,8 @@ function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
     pod.workloadType
       ? `Workload: ${pod.workloadType}${pod.workloadName ? `/${pod.workloadName}` : ''}`
       : null,
-    `${label} req: ${format(weight)}`,
-    (pod.requests?.gpu || 0) > 0
+    `${label} req: ${format(w)}`,
+    metric !== 'gpu' && (pod.requests?.gpu || 0) > 0
       ? `GPU req: ${pod.requests.gpu}${pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}`
       : null,
     pod.qosClass ? `QoS: ${pod.qosClass}` : null,
@@ -85,19 +102,23 @@ function PodBarSegment({ pod, metric, grow, showLabel, isActive, onHoverPod }) {
   );
 }
 
-function NodePodBar({ node, pods, metric, showAllPodsInList }) {
-  const { weight: weightFn, format, label } = getMetricFields(metric);
+function NodePodBar({ node, pods, metric, showAllPodsInList, title }) {
+  const { weight: weightFn, format, label } = getMetricFields(metric, node);
   const [hoveredPod, setHoveredPod] = useState(null);
 
   const allocatable =
     metric === 'cpu'
       ? node.cpuUsage?.allocatable ?? 0
-      : node.memoryUsage?.allocatable ?? 0;
+      : metric === 'gpu'
+        ? (node.gpuMemTotalMiB || 0) > 0
+          ? node.gpuMemTotalMiB
+          : node.gpuCapacity ?? 0
+        : node.memoryUsage?.allocatable ?? 0;
 
   const totalRequested = useMemo(() => {
-    const { weight } = getMetricFields(metric);
+    const { weight } = getMetricFields(metric, node);
     return pods.reduce((sum, p) => sum + weight(p), 0);
-  }, [pods, metric]);
+  }, [pods, metric, node]);
 
   const remainder = Math.max(0, allocatable - totalRequested);
 
@@ -106,6 +127,7 @@ function NodePodBar({ node, pods, metric, showAllPodsInList }) {
 
   return (
     <div className="space-y-3">
+      {title && <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>
           {label} allocatable: <span className="font-mono text-foreground">{format(allocatable)}</span>
@@ -126,6 +148,7 @@ function NodePodBar({ node, pods, metric, showAllPodsInList }) {
             <PodBarSegment
               key={getPodKey(pod)}
               pod={pod}
+              node={node}
               metric={metric}
               grow={grow}
               showLabel={showLabel}
@@ -575,6 +598,23 @@ export default function TopologyView() {
                           metric={metric}
                           showAllPodsInList={showAllPodsInOverview}
                         />
+                        {(() => {
+                          const gpuPods = pods.filter(
+                            (p) => (p.requests?.gpu || 0) > 0 || (p.requests?.gpuMemMiB || 0) > 0,
+                          );
+                          if ((node.gpuCapacity || 0) === 0 && (node.gpuPods || 0) === 0) return null;
+                          return (
+                            <div className="mt-4 space-y-3 border-t pt-3">
+                              <NodePodBar
+                                node={node}
+                                pods={gpuPods}
+                                metric="gpu"
+                                title="GPU requests"
+                                showAllPodsInList={showAllPodsInOverview}
+                              />
+                            </div>
+                          );
+                        })()}
                         {pods.length === 0 && (
                           <p className="text-xs text-muted-foreground mt-2">No pods match filters.</p>
                         )}
