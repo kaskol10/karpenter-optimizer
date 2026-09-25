@@ -22,7 +22,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 🖥️ **Modern Web UI**: React-based interface with real-time updates and progress tracking
 - 🚨 **Disruption Tracking**: Monitor Karpenter node disruptions and identify blocked deletions
 - 🔍 **Karpenter Log Analyzer**: Analyze Karpenter error logs with AI-powered explanations and actionable recommendations
-- 🎮 **GPU Allocation Visualization**: See GPU count, memory, and allocation per node, pod, and cluster (allocation-based, no DCGM/Prometheus). GPU count/memory read from node labels (`nvidia.com/gpu.count`, `nvidia.com/gpu.memory`); HAMi/KAI memory partitioning aware (`nvidia.com/gpumem` + `hami.io/vgpu-devices-allocated`)
+- 🎮 **GPU Allocation Visualization**: See GPU count, memory, and allocation per node, pod, and cluster (allocation-based, no DCGM/Prometheus). GPU count/memory read from node labels (`nvidia.com/gpu.count`, `nvidia.com/gpu.memory`); HAMi/KAI memory partitioning aware (`nvidia.com/gpumem` + `hami.io/vgpu-devices-allocated`) — when HAMi is detected, GPU usage is reported as **memory % in use** plus a **GPU pod** count (fractional-GPU friendly)
 - 🏢 **On-Prem / No-Karpenter Mode**: Gracefully degrades when Karpenter is absent — cluster-wide stats, GPU view, and "n/a" costs instead of errors
 - 📦 **Helm Chart**: Production-ready Helm chart for easy Kubernetes deployment
 - ⚡ **Kubernetes Native**: Uses Kubernetes API directly - no Prometheus required

@@ -286,20 +286,28 @@ function NodeUsageView() {
     );
   };
 
-  const GPUGauge = ({ gpuCapacity, gpuAllocated, gpuModel, memTotalMiB, memAllocatedMiB }) => {
-    const percent = gpuCapacity > 0 ? Math.min((gpuAllocated / gpuCapacity) * 100, 100) : 0;
+  const GPUGauge = ({ gpuCapacity, gpuAllocated, gpuModel, memTotalMiB, memAllocatedMiB, hamiDetected }) => {
+    const countPercent = gpuCapacity > 0 ? Math.min((gpuAllocated / gpuCapacity) * 100, 100) : 0;
     const modelLabel = gpuModel ? ` ${gpuModel}` : '';
     const memTotal = formatGPUMem(memTotalMiB);
     const memAlloc = formatGPUMem(memAllocatedMiB);
+    const memKnown = memTotal != null;
+    const hami = !!hamiDetected;
+    const memPercent = memKnown ? Math.min((memAllocatedMiB / memTotalMiB) * 100, 100) : 0;
+    const showMem = hami && memKnown;
+    const barPercent = showMem ? memPercent : countPercent;
+    const headerLabel = showMem
+      ? `${memPercent.toFixed(0)}% · ${memAlloc} / ${memTotal}`
+      : `${gpuAllocated}/${gpuCapacity} (${countPercent.toFixed(0)}%)`;
     return (
       <div className="space-y-2">
         <div className="flex justify-between items-center text-xs">
           <span className="font-semibold">GPU{modelLabel}</span>
-          <span className={cn("font-semibold", percent >= 90 ? "text-red-600" : percent >= 70 ? "text-yellow-600" : "text-green-600")}>
-            {gpuAllocated}/{gpuCapacity} ({percent.toFixed(0)}%)
+          <span className={cn("font-semibold", barPercent >= 90 ? "text-red-600" : barPercent >= 70 ? "text-yellow-600" : "text-green-600")}>
+            {headerLabel}
           </span>
         </div>
-        <Progress value={percent} className="h-2" />
+        <Progress value={barPercent} className="h-2" />
         <div className="flex justify-between text-xs text-muted-foreground">
           <span>Capacity: {gpuCapacity}</span>
           <span>Allocated: {gpuAllocated}</span>
@@ -761,12 +769,27 @@ function NodeUsageView() {
                                 variant="outline"
                                 className="border-purple-500 text-purple-700"
                               >
-                                🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated || 0}/{node.gpuCapacity || 0})
-                                {node.gpuMemTotalMiB > 0 && (
-                                  <span className="ml-1">
-                                    · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
-                                  </span>
-                                )}
+                                {(() => {
+                                  const memKnown = (node.gpuMemTotalMiB || 0) > 0;
+                                  if (node.hamiDetected && memKnown) {
+                                    const pct = Math.min(Math.round((node.gpuMemAllocatedMiB / node.gpuMemTotalMiB) * 100), 100);
+                                    return (
+                                      <>
+                                        🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} · {pct}% GPU mem · {node.gpuPods || 0} GPU pods
+                                      </>
+                                    );
+                                  }
+                                  return (
+                                    <>
+                                      🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated || 0}/{node.gpuCapacity || 0})
+                                      {memKnown && (
+                                        <span className="ml-1">
+                                          · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </Badge>
                             )}
                             {node.creationTime && (
@@ -804,6 +827,7 @@ function NodeUsageView() {
                               gpuModel={node.gpuModel}
                               memTotalMiB={node.gpuMemTotalMiB}
                               memAllocatedMiB={node.gpuMemAllocatedMiB}
+                              hamiDetected={node.hamiDetected}
                             />
                           )}
 

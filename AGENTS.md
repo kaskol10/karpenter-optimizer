@@ -76,6 +76,8 @@ type NodeInfo struct {
     GPUModel      string  // from nvidia.com/gpu.product label (may be empty)
     GPUMemTotalMiB     float64 // total GPU memory (MiB, 0 when unknown)
     GPUMemAllocatedMiB float64 // GPU memory allocated to scheduled pods (MiB)
+    GPUPods       int   // scheduled pods requesting >= 1 GPU
+    HamiDetected  bool  // HAMi/KAI fractional sharing detected on this node
     // ...
 }
 ```
@@ -90,7 +92,8 @@ type NodeInfo struct {
 - Count: `nvidia.com/gpu.count` **node label wins** (MIG/time-slicing inflates `Status.Capacity`); fallback to `Status.Capacity["nvidia.com/gpu"]`. Model from `nvidia.com/gpu.product` label.
 - Memory (MiB): node total = `nvidia.com/gpu.memory` (per-GPU MiB) x count, else `Status.Capacity["nvidia.com/gpumem"]` (HAMi node total); 0 = unknown (memory UI hidden).
 - Pod memory claim precedence: `hami.io/vgpu-devices-allocated` annotation (actual placement, e.g. `;GPU-<uuid>,NVIDIA,45000,0:;`) > `nvidia.com/gpumem` request (HAMi vGPU) > `nvidia.com/gpu` x per-GPU mem (whole-GPU) > 0 (unknown).
-- `NodeInfo.{GPUCapacity,GPUAllocated,GPUModel,GPUMemTotalMiB,GPUMemAllocatedMiB}`, `PodInfo.{GPURequested,GPUMemRequestMiB,GPUDevices}`, `TopologyPodResources.{GPU,GPUMemMiB}`, `TopologyNode` GPU fields, and the `gpu` block in `/api/v1/cluster/summary` (`{total, allocated, free, memoryTotalMiB, memoryAllocatedMiB, byModel[{model,total,allocated,memoryTotalMiB,memoryAllocatedMiB}]}`).
+- **HAMi detection**: `NodeInfo.HamiDetected` is true when any scheduled pod on the node has a `nvidia.com/gpumem` request/limit or the hami annotation, or the node itself exposes `nvidia.com/gpumem` in Capacity/Allocatable. When detected, the UI switches from count-based to **memory-percent** GPU reporting (memory % in use + GPU pod count), since fractional-GPU pods make whole-GPU counts misleading.
+- `NodeInfo.{GPUCapacity,GPUAllocated,GPUModel,GPUMemTotalMiB,GPUMemAllocatedMiB,GPUPods,HamiDetected}`, `PodInfo.{GPURequested,GPUMemRequestMiB,GPUDevices}`, `TopologyPodResources.{GPU,GPUMemMiB}`, `TopologyNode` GPU fields, and the `gpu` block in `/api/v1/cluster/summary` (`{total, allocated, free, memoryTotalMiB, memoryAllocatedMiB, hamiDetected, podsWithGPU, byModel[{model,total,allocated,memoryTotalMiB,memoryAllocatedMiB,pods}]}`).
 - `parseHamiVGPUDevices()` / `PodInfo.GPUDeviceMemoryMiB()` parse the HAMi annotation.
 
 ## API Endpoints

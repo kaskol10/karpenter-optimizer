@@ -1117,6 +1117,8 @@ type TopologyNode struct {
 	GPUModel           string                `json:"gpuModel,omitempty"`
 	GPUMemTotalMiB     float64               `json:"gpuMemTotalMiB,omitempty"`
 	GPUMemAllocatedMiB float64               `json:"gpuMemAllocatedMiB,omitempty"`
+	GPUPods            int                   `json:"gpuPods,omitempty"`
+	HamiDetected       bool                  `json:"hamiDetected,omitempty"`
 }
 
 func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
@@ -1299,6 +1301,8 @@ func (s *Server) getTopology(c *gin.Context) {
 			GPUModel:           node.GPUModel,
 			GPUMemTotalMiB:     node.GPUMemTotalMiB,
 			GPUMemAllocatedMiB: node.GPUMemAllocatedMiB,
+			GPUPods:            node.GPUPods,
+			HamiDetected:       node.HamiDetected,
 		})
 	}
 	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
@@ -1339,7 +1343,12 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 	var totalCPUUsed, totalCPUAllocatable, totalMemoryUsed, totalMemoryAllocatable float64
 	var totalGPUCapacity, totalGPUAllocated float64
 	var totalGPUMem, totalGPUMemAllocated float64
-	gpuByModel := make(map[string]struct{ total, allocated, memTotal, memAllocated float64 })
+	var totalGPUPods int
+	gpuHamiDetected := false
+	gpuByModel := make(map[string]struct {
+		total, allocated, memTotal, memAllocated float64
+		pods                                     int
+	})
 	nodesWithInstanceType := 0
 
 	for _, node := range nodes {
@@ -1361,6 +1370,10 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 
 		// Sum pod counts
 		totalPods += node.PodCount
+		totalGPUPods += node.GPUPods
+		if node.HamiDetected {
+			gpuHamiDetected = true
+		}
 
 		// Sum CPU usage and allocatable
 		if node.CPUUsage != nil {
@@ -1389,6 +1402,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 			m.allocated += node.GPUAllocated
 			m.memTotal += node.GPUMemTotalMiB
 			m.memAllocated += node.GPUMemAllocatedMiB
+			m.pods += node.GPUPods
 			gpuByModel[model] = m
 		}
 	}
@@ -1475,6 +1489,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 				"allocated":          m.allocated,
 				"memoryTotalMiB":     m.memTotal,
 				"memoryAllocatedMiB": m.memAllocated,
+				"pods":               m.pods,
 			})
 		}
 		summaryData["gpu"] = gin.H{
@@ -1483,6 +1498,8 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 			"free":               totalGPUCapacity - totalGPUAllocated,
 			"memoryTotalMiB":     totalGPUMem,
 			"memoryAllocatedMiB": totalGPUMemAllocated,
+			"hamiDetected":       gpuHamiDetected,
+			"podsWithGPU":        totalGPUPods,
 			"byModel":            byModel,
 		}
 	}

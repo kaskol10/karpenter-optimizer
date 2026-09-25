@@ -441,50 +441,86 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 GPU Allocation
               </h3>
-              <div className={cn("grid grid-cols-1 sm:grid-cols-3 gap-4", summary.gpu.memoryTotalMiB > 0 && "sm:grid-cols-4")}>
-                <Card>
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground">Total GPUs</p>
-                    <p className="text-2xl font-bold text-purple-600">{summary.gpu.total}</p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-purple-50 border-purple-200">
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground">In Use</p>
-                    <p className="text-2xl font-bold text-purple-600">
-                      {summary.gpu.allocated} / {summary.gpu.total}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-green-50 border-green-200">
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground">Free</p>
-                    <p className="text-2xl font-bold text-green-600">{summary.gpu.free}</p>
-                  </CardContent>
-                </Card>
-                {summary.gpu.memoryTotalMiB > 0 && (
-                  <Card className="bg-indigo-50 border-indigo-200">
-                    <CardContent className="pt-6">
-                      <p className="text-sm text-muted-foreground">Memory In Use</p>
-                      <p className="text-2xl font-bold text-indigo-600">
-                        {(summary.gpu.memoryAllocatedMiB / 1024).toFixed(1)} / {(summary.gpu.memoryTotalMiB / 1024).toFixed(1)} GiB
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
+              {(() => {
+                const memKnown = (summary.gpu.memoryTotalMiB || 0) > 0;
+                const hami = !!summary.gpu.hamiDetected;
+                const memPct = memKnown ? Math.min(Math.round((summary.gpu.memoryAllocatedMiB / summary.gpu.memoryTotalMiB) * 100), 100) : 0;
+                const memLabel = memKnown ? `${(summary.gpu.memoryAllocatedMiB / 1024).toFixed(1)} / ${(summary.gpu.memoryTotalMiB / 1024).toFixed(1)} GiB` : '';
+                return (
+                  <div className={cn("grid grid-cols-1 sm:grid-cols-3 gap-4", (hami || memKnown) && "sm:grid-cols-4")}>
+                    <Card>
+                      <CardContent className="pt-6">
+                        <p className="text-sm text-muted-foreground">Total GPUs</p>
+                        <p className="text-2xl font-bold text-purple-600">{summary.gpu.total}</p>
+                      </CardContent>
+                    </Card>
+                    {hami && memKnown ? (
+                      <Card className="bg-indigo-50 border-indigo-200">
+                        <CardContent className="pt-6">
+                          <p className="text-sm text-muted-foreground">GPU Memory</p>
+                          <p className="text-2xl font-bold text-indigo-600">{memPct}%</p>
+                          <p className="text-xs text-muted-foreground mt-1">{memLabel}</p>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <Card className="bg-purple-50 border-purple-200">
+                        <CardContent className="pt-6">
+                          <p className="text-sm text-muted-foreground">In Use</p>
+                          <p className="text-2xl font-bold text-purple-600">
+                            {summary.gpu.allocated} / {summary.gpu.total}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {hami ? (
+                      <Card className="bg-green-50 border-green-200">
+                        <CardContent className="pt-6">
+                          <p className="text-sm text-muted-foreground">GPU Pods</p>
+                          <p className="text-2xl font-bold text-green-600">{summary.gpu.podsWithGPU || 0}</p>
+                          <p className="text-xs text-muted-foreground mt-1">pods using GPU</p>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <Card className="bg-green-50 border-green-200">
+                        <CardContent className="pt-6">
+                          <p className="text-sm text-muted-foreground">Free</p>
+                          <p className="text-2xl font-bold text-green-600">{summary.gpu.free}</p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {!hami && memKnown && (
+                      <Card className="bg-indigo-50 border-indigo-200">
+                        <CardContent className="pt-6">
+                          <p className="text-sm text-muted-foreground">Memory In Use</p>
+                          <p className="text-2xl font-bold text-indigo-600">
+                            {(summary.gpu.memoryAllocatedMiB / 1024).toFixed(1)} / {(summary.gpu.memoryTotalMiB / 1024).toFixed(1)} GiB
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                );
+              })()}
               {Array.isArray(summary.gpu.byModel) && summary.gpu.byModel.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {summary.gpu.byModel.map((m, i) => (
-                    <Badge key={`${m.model}-${i}`} variant="outline" className="text-xs">
-                      {m.model}: {m.allocated}/{m.total}
-                      {m.memoryTotalMiB > 0 && (
-                        <span className="ml-1 text-muted-foreground">
-                          ({(m.memoryAllocatedMiB / 1024).toFixed(1)}/{(m.memoryTotalMiB / 1024).toFixed(1)} GiB)
-                        </span>
-                      )}
-                    </Badge>
-                  ))}
+                  {summary.gpu.byModel.map((m, i) => {
+                    const hami = !!summary.gpu.hamiDetected;
+                    const memKnown = (m.memoryTotalMiB || 0) > 0;
+                    const memPct = memKnown ? Math.min(Math.round((m.memoryAllocatedMiB / m.memoryTotalMiB) * 100), 100) : 0;
+                    return (
+                      <Badge key={`${m.model}-${i}`} variant="outline" className="text-xs">
+                        {m.model}: {hami && memKnown ? `${memPct}% · ${(m.memoryAllocatedMiB / 1024).toFixed(1)}/${(m.memoryTotalMiB / 1024).toFixed(1)} GiB` : `${m.allocated}/${m.total}`}
+                        {hami && (
+                          <span className="ml-1 text-muted-foreground">({m.pods || 0} pods)</span>
+                        )}
+                        {!hami && memKnown && (
+                          <span className="ml-1 text-muted-foreground">
+                            ({(m.memoryAllocatedMiB / 1024).toFixed(1)}/{(m.memoryTotalMiB / 1024).toFixed(1)} GiB)
+                          </span>
+                        )}
+                      </Badge>
+                    );
+                  })}
                 </div>
               )}
             </div>

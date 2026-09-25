@@ -527,12 +527,28 @@ export default function TopologyView() {
                                 className="border-purple-500 text-purple-700"
                                 title={node.gpuModel || 'GPU'}
                               >
-                                🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated ?? 0}/{node.gpuCapacity ?? 0})
-                                {node.gpuMemTotalMiB > 0 && (
-                                  <span className="ml-1">
-                                    · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
-                                  </span>
-                                )}
+                                {(() => {
+                                  const memKnown = (node.gpuMemTotalMiB || 0) > 0;
+                                  const hami = !!node.hamiDetected;
+                                  if (hami && memKnown) {
+                                    const pct = Math.min(Math.round((node.gpuMemAllocatedMiB / node.gpuMemTotalMiB) * 100), 100);
+                                    return (
+                                      <>
+                                        🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} · {pct}% GPU mem · {node.gpuPods || 0} GPU pods
+                                      </>
+                                    );
+                                  }
+                                  return (
+                                    <>
+                                      🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated ?? 0}/{node.gpuCapacity ?? 0})
+                                      {memKnown && (
+                                        <span className="ml-1">
+                                          · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </Badge>
                             )}
                           </div>

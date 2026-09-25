@@ -804,6 +804,12 @@ type NodeInfo struct {
 	GPUMemTotalMiB float64 `json:"gpuMemTotalMiB,omitempty"`
 	// GPUMemAllocatedMiB is GPU memory allocated to scheduled pods in MiB.
 	GPUMemAllocatedMiB float64 `json:"gpuMemAllocatedMiB,omitempty"`
+	// GPUPods is the number of scheduled pods requesting at least one GPU.
+	GPUPods int `json:"gpuPods,omitempty"`
+	// HamiDetected is true when the node shows signs of HAMi/KAI fractional
+	// GPU sharing (nvidia.com/gpumem capacity or any pod's gpumem req/limit,
+	// or a hami.io/vgpu-devices-allocated annotation).
+	HamiDetected bool `json:"hamiDetected,omitempty"`
 }
 
 // NodeUsage represents resource usage for a node
@@ -1089,8 +1095,20 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		}
 		if gpuMemPer > 0 {
 			gpuMemTotalMiB = gpuMemPer * float64(int(gpuCapacity))
-		} else if gpumem, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
-			gpuMemTotalMiB = float64(gpumem.Value())
+		}
+		// The nvidia.com/gpumem extended resource on the node means the HAMi
+		// device plugin is present (it registers the node's total GPU memory).
+		hamiNodeResource := false
+		if gpumem, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
+			hamiNodeResource = true
+			if gpuMemTotalMiB == 0 {
+				gpuMemTotalMiB = float64(gpumem.Value())
+			}
+		} else if gpumem, ok := node.Status.Allocatable[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
+			hamiNodeResource = true
+			if gpuMemTotalMiB == 0 {
+				gpuMemTotalMiB = float64(gpumem.Value())
+			}
 		}
 
 		// Get pods on this node once to calculate usage
@@ -1124,7 +1142,9 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 		// pods is guaranteed to be non-nil after error handling above
 		podCount := 0
 		podNames := make([]string, 0)
+		gpuPods := 0
 		gpuMemUsed := 0.0
+		hamiPodSignal := false
 		gpuMemPerGPU := 0.0
 		if gpuMemTotalMiB > 0 && gpuCapacity > 0 {
 			gpuMemPerGPU = gpuMemTotalMiB / gpuCapacity
@@ -1154,6 +1174,7 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 				podNames = append(podNames, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
 
 				var podGPUCount, podGPUMemMiB float64
+				podHamiSignal := len(pod.Annotations[hamiVGPUDevicesAnnotation]) > 0
 
 				// Process only regular containers (exclude init containers per eks-node-viewer)
 				// Init containers are transient and don't contribute to steady-state resource usage
@@ -1176,9 +1197,18 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 					// HAMi: explicit GPU memory request (MiB) for vGPU partitions
 					if gpumemReq := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpumem")]; !gpumemReq.IsZero() {
 						podGPUMemMiB += float64(gpumemReq.Value())
+						podHamiSignal = true
+					}
+
+					if gpumemLim := container.Resources.Limits[corev1.ResourceName("nvidia.com/gpumem")]; !gpumemLim.IsZero() {
+						podHamiSignal = true
 					}
 				}
 
+				if podGPUCount > 0 {
+					gpuPods++
+				}
+				hamiPodSignal = hamiPodSignal || podHamiSignal
 				gpuUsed += podGPUCount
 
 				// Resolve the pod's GPU memory claim:
@@ -1238,6 +1268,8 @@ func (c *Client) GetAllNodesWithUsage(ctx context.Context) ([]NodeInfo, error) {
 			nodeInfo.GPUMemTotalMiB = gpuMemTotalMiB
 			nodeInfo.GPUMemAllocatedMiB = gpuMemUsed
 		}
+		nodeInfo.GPUPods = gpuPods
+		nodeInfo.HamiDetected = hamiNodeResource || hamiPodSignal
 
 		// Set pod count and pod names (already calculated in the loop above)
 		nodeInfo.PodCount = podCount

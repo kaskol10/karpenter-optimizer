@@ -192,6 +192,8 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 		wantModel          string
 		wantMemTotalMiB    float64
 		wantMemAllocMiB    float64
+		wantGPUPods        int
+		wantHami           bool
 		wantGPUCapacitySet bool // whether GPUCapacity/GPUAllocated should be non-zero
 	}{
 		{
@@ -210,6 +212,7 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantCapacity:       4,
 			wantAllocated:      2,
 			wantModel:          "NVIDIA A100-SXM4-80GB",
+			wantGPUPods:        1,
 			wantGPUCapacitySet: true,
 		},
 		{
@@ -219,6 +222,7 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantCapacity:       2,
 			wantAllocated:      1,
 			wantModel:          "NVIDIA T4",
+			wantGPUPods:        1,
 			wantGPUCapacitySet: true,
 		},
 		{
@@ -244,15 +248,18 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 		},
 		{
 			// HAMi vGPU: pod requests nvidia.com/gpu:1 + nvidia.com/gpumem:45k.
-			// Count allocation = 1; memory allocation = 45000 MiB.
+			// Count allocation = 1; memory allocation = 45000 MiB; HAMi detected
+			// from the pod's gpumem request; 2 GPU pods counted.
 			name:               "hami gpumem request drives memory allocation",
 			node:               hamilNode("hami-node", 2, 2, 95830, 0, "NVIDIA A100-SXM4-80GB"),
-			pods:               []runtime.Object{gpuMemPod("gpu-pod", "hami-node", 1, 45000)},
+			pods:               []runtime.Object{gpuMemPod("gpu-pod-1", "hami-node", 1, 45000), gpuMemPod("gpu-pod-2", "hami-node", 1, 20000)},
 			wantCapacity:       2,
-			wantAllocated:      1,
+			wantAllocated:      2,
 			wantModel:          "NVIDIA A100-SXM4-80GB",
 			wantMemTotalMiB:    2 * 95830,
-			wantMemAllocMiB:    45000,
+			wantMemAllocMiB:    65000,
+			wantGPUPods:        2,
+			wantHami:           true,
 			wantGPUCapacitySet: true,
 		},
 		{
@@ -265,6 +272,8 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantModel:          "NVIDIA A100-SXM4-80GB",
 			wantMemTotalMiB:    2 * 95830,
 			wantMemAllocMiB:    45000,
+			wantGPUPods:        1,
+			wantHami:           true,
 			wantGPUCapacitySet: true,
 		},
 		{
@@ -275,6 +284,7 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantCapacity:       4,
 			wantAllocated:      2,
 			wantModel:          "NVIDIA A100-SXM4-80GB",
+			wantGPUPods:        1,
 			wantGPUCapacitySet: true,
 			// No memory label => memory unknown, so claim stays 0.
 		},
@@ -288,6 +298,7 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantModel:          "NVIDIA A100-SXM4-80GB",
 			wantMemTotalMiB:    2 * 95830,
 			wantMemAllocMiB:    2 * 95830,
+			wantGPUPods:        1,
 			wantGPUCapacitySet: true,
 		},
 		{
@@ -300,6 +311,19 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			wantModel:          "NVIDIA A100-SXM4-80GB",
 			wantMemTotalMiB:    200000,
 			wantMemAllocMiB:    100000, // 1 x (200000/2)
+			wantGPUPods:        1,
+			wantHami:           true, // HAMi device plugin gpumem resource on node
+			wantGPUCapacitySet: true,
+		},
+		{
+			// Two fractional GPU pods on one node (HAMi-style sharing).
+			name:               "two fractional GPU pods counted separately",
+			node:               gpuNode("shared-node", 2, "NVIDIA H100-NVL"),
+			pods:               []runtime.Object{gpuPod("vllm-1", "shared-node", 1), gpuPod("vllm-2", "shared-node", 1), gpuPod("plain", "shared-node", 0)},
+			wantCapacity:       2,
+			wantAllocated:      2,
+			wantModel:          "NVIDIA H100-NVL",
+			wantGPUPods:        2,
 			wantGPUCapacitySet: true,
 		},
 	}
@@ -335,6 +359,12 @@ func TestGetAllNodesWithUsageGPU(t *testing.T) {
 			}
 			if n.GPUMemAllocatedMiB != tc.wantMemAllocMiB {
 				t.Errorf("GPUMemAllocatedMiB = %v, want %v", n.GPUMemAllocatedMiB, tc.wantMemAllocMiB)
+			}
+			if n.GPUPods != tc.wantGPUPods {
+				t.Errorf("GPUPods = %v, want %v", n.GPUPods, tc.wantGPUPods)
+			}
+			if n.HamiDetected != tc.wantHami {
+				t.Errorf("HamiDetected = %v, want %v", n.HamiDetected, tc.wantHami)
 			}
 			if tc.wantGPUCapacitySet && n.GPUCapacity == 0 {
 				t.Error("expected GPU capacity to be reported for GPU node")
