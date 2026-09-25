@@ -1,5 +1,9 @@
 # Build stage
-FROM node:20-alpine AS builder
+# The frontend bundle is static, platform-independent assets, so build on the
+# build host platform and copy the result into the multi-arch final stage.
+# This avoids running Node under QEMU when cross-building (e.g. arm64 on amd64),
+# which crashes the V8 JIT with SIGILL.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 
