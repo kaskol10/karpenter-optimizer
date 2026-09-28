@@ -62,6 +62,18 @@ function isDaemonSetPod(pod) {
   return (pod.workloadType || '').toLowerCase() === 'daemonset';
 }
 
+// hasDevicePlacement reports whether the node should render per-physical-GPU
+// lanes: HAMi-detected, per-GPU memory known, multi-GPU node, and at least one
+// of the given pods carries a hami.io/vgpu-devices-allocated annotation.
+function hasDevicePlacement(node, pods) {
+  return (
+    !!node.hamiDetected &&
+    (node.gpuMemTotalMiB || 0) > 0 &&
+    (node.gpuCapacity || 0) > 1 &&
+    pods.some((p) => (p.gpuDevices || []).length > 0)
+  );
+}
+
 function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod }) {
   const { format, label, weight } = getMetricFields(metric, node);
   const w = weight(pod);
@@ -75,6 +87,9 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
     `${label} req: ${format(w)}`,
     metric !== 'gpu' && (pod.requests?.gpu || 0) > 0
       ? `GPU req: ${pod.requests.gpu}${pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}`
+      : null,
+    (pod.gpuDevices || []).length > 0
+      ? `Placed: ${pod.gpuDevices.map((d) => `GPU ${d.index}${d.uuid ? ` (${d.uuid})` : ''}`).join(', ')}`
       : null,
     pod.qosClass ? `QoS: ${pod.qosClass}` : null,
   ].filter(Boolean);
@@ -102,7 +117,107 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
   );
 }
 
-function NodePodBar({ node, pods, metric, showAllPodsInList, title }) {
+// GPULaneBar renders one lane per physical GPU (by HAMi device index) plus an
+// "Unassigned" lane for GPU pods without placement info. Segment width is the
+// pod's memory on that device (MiB), against the node's per-GPU memory.
+function GPULaneBar({ node, pods }) {
+  const gpuCount = Math.max(Math.round(node.gpuCapacity || 0), 1);
+  const perGpuMiB = (node.gpuMemTotalMiB || 0) / gpuCount;
+
+  // laneSegments[i] = [{ pod, device, memMiB }]
+  const lanes = Array.from({ length: gpuCount }, () => []);
+  const unassigned = [];
+
+  pods.forEach((pod) => {
+    const devices = pod.gpuDevices || [];
+    if (devices.length === 0) {
+      // No placement yet (e.g. whole-GPU claim before hami placed it).
+      const mem =
+        (pod.requests?.gpuMemMiB || 0) > 0
+          ? pod.requests.gpuMemMiB
+          : (pod.requests?.gpu || 0) * perGpuMiB;
+      unassigned.push({ pod, memMiB: mem });
+      return;
+    }
+    devices.forEach((device) => {
+      const idx = Math.min(Math.max(device.index || 0, 0), gpuCount - 1);
+      lanes[idx].push({ pod, device, memMiB: device.memoryMiB || 0 });
+    });
+  });
+
+  const renderSegment = ({ pod, device, memMiB }) => {
+    const hue = hashToHue(getPodKey(pod));
+    const titleLines = device
+      ? [
+          `${pod.namespace}/${pod.name}`,
+          `GPU ${device.index}${device.uuid ? ` (${device.uuid})` : ''}`,
+          `${memMiB} MiB requested`,
+        ]
+      : [
+          `${pod.namespace}/${pod.name}`,
+          'No device placement (unassigned)',
+          `${memMiB} MiB requested`,
+        ];
+    return (
+      <div
+        key={`${getPodKey(pod)}-${device ? device.index : 'unassigned'}`}
+        className="flex items-center justify-center border-r border-foreground/10 bg-card/80 hover:bg-accent transition-colors overflow-hidden"
+        style={{
+          flexGrow: Math.max(memMiB, 0),
+          flexShrink: 0,
+          flexBasis: 0,
+          minWidth: 0,
+          background: `hsl(${hue} 70% 50% / 0.18)`,
+        }}
+        title={titleLines.join('\n')}
+      >
+        <span className="px-1 text-[10px] font-mono truncate max-w-full">{pod.name}</span>
+      </div>
+    );
+  };
+
+  const laneRow = (label, segments, usedMiB) => (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate">{label}</span>
+      <div className="flex h-7 flex-1 rounded border border-foreground/15 overflow-hidden bg-muted/40">
+        {segments.map(renderSegment)}
+        {perGpuMiB > 0 && usedMiB < perGpuMiB && (
+          <div
+            className="flex items-center justify-center bg-muted text-muted-foreground text-[10px] px-1"
+            style={{
+              flexGrow: Math.max(perGpuMiB - usedMiB, 0),
+              flexShrink: 0,
+              flexBasis: 0,
+              minWidth: 0,
+            }}
+            title="Free GPU memory"
+          >
+            <span className="truncate">free</span>
+          </div>
+        )}
+      </div>
+      <span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 text-right">
+        {usedMiB > 0 ? `${(usedMiB / 1024).toFixed(1)}/${(perGpuMiB / 1024).toFixed(1)} GiB` : `0/${(perGpuMiB / 1024).toFixed(1)} GiB`}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        GPU requests (per device)
+      </p>
+      {lanes.map((segments, i) => {
+        const usedMiB = segments.reduce((sum, s) => sum + s.memMiB, 0);
+        return laneRow(`GPU ${i}`, segments, usedMiB);
+      })}
+      {unassigned.length > 0 &&
+        laneRow('Unassigned', unassigned, unassigned.reduce((sum, s) => sum + s.memMiB, 0))}
+    </div>
+  );
+}
+
+function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
   const { weight: weightFn, format, label } = getMetricFields(metric, node);
   const [hoveredPod, setHoveredPod] = useState(null);
 
@@ -128,61 +243,65 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title }) {
   return (
     <div className="space-y-3">
       {title && <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>
-          {label} allocatable: <span className="font-mono text-foreground">{format(allocatable)}</span>
-        </span>
-        <span>
-          Pods sum (requests):{' '}
-          <span className="font-mono text-foreground">{format(totalRequested)}</span>
-        </span>
-      </div>
-
-      <div className="flex h-10 w-full rounded-md border border-foreground/15 overflow-hidden bg-muted/40">
-        {podsSorted.map((pod) => {
-          const w = weightFn(pod);
-          const grow = Math.max(w, 0);
-          const showLabel = allocatable > 0 ? w / allocatable >= showLabelThreshold : false;
-          const isActive = hoveredPod ? getPodKey(hoveredPod) === getPodKey(pod) : false;
-          return (
-            <PodBarSegment
-              key={getPodKey(pod)}
-              pod={pod}
-              node={node}
-              metric={metric}
-              grow={grow}
-              showLabel={showLabel}
-              isActive={isActive}
-              onHoverPod={setHoveredPod}
-            />
-          );
-        })}
-        {remainder > 1e-6 && (
-          <div
-            className="flex items-center justify-center bg-muted text-muted-foreground text-[10px] px-1"
-            style={{
-              flexGrow: remainder,
-              flexShrink: 0,
-              flexBasis: 0,
-              minWidth: 0,
-            }}
-            title={`Unrequested ${label.toLowerCase()} (vs allocatable)`}
-          >
-            <span className="truncate">free</span>
-          </div>
-        )}
-      </div>
-
-      {hoveredPod && (
-        <div className="text-xs border rounded-md bg-card/60 px-3 py-2">
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <span className="font-mono truncate">{hoveredPod.namespace}/{hoveredPod.name}</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="font-mono text-muted-foreground">
-              {label} req: {format(weightFn(hoveredPod))}
+      {!hideBar && (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {label} allocatable: <span className="font-mono text-foreground">{format(allocatable)}</span>
+            </span>
+            <span>
+              Pods sum (requests):{' '}
+              <span className="font-mono text-foreground">{format(totalRequested)}</span>
             </span>
           </div>
-        </div>
+
+          <div className="flex h-10 w-full rounded-md border border-foreground/15 overflow-hidden bg-muted/40">
+            {podsSorted.map((pod) => {
+              const w = weightFn(pod);
+              const grow = Math.max(w, 0);
+              const showLabel = allocatable > 0 ? w / allocatable >= showLabelThreshold : false;
+              const isActive = hoveredPod ? getPodKey(hoveredPod) === getPodKey(pod) : false;
+              return (
+                <PodBarSegment
+                  key={getPodKey(pod)}
+                  pod={pod}
+                  node={node}
+                  metric={metric}
+                  grow={grow}
+                  showLabel={showLabel}
+                  isActive={isActive}
+                  onHoverPod={setHoveredPod}
+                />
+              );
+            })}
+            {remainder > 1e-6 && (
+              <div
+                className="flex items-center justify-center bg-muted text-muted-foreground text-[10px] px-1"
+                style={{
+                  flexGrow: remainder,
+                  flexShrink: 0,
+                  flexBasis: 0,
+                  minWidth: 0,
+                }}
+                title={`Unrequested ${label.toLowerCase()} (vs allocatable)`}
+              >
+                <span className="truncate">free</span>
+              </div>
+            )}
+          </div>
+
+          {hoveredPod && (
+            <div className="text-xs border rounded-md bg-card/60 px-3 py-2">
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                <span className="font-mono truncate">{hoveredPod.namespace}/{hoveredPod.name}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="font-mono text-muted-foreground">
+                  {label} req: {format(weightFn(hoveredPod))}
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {pods.length > 0 && (
@@ -212,6 +331,17 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title }) {
                       {pod.requests.gpu} GPU{pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}
                     </Badge>
                   )}
+                  {(pod.gpuDevices || []).map((d) => (
+                    <Badge
+                      key={`dev-${d.index}`}
+                      variant="outline"
+                      className="text-[10px] border-indigo-500 text-indigo-700 shrink-0"
+                      title={d.uuid || undefined}
+                    >
+                      GPU {d.index}
+                      {d.memoryMiB > 0 && node.gpuMemTotalMiB > 0 ? ` · ${formatGPUMem(d.memoryMiB)}` : ''}
+                    </Badge>
+                  ))}
                   <span className="ml-auto text-muted-foreground font-mono shrink-0">{format(w)}</span>
                 </div>
               );
@@ -603,15 +733,29 @@ export default function TopologyView() {
                             (p) => (p.requests?.gpu || 0) > 0 || (p.requests?.gpuMemMiB || 0) > 0,
                           );
                           if ((node.gpuCapacity || 0) === 0 && (node.gpuPods || 0) === 0) return null;
+                          const laneMode = hasDevicePlacement(node, gpuPods);
                           return (
                             <div className="mt-4 space-y-3 border-t pt-3">
-                              <NodePodBar
-                                node={node}
-                                pods={gpuPods}
-                                metric="gpu"
-                                title="GPU requests"
-                                showAllPodsInList={showAllPodsInOverview}
-                              />
+                              {laneMode ? (
+                                <GPULaneBar node={node} pods={gpuPods} />
+                              ) : (
+                                <NodePodBar
+                                  node={node}
+                                  pods={gpuPods}
+                                  metric="gpu"
+                                  title="GPU requests"
+                                  showAllPodsInList={showAllPodsInOverview}
+                                />
+                              )}
+                              {laneMode && (
+                                <NodePodBar
+                                  node={node}
+                                  pods={gpuPods}
+                                  metric="gpu"
+                                  hideBar
+                                  showAllPodsInList={showAllPodsInOverview}
+                                />
+                              )}
                             </div>
                           );
                         })()}
