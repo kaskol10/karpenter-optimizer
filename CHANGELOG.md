@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `kubernetes.Client.clientset` is now typed as `kubernetes.Interface` (was `*kubernetes.Clientset`) to allow fake-client injection in tests.
 - **GPU overview under HAMi**: when HAMi is detected, the cluster overview, topology node badges, and node GPU gauges now lead with **GPU memory % in use** plus a **GPU pods** count (e.g. `NVIDIA-H100-NVL: 95% · 532.2/561.5 GiB (11 pods)`) instead of whole-GPU counts, which are meaningless for fractional GPU sharing. Non-HAMi clusters keep the count-based display.
+- **Topology GPU free segments show the amount**: the "free" segment in the per-GPU lanes and the aggregate GPU bar now reads `free · {GiB}` (total minus used) instead of just `free`.
+- **Topology pod names are click-to-copy**: clicking a pod name (in the CPU/Memory bar labels, the per-GPU lane segments, and the pod lists) copies its full `namespace/name` to the clipboard, for pasting into the CLI.
 
 ## [0.0.29] - 2025-01-26
 
