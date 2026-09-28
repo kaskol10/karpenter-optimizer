@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -6,7 +6,7 @@ import { Badge } from './ui/badge';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Check, Loader2, RefreshCw } from 'lucide-react';
 import { cn, formatGPUMem } from '../lib/utils';
 
 const API_URL =
@@ -83,7 +83,72 @@ function shortGpuUuid(uuid) {
   return String(uuid).replace(/^GPU-/, '').replace(/-/g, '').slice(0, 8);
 }
 
-function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod }) {
+// useCopyPodName copies a pod's namespace/name to the clipboard and tracks
+// which pod key was just copied (for brief "Copied" feedback).
+function useCopyPodName() {
+  const [copiedKey, setCopiedKey] = useState(null);
+  const timeoutRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(timeoutRef.current), []);
+
+  const copy = useCallback((pod) => {
+    const key = getPodKey(pod);
+    const done = () => {
+      setCopiedKey(key);
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopiedKey(null), 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(key).then(done).catch(done);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = key;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }
+  }, []);
+
+  return { copy, copiedKey };
+}
+
+// CopyablePodName renders a pod's namespace/name; clicking copies the full
+// name (for pasting into the CLI).
+function CopyablePodName({ pod, onCopy, copiedKey, className }) {
+  const isCopied = copiedKey === getPodKey(pod);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCopy(pod);
+      }}
+      title={`${getPodKey(pod)} — click to copy`}
+      className={cn(
+        'inline-flex items-center gap-1 font-mono max-w-full cursor-pointer truncate text-left',
+        isCopied && 'text-emerald-600',
+        className,
+      )}
+    >
+      {isCopied ? (
+        <>
+          <Check className="w-3 h-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">Copied</span>
+        </>
+      ) : (
+        <span className="truncate">
+          {pod.namespace}/{pod.name}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod, copyPod, copiedKey }) {
   const { format, label, weight } = getMetricFields(metric, node);
   const w = weight(pod);
   const hue = hashToHue(getPodKey(pod));
@@ -120,7 +185,12 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
       onMouseLeave={() => onHoverPod?.(null)}
     >
       {showLabel && (
-        <span className="px-1 text-[10px] font-mono truncate max-w-full">{pod.name}</span>
+        <CopyablePodName
+          pod={pod}
+          onCopy={copyPod}
+          copiedKey={copiedKey}
+          className="px-1 text-[10px]"
+        />
       )}
     </div>
   );
@@ -131,7 +201,7 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
 // index 0), plus an "Unassigned" lane for GPU pods without placement info.
 // Segment width is the pod's memory on that device (MiB), against the node's
 // per-GPU memory.
-function GPULaneBar({ node, pods }) {
+function GPULaneBar({ node, pods, copyPod, copiedKey }) {
   const gpuCount = Math.max(Math.round(node.gpuCapacity || 0), 1);
   const perGpuMiB = (node.gpuMemTotalMiB || 0) / gpuCount;
 
@@ -194,12 +264,19 @@ function GPULaneBar({ node, pods }) {
         }}
         title={titleLines.join('\n')}
       >
-        <span className="px-1 text-[10px] font-mono truncate max-w-full">{pod.name}</span>
+        <CopyablePodName
+          pod={pod}
+          onCopy={copyPod}
+          copiedKey={copiedKey}
+          className="px-1 text-[10px]"
+        />
       </div>
     );
   };
 
-  const laneRow = (label, segments, usedMiB, labelTitle) => (
+  const laneRow = (label, segments, usedMiB, labelTitle) => {
+    const freeMiB = Math.max(perGpuMiB - usedMiB, 0);
+    return (
     <div className="flex items-center gap-2">
       <span
         className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate"
@@ -209,18 +286,18 @@ function GPULaneBar({ node, pods }) {
       </span>
       <div className="flex h-7 flex-1 rounded border border-foreground/15 overflow-hidden bg-muted/40">
         {segments.map(renderSegment)}
-        {perGpuMiB > 0 && usedMiB < perGpuMiB && (
+        {perGpuMiB > 0 && freeMiB > 0 && (
           <div
             className="flex items-center justify-center bg-muted text-muted-foreground text-[10px] px-1"
             style={{
-              flexGrow: Math.max(perGpuMiB - usedMiB, 0),
+              flexGrow: freeMiB,
               flexShrink: 0,
               flexBasis: 0,
               minWidth: 0,
             }}
-            title="Free GPU memory"
+            title={`Free GPU memory: ${Math.round(freeMiB)} MiB (${Math.round(perGpuMiB)} MiB total)`}
           >
-            <span className="truncate">free</span>
+            <span className="truncate">free · {formatGPUMem(freeMiB)}</span>
           </div>
         )}
       </div>
@@ -228,7 +305,8 @@ function GPULaneBar({ node, pods }) {
         {usedMiB > 0 ? `${(usedMiB / 1024).toFixed(1)}/${(perGpuMiB / 1024).toFixed(1)} GiB` : `0/${(perGpuMiB / 1024).toFixed(1)} GiB`}
       </span>
     </div>
-  );
+    );
+  };
 
   // GPUs referenced by no pod: keep the lane totals equal to node GPU memory.
   const otherGpusMiB = Math.max(gpuCount - lanes.length, 0) * perGpuMiB;
@@ -264,7 +342,7 @@ function GPULaneBar({ node, pods }) {
   );
 }
 
-function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
+function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, copyPod, copiedKey }) {
   const { weight: weightFn, format, label } = getMetricFields(metric, node);
   const [hoveredPod, setHoveredPod] = useState(null);
 
@@ -318,6 +396,8 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
                   showLabel={showLabel}
                   isActive={isActive}
                   onHoverPod={setHoveredPod}
+                  copyPod={copyPod}
+                  copiedKey={copiedKey}
                 />
               );
             })}
@@ -332,7 +412,11 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
                 }}
                 title={`Unrequested ${label.toLowerCase()} (vs allocatable)`}
               >
-                <span className="truncate">free</span>
+                <span className="truncate">
+                  {metric === 'gpu' && (node.gpuMemTotalMiB || 0) > 0
+                    ? `free · ${formatGPUMem(remainder)}`
+                    : 'free'}
+                </span>
               </div>
             )}
           </div>
@@ -369,7 +453,7 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
                       background: `hsl(${hashToHue(getPodKey(pod))} 70% 50% / 0.55)`,
                     }}
                   />
-                  <span className="font-mono truncate">{pod.namespace}/{pod.name}</span>
+                  <CopyablePodName pod={pod} onCopy={copyPod} copiedKey={copiedKey} className="text-xs" />
                   {(pod.requests?.gpu || 0) > 0 && (
                     <Badge
                       variant="outline"
@@ -418,6 +502,7 @@ export default function TopologyView() {
   const [hideDaemonSets, setHideDaemonSets] = useState(false);
   const [expandedNodeName, setExpandedNodeName] = useState(null);
   const [nodeDetailFilters, setNodeDetailFilters] = useState({});
+  const { copy: copyPod, copiedKey } = useCopyPodName();
 
   const getNodeDetailFilters = useCallback(
     (nodeName) =>
@@ -774,6 +859,8 @@ export default function TopologyView() {
                           pods={pods}
                           metric={metric}
                           showAllPodsInList={showAllPodsInOverview}
+                          copyPod={copyPod}
+                          copiedKey={copiedKey}
                         />
                         {(() => {
                           const gpuPods = pods.filter(
@@ -784,7 +871,7 @@ export default function TopologyView() {
                           return (
                             <div className="mt-4 space-y-3 border-t pt-3">
                               {laneMode ? (
-                                <GPULaneBar node={node} pods={gpuPods} />
+                                <GPULaneBar node={node} pods={gpuPods} copyPod={copyPod} copiedKey={copiedKey} />
                               ) : (
                                 <NodePodBar
                                   node={node}
@@ -792,6 +879,8 @@ export default function TopologyView() {
                                   metric="gpu"
                                   title="GPU requests"
                                   showAllPodsInList={showAllPodsInOverview}
+                                  copyPod={copyPod}
+                                  copiedKey={copiedKey}
                                 />
                               )}
                               {laneMode && (
@@ -801,6 +890,8 @@ export default function TopologyView() {
                                   metric="gpu"
                                   hideBar
                                   showAllPodsInList={showAllPodsInOverview}
+                                  copyPod={copyPod}
+                                  copiedKey={copiedKey}
                                 />
                               )}
                             </div>
@@ -866,9 +957,12 @@ export default function TopologyView() {
                                               background: `hsl(${hashToHue(getPodKey(pod))} 70% 50% / 0.55)`,
                                             }}
                                           />
-                                          <span className="font-mono truncate">
-                                            {pod.namespace}/{pod.name}
-                                          </span>
+                                          <CopyablePodName
+                                            pod={pod}
+                                            onCopy={copyPod}
+                                            copiedKey={copiedKey}
+                                            className="text-xs"
+                                          />
                                           {pod.workloadType && (
                                             <Badge variant="secondary" className="text-[10px]">
                                               {pod.workloadType}
