@@ -74,6 +74,15 @@ function hasDevicePlacement(node, pods) {
   );
 }
 
+// shortGpuUuid shortens a HAMi device UUID to a compact label, e.g.
+// "GPU-83026582-9368-..." -> "83026582". Returns '' when the uuid is empty.
+// HAMi's allocated-index is unreliable (two cards can both report index 0),
+// so the UUID is the only stable identifier of a physical GPU.
+function shortGpuUuid(uuid) {
+  if (!uuid) return '';
+  return String(uuid).replace(/^GPU-/, '').replace(/-/g, '').slice(0, 8);
+}
+
 function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod }) {
   const { format, label, weight } = getMetricFields(metric, node);
   const w = weight(pod);
@@ -89,7 +98,7 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
       ? `GPU req: ${pod.requests.gpu}${pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}`
       : null,
     (pod.gpuDevices || []).length > 0
-      ? `Placed: ${pod.gpuDevices.map((d) => `GPU ${d.index}${d.uuid ? ` (${d.uuid})` : ''}`).join(', ')}`
+      ? `Placed: ${pod.gpuDevices.map((d) => shortGpuUuid(d.uuid) || `GPU ${d.index}`).join(', ')}`
       : null,
     pod.qosClass ? `QoS: ${pod.qosClass}` : null,
   ].filter(Boolean);
@@ -117,15 +126,17 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
   );
 }
 
-// GPULaneBar renders one lane per physical GPU (by HAMi device index) plus an
-// "Unassigned" lane for GPU pods without placement info. Segment width is the
-// pod's memory on that device (MiB), against the node's per-GPU memory.
+// GPULaneBar renders one lane per physical GPU, keyed by the HAMi device UUID
+// (the annotation's index field is unreliable — two cards can both report
+// index 0), plus an "Unassigned" lane for GPU pods without placement info.
+// Segment width is the pod's memory on that device (MiB), against the node's
+// per-GPU memory.
 function GPULaneBar({ node, pods }) {
   const gpuCount = Math.max(Math.round(node.gpuCapacity || 0), 1);
   const perGpuMiB = (node.gpuMemTotalMiB || 0) / gpuCount;
 
-  // laneSegments[i] = [{ pod, device, memMiB }]
-  const lanes = Array.from({ length: gpuCount }, () => []);
+  // lanes: Map<key, { label, uuid, sortIndex, segments: [{ pod, device, memMiB }] }>
+  const laneMap = new Map();
   const unassigned = [];
 
   pods.forEach((pod) => {
@@ -140,10 +151,22 @@ function GPULaneBar({ node, pods }) {
       return;
     }
     devices.forEach((device) => {
-      const idx = Math.min(Math.max(device.index || 0, 0), gpuCount - 1);
-      lanes[idx].push({ pod, device, memMiB: device.memoryMiB || 0 });
+      const key = device.uuid || `idx-${device.index}`;
+      if (!laneMap.has(key)) {
+        laneMap.set(key, {
+          label: shortGpuUuid(device.uuid) || `GPU ${device.index}`,
+          uuid: device.uuid || '',
+          sortIndex: device.index || 0,
+          segments: [],
+        });
+      }
+      laneMap.get(key).segments.push({ pod, device, memMiB: device.memoryMiB || 0 });
     });
   });
+
+  const lanes = [...laneMap.values()].sort(
+    (a, b) => a.sortIndex - b.sortIndex || a.label.localeCompare(b.label),
+  );
 
   const renderSegment = ({ pod, device, memMiB }) => {
     const hue = hashToHue(getPodKey(pod));
@@ -160,7 +183,7 @@ function GPULaneBar({ node, pods }) {
         ];
     return (
       <div
-        key={`${getPodKey(pod)}-${device ? device.index : 'unassigned'}`}
+        key={`${getPodKey(pod)}-${device ? device.uuid || device.index : 'unassigned'}`}
         className="flex items-center justify-center border-r border-foreground/10 bg-card/80 hover:bg-accent transition-colors overflow-hidden"
         style={{
           flexGrow: Math.max(memMiB, 0),
@@ -176,9 +199,14 @@ function GPULaneBar({ node, pods }) {
     );
   };
 
-  const laneRow = (label, segments, usedMiB) => (
+  const laneRow = (label, segments, usedMiB, labelTitle) => (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate">{label}</span>
+      <span
+        className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate"
+        title={labelTitle || undefined}
+      >
+        {label}
+      </span>
       <div className="flex h-7 flex-1 rounded border border-foreground/15 overflow-hidden bg-muted/40">
         {segments.map(renderSegment)}
         {perGpuMiB > 0 && usedMiB < perGpuMiB && (
@@ -202,15 +230,34 @@ function GPULaneBar({ node, pods }) {
     </div>
   );
 
+  // GPUs referenced by no pod: keep the lane totals equal to node GPU memory.
+  const otherGpusMiB = Math.max(gpuCount - lanes.length, 0) * perGpuMiB;
+
   return (
     <div className="space-y-1">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         GPU requests (per device)
       </p>
-      {lanes.map((segments, i) => {
-        const usedMiB = segments.reduce((sum, s) => sum + s.memMiB, 0);
-        return laneRow(`GPU ${i}`, segments, usedMiB);
+      {lanes.map((lane) => {
+        const usedMiB = lane.segments.reduce((sum, s) => sum + s.memMiB, 0);
+        return laneRow(lane.label, lane.segments, usedMiB, lane.uuid);
       })}
+      {otherGpusMiB > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate">
+            Other GPUs
+          </span>
+          <div
+            className="flex h-7 flex-1 items-center justify-center rounded border border-foreground/15 bg-muted/60 text-[10px] text-muted-foreground"
+            title="GPUs with no pod placement annotation"
+          >
+            <span className="truncate">no placement annotation</span>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0 text-right">
+            0/{(otherGpusMiB / 1024).toFixed(1)} GiB
+          </span>
+        </div>
+      )}
       {unassigned.length > 0 &&
         laneRow('Unassigned', unassigned, unassigned.reduce((sum, s) => sum + s.memMiB, 0))}
     </div>
@@ -333,12 +380,12 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar }) {
                   )}
                   {(pod.gpuDevices || []).map((d) => (
                     <Badge
-                      key={`dev-${d.index}`}
+                      key={`dev-${d.uuid || d.index}`}
                       variant="outline"
                       className="text-[10px] border-indigo-500 text-indigo-700 shrink-0"
                       title={d.uuid || undefined}
                     >
-                      GPU {d.index}
+                      {shortGpuUuid(d.uuid) || `GPU ${d.index}`}
                       {d.memoryMiB > 0 && node.gpuMemTotalMiB > 0 ? ` · ${formatGPUMem(d.memoryMiB)}` : ''}
                     </Badge>
                   ))}
