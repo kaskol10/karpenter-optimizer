@@ -1097,6 +1097,9 @@ type TopologyPod struct {
 	WorkloadType string               `json:"workloadType,omitempty"`
 	QOSClass     string               `json:"qosClass,omitempty"`
 	Requests     TopologyPodResources `json:"requests"`
+	// GPUDevices carries the HAMi placement (which physical GPU index, UUID,
+	// memory) when the pod has a hami.io/vgpu-devices-allocated annotation.
+	GPUDevices []kubernetes.GPUDevice `json:"gpuDevices,omitempty"`
 }
 
 // TopologyNode is a node with its pods for the topology view.
@@ -1281,6 +1284,7 @@ func (s *Server) getTopology(c *gin.Context) {
 				WorkloadType: entry.pod.WorkloadType,
 				QOSClass:     entry.pod.QOSClass,
 				Requests:     entry.req,
+				GPUDevices:   entry.pod.GPUDevices,
 			})
 		}
 
