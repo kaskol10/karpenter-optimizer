@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Fleet Power Estimation**: The cluster summary now includes an estimated power draw (`power: {watts, coveragePct, nodeCount, coveredNodes}`) computed from a static wattage table keyed by EC2 instance family (GPU, general, compute, memory, storage families). The Cluster Overview shows an "Est. Power" tile (e.g. `~1.24 kW`, `4/4 nodes covered`) — clearly labeled as an estimate; nodes with unknown families are excluded from the total and from the coverage percentage.
 - **Karpenter Log Analyzer**: New feature to analyze Karpenter error logs with AI-powered explanations
   - Paste Karpenter error logs (JSON format) to get detailed analysis
   - Automatic error categorization (Label Errors, Taint Tolerance, NodePool Limits, Resource Constraints)
