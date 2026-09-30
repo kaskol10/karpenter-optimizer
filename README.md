@@ -12,6 +12,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 ## ✨ Features
 
 - 🎯 **Automatic Workload Discovery**: Automatically fetch workloads from your Kubernetes cluster
+- 📈 **Cluster Trends**: CPU, memory, GPU-memory and estimated-cost trend sparklines in the Cluster Overview (1h/6h/24h) from a background sampler; per-node age badges in the Topology view
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
 - 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool); GPU nodes additionally get a dedicated GPU requests section (memory-based under HAMi), with per-GPU placement lanes under HAMi. Free GPU memory shows its remaining amount, and pod names are click-to-copy (`namespace/name`)
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
@@ -242,6 +243,7 @@ make swagger
 - `GET /api/v1/nodes` - Get nodes with usage data
 - `GET /api/v1/topology` - Get nodes with scheduled pods and per-pod requests (topology view)
 - `GET /api/v1/cluster/summary` - Get cluster-wide statistics
+- `GET /api/v1/history?window=6h` - Cluster resource trend series (CPU/memory/GPU-memory/cost) for sparklines; `window` accepts `1h`/`6h`/`24h` (default `6h`)
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions
 

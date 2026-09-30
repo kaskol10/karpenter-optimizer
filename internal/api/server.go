@@ -43,6 +43,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/karpenter-optimizer/internal/config"
+	"github.com/karpenter-optimizer/internal/history"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/recommender"
 	swaggerFiles "github.com/swaggo/files"
@@ -65,6 +66,7 @@ type Server struct {
 	recommender       *recommender.Recommender
 	k8sClient         *kubernetes.Client
 	karpenterDetected bool
+	historyStore      *history.Store
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -134,9 +136,15 @@ func NewServer(cfg *config.Config) *Server {
 		recommender:       rec,
 		k8sClient:         k8sClient,
 		karpenterDetected: karpenterDetected,
+		historyStore:      history.New(historyWindowFromEnv()),
 	}
 
 	server.setupRoutes()
+
+	// Sample cluster usage into the history store for trend sparklines.
+	if k8sClient != nil {
+		server.startHistorySampler(context.Background())
+	}
 
 	return server
 }
@@ -228,6 +236,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/nodes", s.getNodesWithUsage)
 		api.GET("/topology", s.getTopology)
 		api.GET("/cluster/summary", s.getClusterSummary)
+		api.GET("/history", s.getHistory)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
 
