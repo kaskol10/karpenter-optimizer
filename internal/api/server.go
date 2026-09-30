@@ -228,6 +228,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/nodes", s.getNodesWithUsage)
 		api.GET("/topology", s.getTopology)
 		api.GET("/cluster/summary", s.getClusterSummary)
+		api.GET("/serving", s.getServing)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
 

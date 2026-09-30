@@ -14,6 +14,7 @@ import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
 import KarpenterLogAnalyzer from './components/KarpenterLogAnalyzer';
+import ServingHealth from './components/ServingHealth';
 import { cn } from './lib/utils';
 
 // Use runtime configuration from window.ENV (set via config.js) or build-time env var
@@ -140,6 +141,17 @@ function App() {
               )}
             >
               Topology
+            </button>
+            <button
+              onClick={() => setActiveTab('serving')}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === 'serving'
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300"
+              )}
+            >
+              Serving
             </button>
             <button
               onClick={() => setActiveTab('workloads')}
@@ -425,6 +437,9 @@ function App() {
 
           {/* Topology Tab */}
           {activeTab === 'topology' && <TopologyView />}
+
+          {/* Serving Tab */}
+          {activeTab === 'serving' && <ServingHealth />}
 
           {/* Workloads Tab */}
           {activeTab === 'workloads' && <WorkloadUsageView />}

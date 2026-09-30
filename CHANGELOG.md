@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **LLM Serving Health**: A new "Serving" tab and `GET /api/v1/serving` endpoint detect in-cluster LLM serving pods (vLLM/sglang, matched by image or command) and probe each pod's `/v1/models` and `/metrics` (with a `/server_info` fallback for sglang) to surface inference health: model, KV cache % (`gpu_cache_usage_info`/`gpu_cache_usage_pq`), running/waiting requests, TTFT mean + p95, preemptions, and token throughput (derived from counter diffs between samples). Unreachable pods render as graceful offline cards (never an error). Results are cached 15s server-side to bound probe load. Note: requires the app to be able to reach pod IPs (in-cluster or pod-network reachability).
 - **Karpenter Log Analyzer**: New feature to analyze Karpenter error logs with AI-powered explanations
   - Paste Karpenter error logs (JSON format) to get detailed analysis
   - Automatic error categorization (Label Errors, Taint Tolerance, NodePool Limits, Resource Constraints)
