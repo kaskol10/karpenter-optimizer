@@ -23,7 +23,7 @@ This document provides context and guidelines for AI coding assistants working o
   - `internal/recommender/node_pool_recommender.go` - **PRIMARY** recommendation engine (NodePool-based)
   - `internal/kubernetes/client.go` - Kubernetes API client (nodes, pods, NodePools)
  - `internal/awspricing/client.go` - AWS Pricing API client for instance pricing
- - `internal/llmhealth/probe.go` - LLM serving health probe (vLLM/sglang discovery + Prometheus `/metrics` parsing, token-rate via counter diffs)
+ - `internal/power/power.go` - Static EC2-family wattage table; `Estimate(instanceTypes)` returns fleet watts + coverage
  - `internal/ollama/client.go` - Ollama LLM client for AI explanations
 
 ### Frontend (React)

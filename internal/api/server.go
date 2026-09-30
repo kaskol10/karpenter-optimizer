@@ -45,6 +45,7 @@ import (
 	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/history"
 	"github.com/karpenter-optimizer/internal/kubernetes"
+	"github.com/karpenter-optimizer/internal/power"
 	"github.com/karpenter-optimizer/internal/recommender"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -1515,6 +1516,25 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 			"hamiDetected":       gpuHamiDetected,
 			"podsWithGPU":        totalGPUPods,
 			"byModel":            byModel,
+		}
+	}
+
+	// Estimate fleet power from instance types (static wattage table). Clearly
+	// an estimate: unknown families are excluded from the total and from
+	// coveragePct.
+	if nodesWithInstanceType > 0 {
+		instanceTypes := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if n.InstanceType != "" {
+				instanceTypes = append(instanceTypes, n.InstanceType)
+			}
+		}
+		pwr := power.Estimate(instanceTypes)
+		summaryData["power"] = gin.H{
+			"watts":        pwr.Watts,
+			"coveragePct":  pwr.CoveragePct,
+			"nodeCount":    pwr.NodeCount,
+			"coveredNodes": pwr.CoveredNodes,
 		}
 	}
 

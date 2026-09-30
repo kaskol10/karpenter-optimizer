@@ -159,6 +159,13 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
     }
   };
 
+  const formatWatts = (watts) => {
+    if (watts >= 1000) {
+      return `${(watts / 1000).toFixed(2)} kW`;
+    }
+    return `${Math.round(watts)} W`;
+  };
+
   const handleGenerateRecommendations = async () => {
     if (!summary) {
       setError('Please wait for cluster summary to load');
@@ -410,7 +417,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
           )}
 
           {/* Statistics Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Total Nodes</p>
@@ -523,6 +530,20 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                 </p>
               </CardContent>
             </Card>
+
+            {summary.power && summary.power.nodeCount > 0 && (
+              <Card className="bg-amber-50 border-amber-200" title="Estimated from a static wattage table per instance family. Nodes with unknown instance families are excluded from the total (see coverage).">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">Est. Power</p>
+                  <p className="text-2xl font-bold text-amber-600">
+                    ~{formatWatts(summary.power.watts)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.power.coveredNodes}/{summary.power.nodeCount} nodes covered
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* GPU Allocation (allocation-based; shown only when GPUs exist) */}
