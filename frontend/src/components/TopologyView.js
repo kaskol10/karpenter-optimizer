@@ -18,6 +18,19 @@ function getPodKey(pod) {
   return `${pod.namespace}/${pod.name}`;
 }
 
+// formatNodeAge renders a human-friendly age from an RFC3339 creation time
+// (e.g. "age 3d" / "age 5h" / "age 12m"). Returns '' when unknown.
+function formatNodeAge(creationTime) {
+  if (!creationTime) return '';
+  const created = new Date(creationTime).getTime();
+  if (Number.isNaN(created)) return '';
+  const secs = Math.max(0, (Date.now() - created) / 1000);
+  if (secs < 90) return 'age now';
+  if (secs < 5400) return `age ${Math.round(secs / 60)}m`;
+  if (secs < 172800) return `age ${Math.round(secs / 3600)}h`;
+  return `age ${Math.round(secs / 86400)}d`;
+}
+
 function hashToHue(str) {
   let h = 0;
   for (let i = 0; i < str.length; i += 1) {
@@ -806,6 +819,10 @@ export default function TopologyView() {
                               <Badge variant="outline">{node.capacityType}</Badge>
                             )}
                             {node.zone && <Badge variant="secondary">{node.zone}</Badge>}
+                            {(() => {
+                              const age = formatNodeAge(node.creationTime);
+                              return age ? <Badge variant="outline">{age}</Badge> : null;
+                            })()}
                             {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
                               <Badge
                                 variant="outline"

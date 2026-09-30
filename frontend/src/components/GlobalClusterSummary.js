@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -7,6 +7,7 @@ import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
+import Sparkline from './Sparkline';
 import { RefreshCw, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getCacheStats } from '../lib/pricingCache';
@@ -15,6 +16,95 @@ import { getCacheStats } from '../lib/pricingCache';
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
   ? window.ENV.REACT_APP_API_URL 
   : (process.env.REACT_APP_API_URL || '');
+
+// ClusterTrends renders sparklines for CPU %, memory %, GPU memory % and
+// estimated cost over the selected window (1h / 6h / 24h).
+function ClusterTrends({ API_URL }) {
+  const [window, setWindow] = useState('6h');
+  const [points, setPoints] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/api/v1/history`, {
+          params: { window },
+        });
+        if (!cancelled) {
+          setPoints(response.data.points || []);
+        }
+      } catch (err) {
+        if (!cancelled) setPoints([]);
+        console.error('History error:', err);
+      }
+    };
+    load();
+    const interval = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [window, API_URL]);
+
+  const series = useMemo(() => {
+    const toPoints = (fn) => points.map((p) => ({ t: p.t, value: fn(p) }));
+    return {
+      cpu: toPoints((p) => (p.cpuAllocatable > 0 ? (p.cpuUsed / p.cpuAllocatable) * 100 : 0)),
+      memory: toPoints((p) =>
+        p.memoryAllocatable > 0 ? (p.memoryUsed / p.memoryAllocatable) * 100 : 0,
+      ),
+      gpu: toPoints((p) =>
+        p.gpuMemTotalMiB > 0 ? (p.gpuMemUsedMiB / p.gpuMemTotalMiB) * 100 : 0,
+      ),
+      cost: toPoints((p) => p.costUSDPerHour || 0),
+    };
+  }, [points]);
+
+  const tiles = [
+    { label: 'CPU %', data: series.cpu, stroke: '#3b82f6', fmt: (v) => `${v.toFixed(1)}%` },
+    { label: 'Memory %', data: series.memory, stroke: '#f59e0b', fmt: (v) => `${v.toFixed(1)}%` },
+    { label: 'GPU mem %', data: series.gpu, stroke: '#8b5cf6', fmt: (v) => `${v.toFixed(1)}%` },
+    {
+      label: 'Est. cost',
+      data: series.cost,
+      stroke: '#22c55e',
+      fmt: (v) => `$${v.toFixed(2)}/hr ($${(v * 24).toFixed(0)}/day)`,
+    },
+  ];
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Trends
+        </h3>
+        <Select value={window} onValueChange={setWindow}>
+          <SelectTrigger className="h-7 w-[110px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1h">Last 1h</SelectItem>
+            <SelectItem value="6h">Last 6h</SelectItem>
+            <SelectItem value="24h">Last 24h</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {tiles.map((tile) => (
+          <div key={tile.label} className="rounded-md border bg-card/60 px-3 py-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">{tile.label}</p>
+              <p className="text-xs font-mono font-semibold">
+                {tile.data.length ? tile.fmt(tile.data[tile.data.length - 1].value) : '—'}
+              </p>
+            </div>
+            <Sparkline points={tile.data} stroke={tile.stroke} height={36} formatValue={tile.fmt} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate }) {
   const [summary, setSummary] = useState(null);
@@ -546,6 +636,9 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
               )}
             </div>
           )}
+
+          {/* Resource trends (sparklines from the history store) */}
+          <ClusterTrends API_URL={API_URL} />
         </div>
       </CardContent>
     </Card>

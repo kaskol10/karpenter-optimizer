@@ -32,8 +32,9 @@ This document provides context and guidelines for AI coding assistants working o
   - `App.js` - Main application component
   - `components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
   - `components/NodePoolCard.js` - Displays individual NodePool recommendations
-  - `components/NodeUsageView.js` - Real-time node resource usage visualization
-  - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
+ - `components/NodeUsageView.js` - Real-time node resource usage visualization
+ - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards
+ - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
 
 ## Key Data Structures
 
@@ -109,6 +110,7 @@ type NodeInfo struct {
 - `GET /api/v1/nodepools` - List all NodePools with actual node data
 - `GET /api/v1/nodes` - Get all nodes with usage data
 - `GET /api/v1/cluster/summary` - Cluster-wide statistics
+- `GET /api/v1/serving` - Inference health for detected LLM serving pods (vLLM/sglang)
 
 ### Karpenter Log Analysis Endpoints
 - `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs and provide explanations
@@ -273,6 +275,8 @@ type NodeInfo struct {
 - `KUBECONFIG` - Kubernetes config path
 - `KUBE_CONTEXT` - Kubernetes context
 - `PORT` - API server port (default: 8080)
+- `HISTORY_INTERVAL_SECS` - Cluster trend sampler interval (default: 60)
+- `HISTORY_WINDOW_HOURS` - Cluster trend history retention (default: 6, max 24)
 
 ## Code Style
 

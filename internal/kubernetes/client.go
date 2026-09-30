@@ -2395,6 +2395,90 @@ func (c *Client) GetRecentNodeDeletions(ctx context.Context, sinceHours int) ([]
 	return deletions, nil
 }
 
+// LLMPodInfo identifies an LLM serving pod (vLLM/sglang) that can be probed
+// for inference health metrics.
+type LLMPodInfo struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	IP        string `json:"ip"`
+	Port      int32  `json:"port"`
+	Image     string `json:"image"`
+}
+
+// llmImageMarkers are substrings matched against a container image or command
+// to detect LLM serving pods.
+var llmImageMarkers = []string{"vllm", "sglang"}
+
+// FindLLMPods lists, across all namespaces, running pods whose containers look
+// like LLM servers (vLLM/sglang in the image or command). It returns the pod
+// IP and the first container port (or 8000) so callers can probe
+// http://<ip>:<port>.
+func (c *Client) FindLLMPods(ctx context.Context) ([]LLMPodInfo, error) {
+	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods for LLM discovery: %w", err)
+	}
+
+	var out []LLMPodInfo
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if pod.Status.PodIP == "" {
+			continue
+		}
+		marker, port, image := detectLLMServing(&pod)
+		if marker == "" {
+			continue
+		}
+		out = append(out, LLMPodInfo{
+			Namespace: pod.Namespace,
+			Name:      pod.Name,
+			IP:        pod.Status.PodIP,
+			Port:      port,
+			Image:     image,
+		})
+	}
+	return out, nil
+}
+
+// detectLLMServing returns (matchedMarker, port, image) for a pod that looks
+// like an LLM server, or ("", 0, "") otherwise.
+func detectLLMServing(pod *corev1.Pod) (string, int32, string) {
+	var firstPort int32
+	for _, container := range pod.Spec.Containers {
+		if firstPort == 0 && len(container.Ports) > 0 {
+			firstPort = container.Ports[0].ContainerPort
+		}
+		image := container.Image
+		if match := matchLLMMarker(strings.ToLower(image)); match != "" {
+			return match, portOrDefault(firstPort), image
+		}
+		// Also match command/args (e.g. entrypoint "vllm serve").
+		cmd := strings.ToLower(strings.Join(append(container.Command, container.Args...), " "))
+		if match := matchLLMMarker(cmd); match != "" {
+			return match, portOrDefault(firstPort), image
+		}
+	}
+	return "", 0, ""
+}
+
+func matchLLMMarker(lower string) string {
+	for _, marker := range llmImageMarkers {
+		if strings.Contains(lower, marker) {
+			return marker
+		}
+	}
+	return ""
+}
+
+func portOrDefault(port int32) int32 {
+	if port == 0 {
+		return 8000
+	}
+	return port
+}
+
 // KarpenterPodInfo represents information about a Karpenter pod
 type KarpenterPodInfo struct {
 	Name      string `json:"name"`

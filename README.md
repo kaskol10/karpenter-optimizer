@@ -12,6 +12,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 ## ✨ Features
 
 - 🎯 **Automatic Workload Discovery**: Automatically fetch workloads from your Kubernetes cluster
+- 📈 **Cluster Trends**: CPU, memory, GPU-memory and estimated-cost trend sparklines in the Cluster Overview (1h/6h/24h) from a background sampler; per-node age badges in the Topology view
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
 - 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool); GPU nodes additionally get a dedicated GPU requests section (memory-based under HAMi), with per-GPU placement lanes under HAMi. Free GPU memory shows its remaining amount, and pod names are click-to-copy (`namespace/name`)
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
@@ -23,6 +24,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 🚨 **Disruption Tracking**: Monitor Karpenter node disruptions and identify blocked deletions
 - 🔍 **Karpenter Log Analyzer**: Analyze Karpenter error logs with AI-powered explanations and actionable recommendations
 - 🎮 **GPU Allocation Visualization**: See GPU count, memory, and allocation per node, pod, and cluster (allocation-based, no DCGM/Prometheus). GPU count/memory read from node labels (`nvidia.com/gpu.count`, `nvidia.com/gpu.memory`); HAMi/KAI memory partitioning aware (`nvidia.com/gpumem` + `hami.io/vgpu-devices-allocated`) — when HAMi is detected, GPU usage is reported as **memory % in use** plus a **GPU pod** count (fractional-GPU friendly)
+- 🤖 **LLM Serving Health**: A "Serving" tab probes in-cluster vLLM/sglang pods to show inference health — model, KV cache %, running/waiting, TTFT (mean/p95), preemptions, and token throughput
 - 🏢 **On-Prem / No-Karpenter Mode**: Gracefully degrades when Karpenter is absent — cluster-wide stats, GPU view, and "n/a" costs instead of errors
 - ⚡ **Fleet Power Estimation**: A coarse estimated power draw per instance family (e.g. `p4d` ~3.3 kW, `p5` ~10.2 kW) shown as an "Est. Power" tile in the Cluster Overview (clearly an estimate, with node coverage)
 - 📦 **Helm Chart**: Production-ready Helm chart for easy Kubernetes deployment
@@ -243,6 +245,7 @@ make swagger
 - `GET /api/v1/nodes` - Get nodes with usage data
 - `GET /api/v1/topology` - Get nodes with scheduled pods and per-pod requests (topology view)
 - `GET /api/v1/cluster/summary` - Get cluster-wide statistics
+- `GET /api/v1/serving` - Inference health for detected vLLM/sglang serving pods (model, KV cache %, running/waiting, TTFT, preemptions, throughput)
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions
 
