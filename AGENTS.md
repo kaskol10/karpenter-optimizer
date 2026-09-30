@@ -22,8 +22,9 @@ This document provides context and guidelines for AI coding assistants working o
   - `internal/recommender/recommender.go` - Legacy recommendation logic (cluster-summary based)
   - `internal/recommender/node_pool_recommender.go` - **PRIMARY** recommendation engine (NodePool-based)
   - `internal/kubernetes/client.go` - Kubernetes API client (nodes, pods, NodePools)
-  - `internal/awspricing/client.go` - AWS Pricing API client for instance pricing
-  - `internal/ollama/client.go` - Ollama LLM client for AI explanations
+ - `internal/awspricing/client.go` - AWS Pricing API client for instance pricing
+ - `internal/llmhealth/probe.go` - LLM serving health probe (vLLM/sglang discovery + Prometheus `/metrics` parsing, token-rate via counter diffs)
+ - `internal/ollama/client.go` - Ollama LLM client for AI explanations
 
 ### Frontend (React)
 - **Location**: `frontend/src/`
@@ -31,8 +32,9 @@ This document provides context and guidelines for AI coding assistants working o
   - `App.js` - Main application component
   - `components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
   - `components/NodePoolCard.js` - Displays individual NodePool recommendations
-  - `components/NodeUsageView.js` - Real-time node resource usage visualization
-  - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
+ - `components/NodeUsageView.js` - Real-time node resource usage visualization
+ - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards
+ - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
 
 ## Key Data Structures
 
@@ -108,7 +110,7 @@ type NodeInfo struct {
 - `GET /api/v1/nodepools` - List all NodePools with actual node data
 - `GET /api/v1/nodes` - Get all nodes with usage data
 - `GET /api/v1/cluster/summary` - Cluster-wide statistics
-- `GET /api/v1/history?window=6h` - Cluster resource trend series (CPU/memory/GPU-memory/cost points) for sparklines
+- `GET /api/v1/serving` - Inference health for detected LLM serving pods (vLLM/sglang)
 
 ### Karpenter Log Analysis Endpoints
 - `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs and provide explanations
