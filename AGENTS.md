@@ -275,6 +275,8 @@ type NodeInfo struct {
 - `KUBECONFIG` - Kubernetes config path
 - `KUBE_CONTEXT` - Kubernetes context
 - `PORT` - API server port (default: 8080)
+- `HISTORY_INTERVAL_SECS` - Cluster trend sampler interval (default: 60)
+- `HISTORY_WINDOW_HOURS` - Cluster trend history retention (default: 6, max 24)
 
 ## Code Style
 
