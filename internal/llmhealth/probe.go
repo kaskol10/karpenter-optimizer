@@ -185,14 +185,13 @@ func (p *Prober) getJSON(ctx context.Context, url string, out interface{}) error
 func (p *Prober) applyVLLMMetrics(h *PodHealth, samples []promSample) {
 	gauges, counters, histograms := splitSamples(samples)
 
-	if v, ok := gaugeValue(gauges, "gpu_cache_usage_info"); ok {
-		if v > 1 {
-			v = 1 // already a percent
-		}
+	// KV cache usage: vllm:kv_cache_usage_perc (current) or the deprecated
+	// vllm:gpu_cache_usage_perc (pre-0.9.2). Both are 0-1 fractions.
+	if v, ok := gaugeValue(gauges, "kv_cache_usage_perc"); ok {
 		pct := v * 100
 		h.KVCachePercent = &pct
-	} else if v, ok := gaugeValue(gauges, "gpu_cache_usage_pq"); ok {
-		pct := v
+	} else if v, ok := gaugeValue(gauges, "gpu_cache_usage_perc"); ok {
+		pct := v * 100
 		h.KVCachePercent = &pct
 	}
 	if v, ok := gaugeValue(gauges, "num_requests_running"); ok {

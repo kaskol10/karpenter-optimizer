@@ -32,9 +32,9 @@ vllm:num_requests_running{model_name="qwen3-30b"} 3
 # HELP vllm:num_requests_waiting Number of waiting requests.
 # TYPE vllm:num_requests_waiting gauge
 vllm:num_requests_waiting{model_name="qwen3-30b"} 1
-# HELP vllm:gpu_cache_usage_info KV cache usage.
-# TYPE vllm:gpu_cache_usage_info gauge
-vllm:gpu_cache_usage_info{model_name="qwen3-30b"} 0.42
+# HELP vllm:kv_cache_usage_perc KV cache usage.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{model_name="qwen3-30b"} 0.42
 # HELP vllm:num_preemptions_total Total number of preemption events.
 # TYPE vllm:num_preemptions_total counter
 vllm:num_preemptions_total{model_name="qwen3-30b"} 7
@@ -66,8 +66,8 @@ func TestParsePrometheusFixture(t *testing.T) {
 	if got, ok := gaugeValue(gauges, "num_requests_waiting"); !ok || got != 1 {
 		t.Errorf("num_requests_waiting = %v (ok=%v), want 1", got, ok)
 	}
-	if got, ok := gaugeValue(gauges, "gpu_cache_usage_info"); !ok || got != 0.42 {
-		t.Errorf("gpu_cache_usage_info = %v (ok=%v), want 0.42", got, ok)
+	if got, ok := gaugeValue(gauges, "kv_cache_usage_perc"); !ok || got != 0.42 {
+		t.Errorf("kv_cache_usage_perc = %v (ok=%v), want 0.42", got, ok)
 	}
 	if got, ok := counterValue(counters, "num_preemptions_total"); !ok || got != 7 {
 		t.Errorf("num_preemptions_total = %v (ok=%v), want 7", got, ok)
