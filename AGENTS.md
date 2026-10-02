@@ -34,7 +34,7 @@ This document provides context and guidelines for AI coding assistants working o
   - `components/NodePoolCard.js` - Displays individual NodePool recommendations
  - `components/NodeUsageView.js` - Real-time node resource usage visualization
  - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards
- - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
+ - `components/DisruptionTracker.js` - Node disruption tracking (60s auto-refresh, cost banner, recent deletions; `DisruptionCard` subcomponent)
 
 ## Key Data Structures
 
@@ -111,6 +111,8 @@ type NodeInfo struct {
 - `GET /api/v1/nodes` - Get all nodes with usage data
 - `GET /api/v1/cluster/summary` - Cluster-wide statistics
 - `GET /api/v1/serving` - Inference health for detected LLM serving pods (vLLM/sglang)
+- `GET /api/v1/disruptions?hours=N` - Live node disruptions (FailedDraining events + nodes marked for deletion). Each item includes `capacityType`, `eventCount` (real FailedDraining event count), `costPerHour`/`costSource` (spot-aware, from cached pricing), plus a top-level `summary` (`blockedCount`, `activeCount`, `totalCostPerHour`, `totalCostPerDay`, `byNodePool`). Backend fetches pods (one paginated list) and PDBs (one list) per request, not per node/pod.
+- `GET /api/v1/disruptions/recent?hours=N` - Recently deleted (completed) disruption nodes
 
 ### Karpenter Log Analysis Endpoints
 - `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs and provide explanations
@@ -177,7 +179,7 @@ type NodeInfo struct {
 - `internal/kubernetes/client.go` - Kubernetes integration
   - `ListNodePools()` - Lists NodePools with actual node data
   - `GetAllNodesWithUsage()` - Gets all nodes with CPU/Memory usage
-  - `GetNodeDisruptions()` - Tracks node disruptions (FailedDraining events)
+  - `GetNodeDisruptions()` - Tracks node disruptions (FailedDraining events + deletion-marked nodes); fetches pods/PDBs in batch (no per-node fan-out) and attaches `capacityType`
 
 - `internal/awspricing/client.go` - AWS Pricing API
   - `GetProductPrice()` - Gets instance pricing (on-demand or spot)
