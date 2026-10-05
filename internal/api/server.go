@@ -996,12 +996,67 @@ func (s *Server) getNodeDisruptions(c *gin.Context) {
 		return
 	}
 
+	s.enrichDisruptionsWithCost(ctx, disruptions)
+
+	var totalCostPerHour float64
+	blockedCount := 0
+	activeCount := 0
+	byNodePool := map[string]float64{}
+	for i := range disruptions {
+		d := &disruptions[i]
+		if d.IsBlocked {
+			blockedCount++
+		} else {
+			activeCount++
+		}
+		if d.CostPerHour != nil {
+			totalCostPerHour += *d.CostPerHour
+			if d.NodePool != "" {
+				byNodePool[d.NodePool] += *d.CostPerHour
+			}
+		}
+	}
+
+	summary := gin.H{
+		"blockedCount":     blockedCount,
+		"activeCount":      activeCount,
+		"totalCostPerHour": totalCostPerHour,
+		"totalCostPerDay":  totalCostPerHour * 24,
+		"byNodePool":       byNodePool,
+	}
+
 	c.JSON(200, gin.H{
 		"disruptions": disruptions,
+		"summary":     summary,
 		"sinceHours":  sinceHours, // Only used for historical deleted nodes
 		"count":       len(disruptions),
 		"note":        "Disruptions are based on current live node state, not historical events",
 	})
+}
+
+// enrichDisruptionsWithCost fills CostPerHour/CostSource on disruptions whose
+// node still exists and has an instance type. Uses the recommender's cached
+// pricing (same source as the cluster summary).
+func (s *Server) enrichDisruptionsWithCost(ctx context.Context, disruptions []kubernetes.NodeDisruptionInfo) {
+	if s.recommender == nil {
+		return
+	}
+	for i := range disruptions {
+		d := &disruptions[i]
+		if !d.NodeStillExists || d.InstanceType == "" {
+			continue
+		}
+		capacityType := d.CapacityType
+		if capacityType != "spot" {
+			capacityType = "on-demand"
+		}
+		pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{d.InstanceType}, capacityType, 1)
+		if pricingResult.Cost > 0 {
+			cost := pricingResult.Cost
+			d.CostPerHour = &cost
+			d.CostSource = string(pricingResult.Source)
+		}
+	}
 }
 
 // GetRecentNodeDeletions godoc

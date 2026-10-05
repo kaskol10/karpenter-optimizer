@@ -17,6 +17,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -965,6 +966,15 @@ func (c *Client) getAllNodes(ctx context.Context) ([]NodeInfo, error) {
 	return nodeInfos, nil
 }
 
+// nodeCapacityType returns the Karpenter capacity-type label of a node
+// (defaults to "on-demand" when the label is absent).
+func nodeCapacityType(node *corev1.Node) string {
+	if ct, ok := node.Labels["karpenter.sh/capacity-type"]; ok && ct != "" {
+		return ct
+	}
+	return "on-demand"
+}
+
 // fetchPodsForNodeWithRetry fetches pods for a node with retry logic and exponential backoff
 func (c *Client) fetchPodsForNodeWithRetry(ctx context.Context, nodeName string, maxRetries int) (*corev1.PodList, error) {
 	var lastErr error
@@ -1694,6 +1704,7 @@ type NodeDisruptionInfo struct {
 	NodeName           string            `json:"nodeName"`
 	NodePool           string            `json:"nodePool"`
 	InstanceType       string            `json:"instanceType"`
+	CapacityType       string            `json:"capacityType,omitempty"` // spot or on-demand (karpenter.sh/capacity-type)
 	Reason             string            `json:"reason"`                 // consolidation, expiration, drift, etc.
 	Message            string            `json:"message"`                // Event message
 	FirstSeen          string            `json:"firstSeen"`              // RFC3339 timestamp
@@ -1708,6 +1719,8 @@ type NodeDisruptionInfo struct {
 	BlockingPDBs       []string          `json:"blockingPDBs,omitempty"`       // PDBs that are blocking (deprecated, use BlockingPDBDetails)
 	BlockingPDBDetails []PDBBlockingInfo `json:"blockingPDBDetails,omitempty"` // Detailed PDB blocking information
 	NodeStillExists    bool              `json:"nodeStillExists"`              // True if node still exists (might be blocked)
+	CostPerHour        *float64          `json:"costPerHour,omitempty"`        // Estimated hourly cost while the node exists (nil = unknown)
+	CostSource         string            `json:"costSource,omitempty"`         // Pricing source for CostPerHour
 	// Enhanced node information from Kubernetes API
 	NodeConditions      []NodeCondition `json:"nodeConditions,omitempty"`      // Node conditions (Ready, MemoryPressure, etc.)
 	ResourceCapacity    ResourceInfo    `json:"resourceCapacity,omitempty"`    // Node resource capacity
@@ -1737,108 +1750,51 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 	var disruptions []NodeDisruptionInfo
 	now := time.Now()
 
+	// Collect the set of live nodes to analyze: nodes with FailedDraining
+	// events and nodes marked for deletion.
+	type liveDisruption struct {
+		node    *corev1.Node
+		reason  string
+		message string
+	}
+	liveDisruptions := make(map[string]*liveDisruption)
+
 	// First, query for FailedDraining events - these indicate nodes that Karpenter tried to drain but failed
 	// This is equivalent to: kubectl get events -A --field-selector reason=FailedDraining
 	failedDrainingEvents, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
 		FieldSelector: "reason=FailedDraining,involvedObject.kind=Node",
 	})
+	failedDrainingEventsByNode := make(map[string][]corev1.Event)
 	if err == nil {
-		// Track nodes we've seen from FailedDraining events
-		failedDrainingNodes := make(map[string]*corev1.Event)
 		for _, event := range failedDrainingEvents.Items {
-			nodeName := event.InvolvedObject.Name
-			if nodeName != "" {
-				// Keep the most recent event for each node
-				if existing, ok := failedDrainingNodes[nodeName]; !ok ||
-					event.LastTimestamp.After(existing.LastTimestamp.Time) {
-					failedDrainingNodes[nodeName] = &event
-				}
+			if nodeName := event.InvolvedObject.Name; nodeName != "" {
+				failedDrainingEventsByNode[nodeName] = append(failedDrainingEventsByNode[nodeName], event)
 			}
 		}
-
-		// For each node with FailedDraining event, get detailed information
-		for nodeName, event := range failedDrainingNodes {
+		for nodeName, events := range failedDrainingEventsByNode {
 			node, err := c.clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 			if err != nil {
 				// Node might have been deleted, skip
 				continue
 			}
-
-			// Get node information
-			nodePool := node.Labels["karpenter.sh/nodepool"]
-			instanceType := node.Labels["node.kubernetes.io/instance-type"]
+			// Most recent event wins for the timestamps/message.
+			sort.Slice(events, func(i, j int) bool {
+				return events[i].LastTimestamp.After(events[j].LastTimestamp.Time)
+			})
+			latest := events[0]
 
 			// Determine reason from Karpenter annotations or event
 			reason := "FailedDraining"
-			message := event.Message
 			if disruptionReason, ok := node.Annotations["karpenter.sh/disruption"]; ok {
 				reason = disruptionReason
 			} else if disruptionReason, ok := node.Annotations["karpenter.sh/disruption-reason"]; ok {
 				reason = disruptionReason
 			}
-
-			// Extract node conditions and resource info
-			var nodeConditions []NodeCondition
-			for _, condition := range node.Status.Conditions {
-				nodeConditions = append(nodeConditions, NodeCondition{
-					Type:    string(condition.Type),
-					Status:  string(condition.Status),
-					Reason:  condition.Reason,
-					Message: condition.Message,
-				})
+			liveDisruptions[nodeName] = &liveDisruption{
+				node:    node,
+				reason:  reason,
+				message: latest.Message,
 			}
-
-			resourceCapacity := ResourceInfo{}
-			resourceAllocatable := ResourceInfo{}
-			if cpu, ok := node.Status.Capacity[corev1.ResourceCPU]; ok {
-				resourceCapacity.CPU = cpu.String()
-			}
-			if memory, ok := node.Status.Capacity[corev1.ResourceMemory]; ok {
-				resourceCapacity.Memory = memory.String()
-			}
-			if cpu, ok := node.Status.Allocatable[corev1.ResourceCPU]; ok {
-				resourceAllocatable.CPU = cpu.String()
-			}
-			if memory, ok := node.Status.Allocatable[corev1.ResourceMemory]; ok {
-				resourceAllocatable.Memory = memory.String()
-			}
-
-			deletionTime := ""
-			if node.DeletionTimestamp != nil {
-				deletionTime = node.DeletionTimestamp.Format(time.RFC3339)
-			}
-
-			disruption := &NodeDisruptionInfo{
-				NodeName:            node.Name,
-				NodePool:            nodePool,
-				InstanceType:        instanceType,
-				Reason:              reason,
-				Message:             message,
-				FirstSeen:           event.FirstTimestamp.Format(time.RFC3339),
-				LastSeen:            event.LastTimestamp.Format(time.RFC3339),
-				EventCount:          1,
-				Labels:              node.Labels,
-				Annotations:         node.Annotations,
-				NodeStillExists:     true,
-				IsBlocked:           true, // FailedDraining means it's blocked
-				BlockingReason:      "Failed to drain node",
-				NodeConditions:      nodeConditions,
-				ResourceCapacity:    resourceCapacity,
-				ResourceAllocatable: resourceAllocatable,
-				CreationTime:        node.CreationTimestamp.Format(time.RFC3339),
-				DeletionTime:        deletionTime,
-			}
-
-			// Get pods currently running on this node (equivalent to kubectl describe node)
-			pods, err := c.getPodsOnNode(ctx, node.Name)
-			if err == nil {
-				disruption.AffectedPods = pods
-			}
-
-			// Check for PDBs and pod eviction issues
-			c.checkBlockingConstraints(ctx, disruption, node)
-
-			disruptions = append(disruptions, *disruption)
 		}
 	}
 
@@ -1848,43 +1804,68 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
-	// Track nodes we've already processed from FailedDraining events
-	processedNodes := make(map[string]bool)
-	for _, d := range disruptions {
-		processedNodes[d.NodeName] = true
-	}
-
 	// Check each node for disruption state
 	for _, node := range nodes.Items {
-		// Skip if we already processed this node from FailedDraining events
-		if processedNodes[node.Name] {
+		_, fromEvent := liveDisruptions[node.Name]
+
+		// Node marked for deletion is always a disruption
+		if node.DeletionTimestamp == nil && !fromEvent {
 			continue
 		}
 
-		// Check if node is marked for deletion (this is the key indicator)
-		if node.DeletionTimestamp == nil {
-			continue // Node is not being deleted, skip
+		// Skip nodes already captured from FailedDraining events (they win)
+		if _, exists := liveDisruptions[node.Name]; exists && node.DeletionTimestamp == nil {
+			continue
 		}
 
-		// Node is marked for deletion - this is a disruption
-		nodePool := node.Labels["karpenter.sh/nodepool"]
-		instanceType := node.Labels["node.kubernetes.io/instance-type"]
+		// Only track Karpenter nodes (or nodes with an instance-type label) for
+		// plain deletion-marked nodes; FailedDraining nodes are always Karpenter.
+		if node.DeletionTimestamp != nil && !fromEvent &&
+			node.Labels["karpenter.sh/nodepool"] == "" &&
+			node.Labels["node.kubernetes.io/instance-type"] == "" {
+			continue
+		}
 
-		// Determine reason from Karpenter annotations, node conditions, or labels
+		// Determine reason from Karpenter annotations
 		reason := "Terminating"
 		message := fmt.Sprintf("Node marked for deletion at %s", node.DeletionTimestamp.Format(time.RFC3339))
-
-		// Check Karpenter annotations for disruption reason
-		// Karpenter may set annotations like:
-		// - karpenter.sh/do-not-disrupt: "true" (blocks disruption)
-		// - karpenter.sh/disruption: "consolidation" or "expiration" or "drift"
 		if disruptionReason, ok := node.Annotations["karpenter.sh/disruption"]; ok {
 			reason = disruptionReason
 		} else if disruptionReason, ok := node.Annotations["karpenter.sh/disruption-reason"]; ok {
 			reason = disruptionReason
 		}
 
-		// Check node conditions for more context
+		// If this node has a FailedDraining event, that reason is more specific
+		if existing, exists := liveDisruptions[node.Name]; exists {
+			reason = existing.reason
+		}
+		liveDisruptions[node.Name] = &liveDisruption{node: &node, reason: reason, message: message}
+	}
+
+	// One batched pod fetch for all target nodes instead of one call per node.
+	podsByNode := make(map[string]*nodePods)
+	if len(liveDisruptions) > 0 {
+		nodeNames := make([]string, 0, len(liveDisruptions))
+		for name := range liveDisruptions {
+			nodeNames = append(nodeNames, name)
+		}
+		if fetched, err := c.getPodsOnNodes(ctx, nodeNames); err == nil {
+			podsByNode = fetched
+		}
+	}
+	pdbs, err := c.clientset.PolicyV1().PodDisruptionBudgets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// PDB API might not be available; disruption info without PDB detail is still useful.
+		pdbs = &policyv1.PodDisruptionBudgetList{}
+	}
+
+	// Build the disruption entries.
+	for _, ld := range liveDisruptions {
+		node := ld.node
+		nodePool := node.Labels["karpenter.sh/nodepool"]
+		instanceType := node.Labels["node.kubernetes.io/instance-type"]
+
+		// Extract node conditions
 		var nodeConditions []NodeCondition
 		for _, condition := range node.Status.Conditions {
 			nodeConditions = append(nodeConditions, NodeCondition{
@@ -1893,17 +1874,8 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 				Reason:  condition.Reason,
 				Message: condition.Message,
 			})
-			if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionFalse {
-				if strings.Contains(condition.Reason, "Kubelet") {
-					if reason == "Terminating" {
-						reason = "Terminating"
-						message = condition.Message
-					}
-				}
-			}
 		}
 
-		// Extract resource information from node
 		resourceCapacity := ResourceInfo{}
 		resourceAllocatable := ResourceInfo{}
 		if cpu, ok := node.Status.Capacity[corev1.ResourceCPU]; ok {
@@ -1919,48 +1891,70 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 			resourceAllocatable.Memory = memory.String()
 		}
 
-		// Check if it's a Karpenter node
-		if nodePool == "" {
-			// Might still be a Karpenter node, check other labels
-			if _, ok := node.Labels["karpenter.sh/nodepool"]; !ok {
-				// Check if it has Karpenter instance type label
-				if instanceType != "" {
-					nodePool = "unknown" // Karpenter node but no nodepool label
+		deletionTime := ""
+		firstSeen := node.CreationTimestamp.Format(time.RFC3339)
+		lastSeen := node.CreationTimestamp.Format(time.RFC3339)
+		eventCount := 0
+		if node.DeletionTimestamp != nil {
+			deletionTime = node.DeletionTimestamp.Format(time.RFC3339)
+			firstSeen = deletionTime
+			lastSeen = deletionTime
+		}
+		if events, ok := failedDrainingEventsByNode[node.Name]; ok {
+			eventCount = len(events)
+			var first, last time.Time
+			for i, e := range events {
+				if i == 0 {
+					first = e.FirstTimestamp.Time
+					last = e.LastTimestamp.Time
 				} else {
-					continue // Not a Karpenter node, skip
+					if e.FirstTimestamp.Time.Before(first) {
+						first = e.FirstTimestamp.Time
+					}
+					if e.LastTimestamp.After(last) {
+						last = e.LastTimestamp.Time
+					}
 				}
 			}
+			firstSeen = first.Format(time.RFC3339)
+			lastSeen = last.Format(time.RFC3339)
+		}
+
+		isBlocked := eventCount > 0 || node.DeletionTimestamp != nil
+		blockingReason := ""
+		if eventCount > 0 {
+			blockingReason = "Failed to drain node"
+		} else if node.DeletionTimestamp != nil {
+			blockingReason = "Node marked for deletion but still exists"
 		}
 
 		disruption := &NodeDisruptionInfo{
 			NodeName:            node.Name,
 			NodePool:            nodePool,
 			InstanceType:        instanceType,
-			Reason:              reason,
-			Message:             message,
-			FirstSeen:           node.DeletionTimestamp.Format(time.RFC3339),
-			LastSeen:            node.DeletionTimestamp.Format(time.RFC3339),
-			EventCount:          1,
+			CapacityType:        nodeCapacityType(node),
+			Reason:              ld.reason,
+			Message:             ld.message,
+			FirstSeen:           firstSeen,
+			LastSeen:            lastSeen,
+			EventCount:          eventCount,
 			Labels:              node.Labels,
 			Annotations:         node.Annotations,
 			NodeStillExists:     true,
-			IsBlocked:           true, // If node has DeletionTimestamp but still exists, it's blocked
-			BlockingReason:      "Node marked for deletion but still exists",
+			IsBlocked:           isBlocked,
+			BlockingReason:      blockingReason,
 			NodeConditions:      nodeConditions,
 			ResourceCapacity:    resourceCapacity,
 			ResourceAllocatable: resourceAllocatable,
 			CreationTime:        node.CreationTimestamp.Format(time.RFC3339),
-			DeletionTime:        node.DeletionTimestamp.Format(time.RFC3339),
+			DeletionTime:        deletionTime,
+		}
+		if np := podsByNode[node.Name]; np != nil {
+			disruption.AffectedPods = np.infos
 		}
 
-		// Get pods currently running on this node
-		pods, err := c.getPodsOnNode(ctx, node.Name)
-		if err == nil {
-			disruption.AffectedPods = pods
-		}
-
-		// Check for PDBs and pod eviction issues
-		c.checkBlockingConstraints(ctx, disruption, &node)
+		// Reuse the batched pod/PDB data (no per-node API fan-out).
+		c.checkBlockingConstraints(disruption, podsByNode[node.Name], pdbs.Items)
 
 		disruptions = append(disruptions, *disruption)
 	}
@@ -1980,22 +1974,21 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 			seenNodes[d.NodeName] = true
 		}
 
-		// Look for Karpenter disruption events for nodes we haven't seen yet
+		// Look for Karpenter disruption events for nodes we haven't seen yet.
+		// Group by node so a node with several events yields one entry with a
+		// real event count.
+		eventsByNode := make(map[string][]corev1.Event)
 		for _, event := range events.Items {
 			if event.FirstTimestamp.Before(&sinceTime) {
 				continue
 			}
 
 			// Check if this is a Karpenter disruption event
-			isKarpenterEvent := false
-			if event.Source.Component == "karpenter" ||
+			isKarpenterEvent := event.Source.Component == "karpenter" ||
 				strings.Contains(event.Source.Component, "karpenter") ||
 				strings.Contains(event.Reason, "Terminating") ||
 				strings.Contains(event.Reason, "Disrupting") ||
-				strings.Contains(event.Reason, "Consolidating") {
-				isKarpenterEvent = true
-			}
-
+				strings.Contains(event.Reason, "Consolidating")
 			if !isKarpenterEvent {
 				continue
 			}
@@ -2004,39 +1997,46 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 			if nodeName == "" || seenNodes[nodeName] {
 				continue
 			}
+			eventsByNode[nodeName] = append(eventsByNode[nodeName], event)
+		}
 
+		for nodeName, events := range eventsByNode {
 			// Check if node still exists
 			_, err := c.clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-			if err != nil {
-				// Node was deleted - this is a completed disruption
-				// Try to get more details from the event
-				reason := event.Reason
-				message := event.Message
-
-				// Extract disruption reason from event message if available
-				messageLower := strings.ToLower(message)
-				if strings.Contains(messageLower, "consolidat") {
-					reason = "Consolidation"
-				} else if strings.Contains(messageLower, "expir") || strings.Contains(messageLower, "drift") {
-					reason = "Expiration"
-				} else if strings.Contains(messageLower, "terminat") || strings.Contains(messageLower, "delet") {
-					reason = "Termination"
-				}
-
-				disruption := &NodeDisruptionInfo{
-					NodeName:        nodeName,
-					Reason:          reason,
-					Message:         message,
-					FirstSeen:       event.FirstTimestamp.Format(time.RFC3339),
-					LastSeen:        event.LastTimestamp.Format(time.RFC3339),
-					EventCount:      1,
-					Labels:          make(map[string]string),
-					Annotations:     make(map[string]string),
-					NodeStillExists: false,
-				}
-				disruptions = append(disruptions, *disruption)
-				seenNodes[nodeName] = true
+			if err == nil {
+				continue // Node exists - handled (or not) by the live pass
 			}
+
+			// Node was deleted - this is a completed disruption.
+			sort.Slice(events, func(i, j int) bool {
+				return events[i].LastTimestamp.After(events[j].LastTimestamp.Time)
+			})
+			latest := events[0]
+			reason := latest.Reason
+			message := latest.Message
+
+			// Extract disruption reason from event message if available
+			messageLower := strings.ToLower(message)
+			if strings.Contains(messageLower, "consolidat") {
+				reason = "Consolidation"
+			} else if strings.Contains(messageLower, "expir") || strings.Contains(messageLower, "drift") {
+				reason = "Expiration"
+			} else if strings.Contains(messageLower, "terminat") || strings.Contains(messageLower, "delet") {
+				reason = "Termination"
+			}
+
+			disruption := &NodeDisruptionInfo{
+				NodeName:        nodeName,
+				Reason:          reason,
+				Message:         message,
+				FirstSeen:       events[len(events)-1].FirstTimestamp.Format(time.RFC3339),
+				LastSeen:        latest.LastTimestamp.Format(time.RFC3339),
+				EventCount:      len(events),
+				Labels:          make(map[string]string),
+				Annotations:     make(map[string]string),
+				NodeStillExists: false,
+			}
+			disruptions = append(disruptions, *disruption)
 		}
 	}
 
@@ -2057,18 +2057,11 @@ func (c *Client) GetNodeDisruptions(ctx context.Context, sinceHours int) ([]Node
 	return disruptions, nil
 }
 
-// checkBlockingConstraints checks for PDBs and other constraints blocking node deletion
-func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeDisruptionInfo, node *corev1.Node) {
-	// Get pods on this node
-	pods, err := c.getPodsOnNode(ctx, disruption.NodeName)
-	if err != nil {
-		return
-	}
-
-	// Get all Pod Disruption Budgets
-	pdbs, err := c.clientset.PolicyV1().PodDisruptionBudgets("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		// PDB API might not be available, continue without PDB checks
+// checkBlockingConstraints checks for PDBs and other constraints blocking node
+// deletion. It operates on pre-fetched data (this node's pods and the
+// cluster-wide PDB list) to avoid a per-node/per-pod API fan-out.
+func (c *Client) checkBlockingConstraints(disruption *NodeDisruptionInfo, pods *nodePods, pdbs []policyv1.PodDisruptionBudget) {
+	if pods == nil || len(pods.checks) == 0 {
 		return
 	}
 
@@ -2077,19 +2070,27 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 	// Map to track detailed PDB blocking information: pdbKey -> PDBBlockingInfo
 	pdbDetailsMap := make(map[string]*PDBBlockingInfo)
 
-	// Check each pod against PDBs
-	for _, podInfo := range pods {
-		// Get full pod object
-		pod, err := c.clientset.CoreV1().Pods(podInfo.Namespace).Get(ctx, podInfo.Name, metav1.GetOptions{})
+	// Precompute PDB selectors once (avoid re-parsing per pod).
+	type pdbEntry struct {
+		pdb      policyv1.PodDisruptionBudget
+		selector labels.Selector
+	}
+	var pdbEntries []pdbEntry
+	for _, pdb := range pdbs {
+		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 		if err != nil {
 			continue
 		}
+		pdbEntries = append(pdbEntries, pdbEntry{pdb: pdb, selector: selector})
+	}
 
-		podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	// Check each pod against PDBs
+	for _, pod := range pods.checks {
+		podKey := fmt.Sprintf("%s/%s", pod.namespace, pod.name)
 
 		// Check if pod has eviction issues
 		hasEvictionIssue := false
-		for _, condition := range pod.Status.Conditions {
+		for _, condition := range pod.conditions {
 			if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
 				if strings.Contains(condition.Reason, "Unschedulable") || strings.Contains(condition.Message, "disruption") {
 					hasEvictionIssue = true
@@ -2098,73 +2099,70 @@ func (c *Client) checkBlockingConstraints(ctx context.Context, disruption *NodeD
 		}
 
 		// Check if pod is protected by a PDB
-		for _, pdb := range pdbs.Items {
-			// Check if PDB matches this pod
-			selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
-			if err != nil {
+		for _, entry := range pdbEntries {
+			pdb := entry.pdb
+			if !entry.selector.Matches(labels.Set(pod.labels)) {
 				continue
 			}
 
-			if selector.Matches(labels.Set(pod.Labels)) {
-				// Pod is protected by this PDB
-				pdbKey := fmt.Sprintf("%s/%s", pdb.Namespace, pdb.Name)
+			// Pod is protected by this PDB
+			pdbKey := fmt.Sprintf("%s/%s", pdb.Namespace, pdb.Name)
 
-				// Check if PDB would block eviction
-				// A PDB blocks eviction when DisruptionsAllowed is 0 and we're at or below the desired healthy threshold
-				isBlocking := pdb.Status.DisruptionsAllowed == 0 && pdb.Status.CurrentHealthy <= pdb.Status.DesiredHealthy
+			// Check if PDB would block eviction
+			// A PDB blocks eviction when DisruptionsAllowed is 0 and we're at or below the desired healthy threshold
+			isBlocking := pdb.Status.DisruptionsAllowed == 0 && pdb.Status.CurrentHealthy <= pdb.Status.DesiredHealthy
 
-				if isBlocking {
-					// Initialize PDB details if not already tracked
-					if _, exists := pdbDetailsMap[pdbKey]; !exists {
-						pdbDetails := &PDBBlockingInfo{
-							PDBName:            pdbKey,
-							Namespace:          pdb.Namespace,
-							Name:               pdb.Name,
-							BlockingPods:       []string{},
-							CurrentHealthy:     pdb.Status.CurrentHealthy,
-							DesiredHealthy:     pdb.Status.DesiredHealthy,
-							DisruptionsAllowed: pdb.Status.DisruptionsAllowed,
-						}
-
-						// Extract minAvailable or maxUnavailable from spec
-						// These can be either int values or percentage strings (e.g., "50%")
-						if pdb.Spec.MinAvailable != nil {
-							switch pdb.Spec.MinAvailable.Type {
-							case intstr.Int:
-								pdbDetails.MinAvailable = fmt.Sprintf("%d", pdb.Spec.MinAvailable.IntVal)
-							case intstr.String:
-								pdbDetails.MinAvailable = pdb.Spec.MinAvailable.StrVal
-							}
-						}
-						if pdb.Spec.MaxUnavailable != nil {
-							switch pdb.Spec.MaxUnavailable.Type {
-							case intstr.Int:
-								pdbDetails.MaxUnavailable = fmt.Sprintf("%d", pdb.Spec.MaxUnavailable.IntVal)
-							case intstr.String:
-								pdbDetails.MaxUnavailable = pdb.Spec.MaxUnavailable.StrVal
-							}
-						}
-
-						pdbDetailsMap[pdbKey] = pdbDetails
-						blockingPDBs = append(blockingPDBs, pdbKey)
+			if isBlocking {
+				// Initialize PDB details if not already tracked
+				if _, exists := pdbDetailsMap[pdbKey]; !exists {
+					pdbDetails := &PDBBlockingInfo{
+						PDBName:            pdbKey,
+						Namespace:          pdb.Namespace,
+						Name:               pdb.Name,
+						BlockingPods:       []string{},
+						CurrentHealthy:     pdb.Status.CurrentHealthy,
+						DesiredHealthy:     pdb.Status.DesiredHealthy,
+						DisruptionsAllowed: pdb.Status.DisruptionsAllowed,
 					}
 
-					// Add this pod to the PDB's blocking pods list
-					if !contains(pdbDetailsMap[pdbKey].BlockingPods, podKey) {
-						pdbDetailsMap[pdbKey].BlockingPods = append(pdbDetailsMap[pdbKey].BlockingPods, podKey)
+					// Extract minAvailable or maxUnavailable from spec
+					// These can be either int values or percentage strings (e.g., "50%")
+					if pdb.Spec.MinAvailable != nil {
+						switch pdb.Spec.MinAvailable.Type {
+						case intstr.Int:
+							pdbDetails.MinAvailable = fmt.Sprintf("%d", pdb.Spec.MinAvailable.IntVal)
+						case intstr.String:
+							pdbDetails.MinAvailable = pdb.Spec.MinAvailable.StrVal
+						}
+					}
+					if pdb.Spec.MaxUnavailable != nil {
+						switch pdb.Spec.MaxUnavailable.Type {
+						case intstr.Int:
+							pdbDetails.MaxUnavailable = fmt.Sprintf("%d", pdb.Spec.MaxUnavailable.IntVal)
+						case intstr.String:
+							pdbDetails.MaxUnavailable = pdb.Spec.MaxUnavailable.StrVal
+						}
 					}
 
-					if !contains(blockingPods, podKey) {
-						blockingPods = append(blockingPods, podKey)
-					}
-					hasEvictionIssue = true
+					pdbDetailsMap[pdbKey] = pdbDetails
+					blockingPDBs = append(blockingPDBs, pdbKey)
 				}
+
+				// Add this pod to the PDB's blocking pods list
+				if !contains(pdbDetailsMap[pdbKey].BlockingPods, podKey) {
+					pdbDetailsMap[pdbKey].BlockingPods = append(pdbDetailsMap[pdbKey].BlockingPods, podKey)
+				}
+
+				if !contains(blockingPods, podKey) {
+					blockingPods = append(blockingPods, podKey)
+				}
+				hasEvictionIssue = true
 			}
 		}
 
 		// Check for other blocking conditions
-		if pod.DeletionTimestamp != nil && pod.DeletionGracePeriodSeconds != nil {
-			// Pod is being deleted but taking too long
+		if pod.deleting {
+			// Pod is stuck in termination
 			hasEvictionIssue = true
 		}
 
@@ -2205,161 +2203,241 @@ func contains(slice []string, value string) bool {
 	return false
 }
 
+// podCheckInfo holds the full-pod fields needed for PDB/eviction checks
+// without an extra API GET per pod.
+type podCheckInfo struct {
+	namespace  string
+	name       string
+	labels     map[string]string
+	conditions []corev1.PodCondition
+	deleting   bool // pod has a DeletionTimestamp
+}
+
+func podCheckInfoFromObject(pod *corev1.Pod) *podCheckInfo {
+	return &podCheckInfo{
+		namespace:  pod.Namespace,
+		name:       pod.Name,
+		labels:     pod.Labels,
+		conditions: pod.Status.Conditions,
+		deleting:   pod.DeletionTimestamp != nil,
+	}
+}
+
+// buildPodInfoFromObject converts a full pod object into a PodInfo.
+func buildPodInfoFromObject(pod *corev1.Pod) (*PodInfo, *podCheckInfo) {
+	// Always use the actual pod name - this is critical
+	podName := pod.Name
+	if podName == "" {
+		return nil, nil
+	}
+
+	workloadName := podName // Default to pod name
+	workloadType := ""
+
+	// Extract workload name from owner references
+	for _, owner := range pod.OwnerReferences {
+		if owner.Kind == "ReplicaSet" {
+			// ReplicaSet name format: workloadname-randomstring
+			parts := strings.Split(owner.Name, "-")
+			if len(parts) > 1 {
+				workloadName = strings.Join(parts[:len(parts)-1], "-")
+			} else {
+				workloadName = owner.Name
+			}
+			workloadType = "deployment"
+			break // Found workload, stop looking
+		} else if owner.Kind == "StatefulSet" {
+			// StatefulSet pod name format: workloadname-ordinal
+			parts := strings.Split(podName, "-")
+			if len(parts) > 1 {
+				// Remove the ordinal (last part)
+				workloadName = strings.Join(parts[:len(parts)-1], "-")
+			}
+			workloadType = "statefulset"
+			break // Found workload, stop looking
+		} else if owner.Kind == "DaemonSet" {
+			// For DaemonSet, workload name is same as pod name
+			workloadName = podName
+			workloadType = "daemonset"
+			break // Found workload, stop looking
+		}
+	}
+
+	// If no owner reference, it's a standalone pod
+	if workloadType == "" {
+		workloadType = "pod"
+	}
+
+	// Ensure namespace is set
+	namespace := pod.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	// Extract pod phase and status
+	phase := string(pod.Status.Phase)
+	status := phase
+	if len(pod.Status.ContainerStatuses) > 0 {
+		// Get status from first container
+		containerStatus := pod.Status.ContainerStatuses[0]
+		if containerStatus.State.Waiting != nil {
+			status = containerStatus.State.Waiting.Reason
+		} else if containerStatus.State.Running != nil {
+			status = "Running"
+		} else if containerStatus.State.Terminated != nil {
+			status = containerStatus.State.Terminated.Reason
+		}
+	}
+
+	// Extract resource requests and limits
+	requests := ResourceInfo{}
+	limits := ResourceInfo{}
+	var cpuRequest, memoryRequest, cpuLimit, memoryLimit resource.Quantity
+	var gpuRequested, gpuMemRequestedMiB float64
+
+	for _, container := range pod.Spec.Containers {
+		if container.Resources.Requests != nil {
+			if cpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+				cpuRequest.Add(cpu)
+			}
+			if mem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
+				memoryRequest.Add(mem)
+			}
+			if gpu, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; ok && !gpu.IsZero() {
+				gpuRequested += float64(gpu.Value())
+			}
+			if gpumem, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
+				gpuMemRequestedMiB += float64(gpumem.Value())
+			}
+		}
+		if container.Resources.Limits != nil {
+			if cpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+				cpuLimit.Add(cpu)
+			}
+			if mem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
+				memoryLimit.Add(mem)
+			}
+		}
+	}
+
+	if !cpuRequest.IsZero() {
+		requests.CPU = cpuRequest.String()
+	}
+	if !memoryRequest.IsZero() {
+		requests.Memory = memoryRequest.String()
+	}
+	if !cpuLimit.IsZero() {
+		limits.CPU = cpuLimit.String()
+	}
+	if !memoryLimit.IsZero() {
+		limits.Memory = memoryLimit.String()
+	}
+
+	// Determine QoS class
+	qosClass := "BestEffort"
+	hasRequests := !cpuRequest.IsZero() || !memoryRequest.IsZero()
+	hasLimits := !cpuLimit.IsZero() || !memoryLimit.IsZero()
+
+	if hasRequests && hasLimits {
+		// Check if requests == limits for all resources
+		cpuEqual := cpuRequest.Equal(cpuLimit) || (cpuRequest.IsZero() && cpuLimit.IsZero())
+		memEqual := memoryRequest.Equal(memoryLimit) || (memoryRequest.IsZero() && memoryLimit.IsZero())
+		if cpuEqual && memEqual {
+			qosClass = "Guaranteed"
+		} else {
+			qosClass = "Burstable"
+		}
+	} else if hasRequests {
+		qosClass = "Burstable"
+	}
+
+	podInfo := PodInfo{
+		Name:             podName,
+		Namespace:        namespace,
+		NodeName:         pod.Spec.NodeName,
+		WorkloadName:     workloadName,
+		WorkloadType:     workloadType,
+		Phase:            phase,
+		Status:           status,
+		Requests:         requests,
+		Limits:           limits,
+		QOSClass:         qosClass,
+		GPURequested:     gpuRequested,
+		GPUMemRequestMiB: gpuMemRequestedMiB,
+		GPUDevices:       parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
+	}
+	return &podInfo, podCheckInfoFromObject(pod)
+}
+
+// nodePods holds the display info and the PDB/eviction check data for one
+// node, built in a single pass over the pod list.
+type nodePods struct {
+	infos  []PodInfo
+	checks []*podCheckInfo
+}
+
 // getPodsOnNode gets pods that were running on a specific node
 func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo, error) {
-	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
-	})
+	byNode, err := c.getPodsOnNodes(ctx, []string{nodeName})
 	if err != nil {
 		return nil, err
 	}
+	if np := byNode[nodeName]; np != nil {
+		return np.infos, nil
+	}
+	return nil, nil
+}
 
-	var podInfos []PodInfo
-	for _, pod := range pods.Items {
-		// Always use the actual pod name - this is critical
-		podName := pod.Name
-		if podName == "" {
-			continue // Skip pods without names (shouldn't happen, but be safe)
-		}
-
-		workloadName := podName // Default to pod name
-		workloadType := ""
-
-		// Extract workload name from owner references
-		for _, owner := range pod.OwnerReferences {
-			if owner.Kind == "ReplicaSet" {
-				// ReplicaSet name format: workloadname-randomstring
-				parts := strings.Split(owner.Name, "-")
-				if len(parts) > 1 {
-					workloadName = strings.Join(parts[:len(parts)-1], "-")
-				} else {
-					workloadName = owner.Name
-				}
-				workloadType = "deployment"
-				break // Found workload, stop looking
-			} else if owner.Kind == "StatefulSet" {
-				// StatefulSet pod name format: workloadname-ordinal
-				parts := strings.Split(podName, "-")
-				if len(parts) > 1 {
-					// Remove the ordinal (last part)
-					workloadName = strings.Join(parts[:len(parts)-1], "-")
-				}
-				workloadType = "statefulset"
-				break // Found workload, stop looking
-			} else if owner.Kind == "DaemonSet" {
-				// For DaemonSet, workload name is same as pod name
-				workloadName = podName
-				workloadType = "daemonset"
-				break // Found workload, stop looking
-			}
-		}
-
-		// If no owner reference, it's a standalone pod
-		if workloadType == "" {
-			workloadType = "pod"
-		}
-
-		// Ensure namespace is set
-		namespace := pod.Namespace
-		if namespace == "" {
-			namespace = "default"
-		}
-
-		// Extract pod phase and status
-		phase := string(pod.Status.Phase)
-		status := phase
-		if len(pod.Status.ContainerStatuses) > 0 {
-			// Get status from first container
-			containerStatus := pod.Status.ContainerStatuses[0]
-			if containerStatus.State.Waiting != nil {
-				status = containerStatus.State.Waiting.Reason
-			} else if containerStatus.State.Running != nil {
-				status = "Running"
-			} else if containerStatus.State.Terminated != nil {
-				status = containerStatus.State.Terminated.Reason
-			}
-		}
-
-		// Extract resource requests and limits
-		requests := ResourceInfo{}
-		limits := ResourceInfo{}
-		var cpuRequest, memoryRequest, cpuLimit, memoryLimit resource.Quantity
-		var gpuRequested, gpuMemRequestedMiB float64
-
-		for _, container := range pod.Spec.Containers {
-			if container.Resources.Requests != nil {
-				if cpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
-					cpuRequest.Add(cpu)
-				}
-				if mem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
-					memoryRequest.Add(mem)
-				}
-				if gpu, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]; ok && !gpu.IsZero() {
-					gpuRequested += float64(gpu.Value())
-				}
-				if gpumem, ok := container.Resources.Requests[corev1.ResourceName("nvidia.com/gpumem")]; ok && !gpumem.IsZero() {
-					gpuMemRequestedMiB += float64(gpumem.Value())
-				}
-			}
-			if container.Resources.Limits != nil {
-				if cpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
-					cpuLimit.Add(cpu)
-				}
-				if mem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok {
-					memoryLimit.Add(mem)
-				}
-			}
-		}
-
-		if !cpuRequest.IsZero() {
-			requests.CPU = cpuRequest.String()
-		}
-		if !memoryRequest.IsZero() {
-			requests.Memory = memoryRequest.String()
-		}
-		if !cpuLimit.IsZero() {
-			limits.CPU = cpuLimit.String()
-		}
-		if !memoryLimit.IsZero() {
-			limits.Memory = memoryLimit.String()
-		}
-
-		// Determine QoS class
-		qosClass := "BestEffort"
-		hasRequests := !cpuRequest.IsZero() || !memoryRequest.IsZero()
-		hasLimits := !cpuLimit.IsZero() || !memoryLimit.IsZero()
-
-		if hasRequests && hasLimits {
-			// Check if requests == limits for all resources
-			cpuEqual := cpuRequest.Equal(cpuLimit) || (cpuRequest.IsZero() && cpuLimit.IsZero())
-			memEqual := memoryRequest.Equal(memoryLimit) || (memoryRequest.IsZero() && memoryLimit.IsZero())
-			if cpuEqual && memEqual {
-				qosClass = "Guaranteed"
-			} else {
-				qosClass = "Burstable"
-			}
-		} else if hasRequests {
-			qosClass = "Burstable"
-		}
-
-		podInfos = append(podInfos, PodInfo{
-			Name:             podName,
-			Namespace:        namespace,
-			NodeName:         pod.Spec.NodeName,
-			WorkloadName:     workloadName,
-			WorkloadType:     workloadType,
-			Phase:            phase,
-			Status:           status,
-			Requests:         requests,
-			Limits:           limits,
-			QOSClass:         qosClass,
-			GPURequested:     gpuRequested,
-			GPUMemRequestMiB: gpuMemRequestedMiB,
-			GPUDevices:       parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
-		})
+// getPodsOnNodes fetches pods for the given nodes in a single paginated API
+// call (K8s field selectors only support a single spec.nodeName value, so the
+// cluster-wide list is grouped by node in memory).
+func (c *Client) getPodsOnNodes(ctx context.Context, nodeNames []string) (map[string]*nodePods, error) {
+	targets := make(map[string]bool, len(nodeNames))
+	for _, n := range nodeNames {
+		targets[n] = true
 	}
 
-	return podInfos, nil
+	out := make(map[string]*nodePods)
+	pages := 0
+	var continueToken string
+	for {
+		podList, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			Limit:    5000,
+			Continue: continueToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			nodeName := pod.Spec.NodeName
+			if nodeName == "" || !targets[nodeName] {
+				continue
+			}
+			podInfo, check := buildPodInfoFromObject(pod)
+			if podInfo == nil {
+				continue
+			}
+			np := out[nodeName]
+			if np == nil {
+				np = &nodePods{}
+				out[nodeName] = np
+			}
+			np.infos = append(np.infos, *podInfo)
+			if check != nil {
+				np.checks = append(np.checks, check)
+			}
+		}
+		continueToken = podList.Continue
+		if continueToken == "" {
+			break
+		}
+		pages++
+		if pages > 100 { // safety bound
+			break
+		}
+	}
+	return out, nil
 }
 
 // parseTime parses an RFC3339 timestamp string

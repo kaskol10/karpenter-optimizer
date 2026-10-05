@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Serving model-usage ranking**: the Serving view now shows which models are the most used. A "Model usage (throughput)" ranked bar chart above the pod grid orders servers by `tok/s` with an active-load (running+waiting) indicator, and a sort control reorders the pod cards by Throughput / Active load / Name (online servers always first).
 
 ### Fixed
+- **Disruptions backend N+1**: `GetNodeDisruptions` no longer lists PDBs or `GET`s a pod per disrupted node. Pods for all target nodes are fetched in a single paginated list (grouped by node in memory) and PDBs are listed once cluster-wide; PDB selectors are parsed once. `EventCount` now reflects the real number of FailedDraining events per node (was hardcoded to 1), deleted-node entries group all of a node's events into one entry, and `NodeDisruptionInfo` gains `capacityType` (from the `karpenter.sh/capacity-type` label).
 - **Inflated per-node GPU counts**: GPU count now prefers the `nvidia.com/gpu.count` node label over `Status.Capacity["nvidia.com/gpu"]` (which can be inflated by MIG/time-slicing, e.g. reporting 20 for a 2-GPU node). A debug log is emitted when the two disagree.
 - **Topology per-GPU lanes merged distinct cards**: the per-device GPU lanes and pod device badges are now keyed by the HAMi device **UUID** (short UUID labels, full UUID in tooltips) because the allocated **index** in `hami.io/vgpu-devices-allocated` can be wrong (two pods on different physical cards both reported index 0).
 

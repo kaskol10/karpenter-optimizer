@@ -57,6 +57,8 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 
 *Monitor Karpenter node disruptions and identify blocked deletions with PDB visibility*
 
+Auto-refreshes every 60s (toggleable) with a 1h/6h/24h/7d window selector. Shows how much a stuck node is still costing (`$X/hr`, spot-aware) plus a cluster-level "still billed" summary, and lists recently-terminated nodes from the `disruptions/recent` endpoint. Node/PDB/pod names are click-to-copy.
+
 ## Architecture
 
 ![Architecture Diagram](docs/images/ArchitectureDiagram.png)
