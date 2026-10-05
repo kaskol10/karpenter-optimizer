@@ -4,12 +4,24 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3 } from 'lucide-react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
+import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
   ? window.ENV.REACT_APP_API_URL
   : (process.env.REACT_APP_API_URL || '');
+
+// MetricTip is a metric label with a hover tooltip explaining it in
+// plain English (for end users unfamiliar with LLM serving metrics).
+function MetricTip({ label, tip, children }) {
+  return (
+    <span className="inline-flex items-center gap-1" title={tip}>
+      <span className="cursor-help border-b border-dotted border-muted-foreground/40">{label}</span>
+      {children}
+    </span>
+  );
+}
 
 // ServingCard renders inference health for a single LLM serving pod.
 function ServingCard({ pod }) {
@@ -47,7 +59,9 @@ function ServingCard({ pod }) {
             {kv !== undefined && kv !== null ? (
               <div>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="text-muted-foreground">KV cache</span>
+                  <span className="text-muted-foreground">
+                    <MetricTip label="KV cache" tip="How full the server's working memory (GPU VRAM) is for active requests. Near 100% means new requests must wait and long ones may be preempted." />
+                  </span>
                   <span className="font-mono font-semibold">{kv.toFixed(1)}%</span>
                 </div>
                 <Progress value={kv} className="h-2" />
@@ -59,19 +73,21 @@ function ServingCard({ pod }) {
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <Cpu className="h-3 w-3" /> Running
+                  <MetricTip label="Running" tip="Requests currently being processed by the server."><Cpu className="h-3 w-3" /></MetricTip>
                 </p>
                 <p className="text-lg font-bold">{pod.running ?? 0}</p>
               </div>
               <div className="rounded-md bg-card/60 py-2">
-                <p className="text-xs text-muted-foreground">Waiting</p>
+                <p className="text-xs text-muted-foreground">
+                  <MetricTip label="Waiting" tip="Requests queued, waiting for a free slot. Consistently > 0 means the server is overloaded." />
+                </p>
                 <p className={cn("text-lg font-bold", (pod.waiting ?? 0) > 0 && "text-yellow-600")}>
                   {pod.waiting ?? 0}
                 </p>
               </div>
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <Clock className="h-3 w-3" /> Preempt
+                  <MetricTip label="Preempt" tip="Requests evicted from memory and re-run because the KV cache ran out. Rising preemptions = the server is under memory pressure."><Clock className="h-3 w-3" /></MetricTip>
                 </p>
                 <p className="text-lg font-bold">{pod.preemptions ?? 0}</p>
               </div>
@@ -80,32 +96,40 @@ function ServingCard({ pod }) {
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
               {pod.ttftSeconds !== undefined && pod.ttftSeconds !== null && (
                 <span className="text-muted-foreground">
-                  TTFT <span className="font-mono text-foreground">{pod.ttftSeconds.toFixed(3)}s</span>
-                  {pod.ttftP95Seconds !== undefined && pod.ttftP95Seconds !== null && (
-                    <span className="ml-1">
-                      (p95 {pod.ttftP95Seconds.toFixed(3)}s)
-                    </span>
-                  )}
+                  <MetricTip label="TTFT" tip="Time to first token — how long until the first word appears. What a user feels when a response starts streaming; high TTFT feels slow even if the rest is fast.">
+                    <span className="font-mono text-foreground">{pod.ttftSeconds.toFixed(3)}s</span>
+                    {pod.ttftP95Seconds !== undefined && pod.ttftP95Seconds !== null && (
+                      <span className="ml-1">
+                        (p95 {pod.ttftP95Seconds.toFixed(3)}s)
+                      </span>
+                    )}
+                  </MetricTip>
                 </span>
               )}
               {pod.e2eSeconds !== undefined && pod.e2eSeconds !== null && (
                 <span className="text-muted-foreground">
-                  E2E <span className="font-mono text-foreground">{pod.e2eSeconds.toFixed(2)}s</span>
-                  {pod.e2eP95Seconds !== undefined && pod.e2eP95Seconds !== null && (
-                    <span className="ml-1">
-                      (p95 {pod.e2eP95Seconds.toFixed(2)}s)
-                    </span>
-                  )}
+                  <MetricTip label="E2E" tip="End-to-end latency — total time for the whole response to finish. What a non-streaming caller actually waits for; high with low TTFT means long outputs or a busy server.">
+                    <span className="font-mono text-foreground">{pod.e2eSeconds.toFixed(2)}s</span>
+                    {pod.e2eP95Seconds !== undefined && pod.e2eP95Seconds !== null && (
+                      <span className="ml-1">
+                        (p95 {pod.e2eP95Seconds.toFixed(2)}s)
+                      </span>
+                    )}
+                  </MetricTip>
                 </span>
               )}
               {pod.tokensPerSec !== undefined && pod.tokensPerSec !== null && (
                 <span className="text-muted-foreground">
-                  Throughput <span className="font-mono text-foreground">{pod.tokensPerSec.toFixed(1)} tok/s</span>
+                  <MetricTip label="Throughput" tip="Tokens generated per second across all requests — how much work this server is doing. Drives the 'Model usage' ranking.">
+                    <span className="font-mono text-foreground">{pod.tokensPerSec.toFixed(1)} tok/s</span>
+                  </MetricTip>
                 </span>
               )}
               {pod.requestsPerSec !== undefined && pod.requestsPerSec !== null && (
                 <span className="text-muted-foreground">
-                  Load <span className="font-mono text-foreground">{pod.requestsPerSec.toFixed(2)} req/s</span>
+                  <MetricTip label="Load" tip="Requests per second served. The most direct 'how used is this model' number (throughput conflates request size with usage).">
+                    <span className="font-mono text-foreground">{pod.requestsPerSec.toFixed(2)} req/s</span>
+                  </MetricTip>
                 </span>
               )}
             </div>
@@ -174,6 +198,68 @@ function ModelUsageChart({ pods }) {
         })}
       </div>
     </div>
+  );
+}
+
+// MetricExplainer is a default-collapsed accordion that explains, in plain
+// English, what the serving metrics mean and what to do when they look bad.
+// Targeted at end users who may not know what TTFT or E2E latency are.
+const METRIC_EXPLAINERS = [
+  {
+    term: 'TTFT (Time To First Token)',
+    what: 'How long until the first word of the response appears.',
+    why: 'What a user feels the moment they ask a question. A high TTFT feels slow even if the rest of the answer streams quickly. p95 shows the worst-case 5% of requests.',
+  },
+  {
+    term: 'E2E latency (End-to-End)',
+    what: 'The total time until the entire response is finished.',
+    why: 'What a non-streaming caller actually waits for. High E2E with a low TTFT usually means long answers or a busy server; high with a high TTFT points at queuing.',
+  },
+  {
+    term: 'KV cache %',
+    what: 'How full the GPU working memory is for in-flight requests.',
+    why: 'Near 100% the server can\'t accept much more work: new requests wait and long ones may be preempted. A consistently full cache means the model is at capacity.',
+  },
+  {
+    term: 'Running / Waiting',
+    what: 'Requests currently being processed vs. queued for a slot.',
+    why: 'Waiting > 0 for a sustained period means the server is overloaded — consider adding replicas or raising the max-num-seqs limit.',
+  },
+  {
+    term: 'Preemptions',
+    what: 'Requests kicked out of memory and re-run because the KV cache ran out.',
+    why: 'A counter that should stay near 0. A rising number means the model is under memory pressure and is silently re-doing work, which adds latency.',
+  },
+  {
+    term: 'Throughput & Load',
+    what: 'Tokens per second generated (Throughput) and requests per second served (Load).',
+    why: 'These are the "most used" signals that drive the ranking chart. Load is the cleaner measure of demand; Throughput also reflects how long the answers are.',
+  },
+];
+
+function MetricExplainer() {
+  return (
+    <Accordion type="single" collapsible className="mb-4 rounded-md border bg-card/40 px-3">
+      <AccordionItem value="explain">
+        <AccordionTrigger className="text-sm">
+          <span className="flex items-center gap-1.5">
+            <HelpCircle className="h-3.5 w-3.5" />
+            What do these metrics mean?
+          </span>
+        </AccordionTrigger>
+        <AccordionContent>
+          <div className="space-y-3 text-xs">
+            {METRIC_EXPLAINERS.map((m) => (
+              <div key={m.term}>
+                <p className="font-semibold">{m.term}</p>
+                <p className="text-muted-foreground">{m.what}</p>
+                <p className="text-muted-foreground italic">{m.why}</p>
+              </div>
+            ))}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 }
 
@@ -266,23 +352,28 @@ function ServingHealth() {
           <p className="text-sm text-red-600 flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" /> {error}
           </p>
-        ) : pods === null ? (
-          <div className="flex flex-col items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
-            <p className="text-sm text-muted-foreground">Probing LLM servers...</p>
-          </div>
-        ) : pods.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            No LLM serving pods detected (looking for vLLM/sglang images or commands).
-          </p>
         ) : (
           <div className="space-y-4">
-            <ModelUsageChart pods={pods} />
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sortedPods.map((pod) => (
-                <ServingCard key={`${pod.namespace}/${pod.name}`} pod={pod} />
-              ))}
-            </div>
+            <MetricExplainer />
+            {pods === null ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground">Probing LLM servers...</p>
+              </div>
+            ) : pods.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No LLM serving pods detected (looking for vLLM/sglang images or commands).
+              </p>
+            ) : (
+              <>
+                <ModelUsageChart pods={pods} />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {sortedPods.map((pod) => (
+                    <ServingCard key={`${pod.namespace}/${pod.name}`} pod={pod} />
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </CardContent>

@@ -33,7 +33,7 @@ This document provides context and guidelines for AI coding assistants working o
   - `components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
   - `components/NodePoolCard.js` - Displays individual NodePool recommendations
  - `components/NodeUsageView.js` - Real-time node resource usage visualization
- - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards + "Model usage" throughput ranking & sort
+ - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards + "Model usage" throughput ranking & sort + metric-explanation tooltips and collapsible "What do these metrics mean?" accordion
  - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
 
 ## Key Data Structures
