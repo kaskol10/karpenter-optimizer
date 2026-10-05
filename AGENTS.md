@@ -110,7 +110,7 @@ type NodeInfo struct {
 - `GET /api/v1/nodepools` - List all NodePools with actual node data
 - `GET /api/v1/nodes` - Get all nodes with usage data
 - `GET /api/v1/cluster/summary` - Cluster-wide statistics
-- `GET /api/v1/serving` - Inference health for detected LLM serving pods (vLLM/sglang)
+- `GET /api/v1/serving` - Inference health for detected LLM serving pods (vLLM/sglang); per pod: model, KV cache %, running/waiting, TTFT (mean+p95), E2E latency (`e2eSeconds`/`e2eP95Seconds`, mean+p95), preemptions, `tokensPerSec`, `requestsPerSec` (rates derived from counter diffs, nil on first sample or when the upstream metric is absent)
 - `GET /api/v1/disruptions?hours=N` - Live node disruptions (FailedDraining events + nodes marked for deletion). Each item includes `capacityType`, `eventCount` (real FailedDraining event count), `costPerHour`/`costSource` (spot-aware, from cached pricing), plus a top-level `summary` (`blockedCount`, `activeCount`, `totalCostPerHour`, `totalCostPerDay`, `byNodePool`). Backend fetches pods (one paginated list) and PDBs (one list) per request, not per node/pod.
 - `GET /api/v1/disruptions/recent?hours=N` - Recently deleted (completed) disruption nodes
 

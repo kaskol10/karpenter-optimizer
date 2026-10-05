@@ -88,9 +88,24 @@ function ServingCard({ pod }) {
                   )}
                 </span>
               )}
+              {pod.e2eSeconds !== undefined && pod.e2eSeconds !== null && (
+                <span className="text-muted-foreground">
+                  E2E <span className="font-mono text-foreground">{pod.e2eSeconds.toFixed(2)}s</span>
+                  {pod.e2eP95Seconds !== undefined && pod.e2eP95Seconds !== null && (
+                    <span className="ml-1">
+                      (p95 {pod.e2eP95Seconds.toFixed(2)}s)
+                    </span>
+                  )}
+                </span>
+              )}
               {pod.tokensPerSec !== undefined && pod.tokensPerSec !== null && (
                 <span className="text-muted-foreground">
                   Throughput <span className="font-mono text-foreground">{pod.tokensPerSec.toFixed(1)} tok/s</span>
+                </span>
+              )}
+              {pod.requestsPerSec !== undefined && pod.requestsPerSec !== null && (
+                <span className="text-muted-foreground">
+                  Load <span className="font-mono text-foreground">{pod.requestsPerSec.toFixed(2)} req/s</span>
                 </span>
               )}
             </div>
@@ -147,12 +162,12 @@ function ModelUsageChart({ pods }) {
               </span>
               <span
                 className={cn(
-                  'w-16 text-right text-[10px] shrink-0 font-mono',
+                  'w-20 text-right text-[10px] shrink-0 font-mono',
                   (pod.waiting || 0) > 0 ? 'text-yellow-600 font-semibold' : 'text-muted-foreground',
                 )}
                 title={`running: ${pod.running ?? 0}, waiting: ${pod.waiting ?? 0}`}
               >
-                {queue} req
+                {queue} in-flight
               </span>
             </div>
           );
@@ -191,6 +206,7 @@ function ServingHealth() {
   const sortedPods = useMemo(() => {
     if (!pods) return pods;
     const byThroughput = (p) => (p.tokensPerSec ?? -1);
+    const byRequests = (p) => (p.requestsPerSec ?? -1);
     const byQueue = (p) => (p.running || 0) + (p.waiting || 0);
     return pods.slice().sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1; // online first
@@ -199,6 +215,8 @@ function ServingHealth() {
           return byQueue(b) - byQueue(a);
         case 'name':
           return `${a.namespace}/${a.name}`.localeCompare(`${b.namespace}/${b.name}`);
+        case 'requests':
+          return byRequests(b) - byRequests(a);
         case 'throughput':
         default:
           return byThroughput(b) - byThroughput(a);
@@ -226,6 +244,7 @@ function ServingHealth() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="throughput">Sort: Throughput</SelectItem>
+                <SelectItem value="requests">Sort: Requests/s</SelectItem>
                 <SelectItem value="queue">Sort: Active load</SelectItem>
                 <SelectItem value="name">Sort: Name</SelectItem>
               </SelectContent>

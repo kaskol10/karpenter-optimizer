@@ -1,7 +1,8 @@
 // Package llmhealth probes in-cluster LLM serving pods (vLLM/sglang) for
 // inference health: KV cache usage, running/waiting requests, TTFT,
-// preemptions, and token throughput. It is read-only and graceful — an
-// unreachable pod yields an offline card, never an error.
+// end-to-end latency, preemptions, and token/request throughput. It is
+// read-only and graceful — an unreachable pod yields an offline card,
+// never an error.
 package llmhealth
 
 import (
@@ -33,8 +34,11 @@ type PodHealth struct {
 	Waiting        int      `json:"waiting"`
 	TTFTSeconds    *float64 `json:"ttftSeconds,omitempty"`    // mean time-to-first-token
 	TTFTP95Seconds *float64 `json:"ttftP95Seconds,omitempty"` // p95 from histogram
+	E2ESeconds     *float64 `json:"e2eSeconds,omitempty"`     // mean end-to-end request latency
+	E2EP95Seconds  *float64 `json:"e2eP95Seconds,omitempty"`  // p95 end-to-end request latency
 	Preemptions    int64    `json:"preemptions"`
-	TokensPerSec   *float64 `json:"tokensPerSec,omitempty"` // input+output, from counter diffs
+	TokensPerSec   *float64 `json:"tokensPerSec,omitempty"`   // input+output, from counter diffs
+	RequestsPerSec *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
 }
 
 // Prober holds the last counter samples per pod so rates (tokens/sec) can be
@@ -46,8 +50,11 @@ type Prober struct {
 }
 
 type rateState struct {
-	tokens float64
-	ts     time.Time
+	tokens      float64
+	hasTokens   bool
+	requests    float64
+	hasRequests bool
+	ts          time.Time
 }
 
 // NewProber returns a Prober with a 5s HTTP timeout.
@@ -209,14 +216,24 @@ func (p *Prober) applyVLLMMetrics(h *PodHealth, samples []promSample) {
 			h.TTFTP95Seconds = &p95
 		}
 	}
-	p.updateTokensPerSec(h, samples)
+	// End-to-end request latency (whole request, not just first token).
+	if mean, ok := histogramMean(histograms, "e2e_request_latency_seconds"); ok {
+		h.E2ESeconds = &mean
+		if p95, ok := histogramQuantile(histograms, "e2e_request_latency_seconds", 0.95); ok {
+			h.E2EP95Seconds = &p95
+		}
+	}
+	p.updateRates(h, samples)
 }
 
-func (p *Prober) updateTokensPerSec(h *PodHealth, samples []promSample) {
+// updateRates derives tokens/sec and requests/sec from counter diffs between
+// successive probes.
+func (p *Prober) updateRates(h *PodHealth, samples []promSample) {
 	_, counters, _ := splitSamples(samples)
 	prompt, hasPrompt := counterValue(counters, "prompt_tokens_total")
 	gen, hasGen := counterValue(counters, "generation_tokens_total")
-	if !hasPrompt && !hasGen {
+	requests, hasRequests := counterValue(counters, "num_requests_total")
+	if !hasPrompt && !hasGen && !hasRequests {
 		return
 	}
 	now := time.Now()
@@ -229,14 +246,23 @@ func (p *Prober) updateTokensPerSec(h *PodHealth, samples []promSample) {
 	if ok && now.After(prev.ts) {
 		dt := now.Sub(prev.ts).Seconds()
 		if dt > 0 {
-			rate := (tokens - prev.tokens) / dt
-			if rate < 0 {
-				rate = 0 // counter reset
+			if (hasPrompt || hasGen) && prev.hasTokens {
+				rate := (tokens - prev.tokens) / dt
+				if rate < 0 {
+					rate = 0 // counter reset
+				}
+				h.TokensPerSec = &rate
 			}
-			h.TokensPerSec = &rate
+			if hasRequests && prev.hasRequests {
+				rate := (requests - prev.requests) / dt
+				if rate < 0 {
+					rate = 0 // counter reset
+				}
+				h.RequestsPerSec = &rate
+			}
 		}
 	}
-	p.last[key] = &rateState{tokens: tokens, ts: now}
+	p.last[key] = &rateState{tokens: tokens, hasTokens: hasPrompt || hasGen, requests: requests, hasRequests: hasRequests, ts: now}
 }
 
 // --- Prometheus text parsing ---
