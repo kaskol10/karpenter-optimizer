@@ -35,11 +35,38 @@ const SLOW_PEER_RATIO = 2; // my p95 E2E > 2x the fastest peer
 const SLOW_PEER_FLOOR_SEC = 1; // ...and actually takes more than 1s
 const SLOW_TTFT_FLOOR_SEC = 3; // no-peer fallback: first token > 3s
 
-// getServingStatus derives { label, tone, reasons } for one serving pod.
-// `peers` is the full pod list; only online pods are comparable.
+// getServingStatus derives { label, tone, reasons, meaning, fixes } for one
+// serving pod. `peers` is the full pod list; only online pods are comparable.
+// `meaning` is a plain-English "what does this state mean", and `fixes` is a
+// short list of concrete things to try.
+const STATUS_FIXES = {
+  pressure: [
+    'Add GPU capacity (more/bigger nodes for this model)',
+    'Give vLLM more KV cache: raise --gpu-memory-utilization, or lower --max-num-seqs / --max-model-len',
+    'Reduce the load this server takes (scale out replicas or cap queue depth)',
+  ],
+  busy: [
+    'Add more replicas of this model',
+    'Raise concurrency (--max-num-seqs) if GPU memory has headroom',
+    'Check for unusually long inputs/outputs or bursty traffic',
+  ],
+  slow: [
+    'Compare placement: this pod may sit on a slower or contended node (check GPU sharing / co-located pods)',
+    'Check for long inputs/outputs on this server vs its peers',
+    'If one server is a clear outlier, delete the pod to force a reschedule — a cheap first step',
+  ],
+  ok: [],
+};
+
 function getServingStatus(pod, peers) {
   if (!pod.online) {
-    return { label: 'offline', tone: 'red', reasons: [pod.error || 'unreachable'] };
+    return {
+      label: 'offline',
+      tone: 'red',
+      reasons: [pod.error || 'unreachable'],
+      meaning: 'The server did not answer its /v1/models or /metrics endpoint.',
+      fixes: ['Check the pod is running and the serving port is exposed', 'Verify the app can reach pod IPs (in-cluster network access)'],
+    };
   }
 
   const reasons = [];
@@ -91,19 +118,44 @@ function getServingStatus(pod, peers) {
   }
 
   if (pressure) {
-    return { label: 'Under pressure', tone: 'red', reasons, limited };
+    return {
+      label: 'Under pressure',
+      tone: 'red',
+      reasons,
+      limited,
+      meaning: 'The GPU memory for in-flight requests is nearly full: requests are being re-run (preemptions) and new work will queue or be interrupted.',
+      fixes: STATUS_FIXES.pressure,
+    };
   }
   if (busy) {
-    return { label: 'Busy', tone: 'amber', reasons, limited };
+    return {
+      label: 'Busy',
+      tone: 'amber',
+      reasons,
+      limited,
+      meaning: 'More requests are arriving than this server can run right now — they are waiting in the queue, so users feel extra latency.',
+      fixes: STATUS_FIXES.busy,
+    };
   }
   if (reasons.length > 0) {
-    return { label: 'Slow', tone: 'orange', reasons, limited };
+    return {
+      label: 'Slow',
+      tone: 'orange',
+      reasons,
+      limited,
+      meaning: 'This server is responding much more slowly than the others serving the same model (or slower than expected when it runs alone).',
+      fixes: STATUS_FIXES.slow,
+    };
   }
   return {
     label: 'OK',
     tone: 'green',
     reasons: limited ? ['limited data (first sample)'] : [],
     limited,
+    meaning: limited
+      ? 'No problems detected yet, but only one sample has been collected — rates and latency compare against previous probes.'
+      : 'No problems detected from the current metrics: no queue, no preemptions, headroom in GPU memory, and latency in line with its peers.',
+    fixes: STATUS_FIXES.ok,
   };
 }
 
@@ -118,8 +170,20 @@ const STATUS_TONE_CLASSES = {
 function ServingCard({ pod, peers }) {
   const kv = pod.kvCachePercent;
   const status = useMemo(() => getServingStatus(pod, peers || [pod]), [pod, peers]);
-  const statusTitle =
-    status.reasons.length > 0 ? `Why: ${status.reasons.join(' · ')}` : 'No issues detected from the current metrics.';
+  // Multi-line tooltip: what triggered it, what the state means, and what to do.
+  const statusTitle = useMemo(() => {
+    const lines = [`${status.label} — ${status.meaning}`];
+    if (status.reasons.length > 0) {
+      lines.push(`Because: ${status.reasons.join(' · ')}`);
+    }
+    if (status.fixes.length > 0) {
+      lines.push('To fix:');
+      status.fixes.forEach((f, i) => lines.push(`  ${i + 1}. ${f}`));
+    } else {
+      lines.push('Nothing to do — keep an eye on it if load grows.');
+    }
+    return lines.join('\n');
+  }, [status]);
 
   return (
     <Card className={cn(!pod.online && 'border-dashed border-red-300')}>
@@ -310,8 +374,13 @@ function ModelUsageChart({ pods }) {
 const METRIC_EXPLAINERS = [
   {
     term: 'Status badge (OK / Busy / Slow / Under pressure)',
-    what: 'A one-glance verdict computed from all the metrics on the card.',
-    why: 'Under pressure = preemptions or KV cache ≥ 85% (memory crunch); Busy = requests queued; Slow = p95 latency more than 2x the fastest server running the same model; OK = nothing detected. Hover the badge for the specific reasons.',
+    what: 'A one-glance verdict computed from all the metrics on the card. Hover the badge for the specific reasons and what to do about them.',
+    why: [
+      'Under pressure (red) — the GPU memory for active requests is nearly full; work is being interrupted and re-run. Fix: add GPU capacity, give vLLM more KV cache (raise --gpu-memory-utilization or lower --max-num-seqs / --max-model-len), or take load off this server.',
+      'Busy (amber) — more requests are arriving than this server can handle, so they queue and users wait. Fix: add replicas of the model, raise concurrency (--max-num-seqs) if memory allows, or find the bursty/long-context traffic.',
+      'Slow (orange) — this server is far slower than the others running the same model. Fix: check placement (slow or contended node, GPU sharing), compare request mix, or reschedule the pod.',
+      'OK (green) — nothing detected: no queue, no preemptions, memory headroom, latency in line with peers.',
+    ].join(' '),
   },
   {
     term: 'TTFT (Time To First Token)',
