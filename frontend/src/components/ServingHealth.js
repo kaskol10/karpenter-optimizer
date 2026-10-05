@@ -23,9 +23,103 @@ function MetricTip({ label, tip, children }) {
   );
 }
 
+// --- Per-server health verdict ---
+//
+// Overload signals (waiting, KV cache %, preemptions) are objective and
+// workload-independent, so they use absolute thresholds. "Slow" is
+// workload-dependent (a 2s first token is fine for batch, bad for chat), so
+// it's judged *relative to the other servers in the fleet*, with a loose
+// TTFT fallback when no peer comparison is possible.
+const KV_PRESSURE_PCT = 85;
+const SLOW_PEER_RATIO = 2; // my p95 E2E > 2x the fastest peer
+const SLOW_PEER_FLOOR_SEC = 1; // ...and actually takes more than 1s
+const SLOW_TTFT_FLOOR_SEC = 3; // no-peer fallback: first token > 3s
+
+// getServingStatus derives { label, tone, reasons } for one serving pod.
+// `peers` is the full pod list; only online pods are comparable.
+function getServingStatus(pod, peers) {
+  if (!pod.online) {
+    return { label: 'offline', tone: 'red', reasons: [pod.error || 'unreachable'] };
+  }
+
+  const reasons = [];
+  let limited = false;
+  let pressure = false;
+  let busy = false;
+
+  // Objective pressure signals
+  if (pod.preemptions > 0) {
+    pressure = true;
+    reasons.push(`${pod.preemptions} preemption(s) — requests re-run due to KV cache pressure`);
+  }
+  if (pod.kvCachePercent != null) {
+    if (pod.kvCachePercent >= KV_PRESSURE_PCT) {
+      pressure = true;
+      reasons.push(`KV cache ${pod.kvCachePercent.toFixed(0)}% — near memory capacity`);
+    }
+  }
+
+  // Objective overload signal
+  if (pod.waiting > 0) {
+    busy = true;
+    reasons.push(`${pod.waiting} request(s) queued`);
+  }
+
+  // Peer-relative "slow" signal (p95 E2E preferred, mean fallback). Peers are
+  // the *other* servers serving the same model — comparing across models is
+  // apples-to-oranges (a 7B and a 70B have very different latency profiles).
+  const myE2E = pod.e2eP95Seconds ?? pod.e2eSeconds;
+  if (myE2E != null && pod.model) {
+    const me = `${pod.namespace}/${pod.name}`;
+    const peerE2E = peers
+      .filter((p) => p.online && p.model === pod.model && `${p.namespace}/${p.name}` !== me)
+      .map((p) => p.e2eP95Seconds ?? p.e2eSeconds)
+      .filter((v) => v != null);
+    if (peerE2E.length > 0) {
+      const best = Math.min(...peerE2E);
+      if (myE2E > SLOW_PEER_RATIO * best && myE2E > SLOW_PEER_FLOOR_SEC) {
+        reasons.push(
+          `p95 E2E ${myE2E.toFixed(1)}s is >${SLOW_PEER_RATIO}x the fastest server (${best.toFixed(1)}s)`,
+        );
+      }
+    } else if (pod.ttftP95Seconds != null && pod.ttftP95Seconds > SLOW_TTFT_FLOOR_SEC) {
+      // No peers to compare against: loose absolute fallback on first token.
+      reasons.push(`first token takes ${pod.ttftP95Seconds.toFixed(1)}s (p95) — high for interactive use`);
+    }
+  } else if (pod.ttftSeconds == null) {
+    limited = true; // no latency data at all yet
+  }
+
+  if (pressure) {
+    return { label: 'Under pressure', tone: 'red', reasons, limited };
+  }
+  if (busy) {
+    return { label: 'Busy', tone: 'amber', reasons, limited };
+  }
+  if (reasons.length > 0) {
+    return { label: 'Slow', tone: 'orange', reasons, limited };
+  }
+  return {
+    label: 'OK',
+    tone: 'green',
+    reasons: limited ? ['limited data (first sample)'] : [],
+    limited,
+  };
+}
+
+const STATUS_TONE_CLASSES = {
+  green: 'bg-green-100 text-green-800 border-green-300',
+  amber: 'bg-amber-100 text-amber-800 border-amber-300',
+  orange: 'bg-orange-100 text-orange-800 border-orange-300',
+  red: 'bg-red-100 text-red-800 border-red-300',
+};
+
 // ServingCard renders inference health for a single LLM serving pod.
-function ServingCard({ pod }) {
+function ServingCard({ pod, peers }) {
   const kv = pod.kvCachePercent;
+  const status = useMemo(() => getServingStatus(pod, peers || [pod]), [pod, peers]);
+  const statusTitle =
+    status.reasons.length > 0 ? `Why: ${status.reasons.join(' · ')}` : 'No issues detected from the current metrics.';
 
   return (
     <Card className={cn(!pod.online && 'border-dashed border-red-300')}>
@@ -44,6 +138,15 @@ function ServingCard({ pod }) {
             <Badge variant={pod.online ? 'default' : 'destructive'} className="text-[10px]">
               {pod.online ? 'online' : 'offline'}
             </Badge>
+            {pod.online && (
+              <Badge
+                variant="outline"
+                className={cn('text-[10px] font-semibold', STATUS_TONE_CLASSES[status.tone])}
+                title={statusTitle}
+              >
+                {status.label}
+              </Badge>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -205,6 +308,11 @@ function ModelUsageChart({ pods }) {
 // English, what the serving metrics mean and what to do when they look bad.
 // Targeted at end users who may not know what TTFT or E2E latency are.
 const METRIC_EXPLAINERS = [
+  {
+    term: 'Status badge (OK / Busy / Slow / Under pressure)',
+    what: 'A one-glance verdict computed from all the metrics on the card.',
+    why: 'Under pressure = preemptions or KV cache ≥ 85% (memory crunch); Busy = requests queued; Slow = p95 latency more than 2x the fastest server running the same model; OK = nothing detected. Hover the badge for the specific reasons.',
+  },
   {
     term: 'TTFT (Time To First Token)',
     what: 'How long until the first word of the response appears.',
@@ -369,7 +477,7 @@ function ServingHealth() {
                 <ModelUsageChart pods={pods} />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {sortedPods.map((pod) => (
-                    <ServingCard key={`${pod.namespace}/${pod.name}`} pod={pod} />
+                    <ServingCard key={`${pod.namespace}/${pod.name}`} pod={pod} peers={pods} />
                   ))}
                 </div>
               </>
