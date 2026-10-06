@@ -252,6 +252,90 @@ Get node disruption information (on-demand nodes only).
 ]
 ```
 
+### List LLM Serving Pods
+
+```http
+GET /api/v1/serving
+```
+
+Discovers in-cluster LLM serving pods (vLLM/sglang, matched by image or command) and probes each for inference health. Each pod is enriched with its node placement. Results are cached 15s server-side to bound probe load.
+
+**Response**:
+```json
+{
+  "pods": [
+    {
+      "namespace": "prod",
+      "name": "vllm-0",
+      "backend": "vllm",
+      "online": true,
+      "model": "meta-llama/Llama-3-8B",
+      "kvCachePercent": 42.5,
+      "running": 3,
+      "waiting": 0,
+      "preemptions": 0,
+      "ttftSeconds": 0.21,
+      "ttftP95Seconds": 0.55,
+      "e2eSeconds": 1.4,
+      "e2eP95Seconds": 2.1,
+      "tokensPerSec": 120.0,
+      "requestsPerSec": 2.4,
+      "node": "ip-10-0-1-2.ec2.internal",
+      "nodeInstanceType": "g5.2xlarge",
+      "gpuModel": "NVIDIA-A10G",
+      "gpuCapacity": 1
+    }
+  ]
+}
+```
+
+Placement fields (`node`, `nodeInstanceType`, `gpuModel`, `gpuCapacity`) are filled from node labels and may be empty when the node lacks them.
+
+### Get Serving History
+
+```http
+GET /api/v1/serving/history?window=6h
+```
+
+Returns per-pod time-series of inference health sampled every 60s (in-memory, default 6h retention, capped at 24h), plus the last time each pod was observed unhealthy.
+
+**Query parameters**:
+- `window` (optional): trend window — `1h`, `6h` (default), `24h`, or a plain seconds count. Capped at `24h`.
+
+**Response**:
+```json
+{
+  "window": "6h",
+  "pods": [
+    {
+      "namespace": "prod",
+      "name": "vllm-0",
+      "window": "6h",
+      "points": [
+        {
+          "t": "2026-10-06T14:00:00Z",
+          "unix": 1791280800,
+          "online": true,
+          "kvCachePercent": 42.5,
+          "running": 3,
+          "waiting": 0,
+          "preemptions": 0,
+          "ttftSeconds": 0.21,
+          "ttftP95Seconds": 0.55,
+          "e2eSeconds": 1.4,
+          "e2eP95Seconds": 2.1,
+          "tokensPerSec": 120.0,
+          "requestsPerSec": 2.4
+        }
+      ],
+      "lastIssue": 1791280800
+    }
+  ]
+}
+```
+
+`lastIssue` is the Unix timestamp of the most recent sample in the window where the pod was offline, had `waiting > 0`, `preemptions > 0`, or KV cache ≥ 85%; `0` means no issues in the window.
+
 ### Analyze Workloads
 
 ```http
