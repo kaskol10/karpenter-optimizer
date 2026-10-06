@@ -39,6 +39,12 @@ type PodHealth struct {
 	Preemptions    int64    `json:"preemptions"`
 	TokensPerSec   *float64 `json:"tokensPerSec,omitempty"`   // input+output, from counter diffs
 	RequestsPerSec *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
+
+	// Placement (filled server-side after probing, not from the pod's own metrics).
+	Node             string `json:"node,omitempty"`
+	NodeInstanceType string `json:"nodeInstanceType,omitempty"`
+	GPUModel         string `json:"gpuModel,omitempty"`
+	GPUCapacity      int    `json:"gpuCapacity,omitempty"`
 }
 
 // Prober holds the last counter samples per pod so rates (tokens/sec) can be

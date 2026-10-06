@@ -35,18 +35,51 @@ func (s *Server) getServing(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
-	pods, err := s.k8sClient.FindLLMPods(ctx)
+	health, err := s.probeServingPods(ctx)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	storeServingCache(health)
+	c.JSON(200, gin.H{"pods": health})
+}
+
+// probeServingPods discovers LLM serving pods, probes each one, and enriches
+// the result with node placement (instance type, GPU model/count). Shared by
+// the on-demand endpoint and the serving history sampler.
+func (s *Server) probeServingPods(ctx context.Context) ([]llmhealth.PodHealth, error) {
+	pods, err := s.k8sClient.FindLLMPods(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var health []llmhealth.PodHealth
 	for _, p := range pods {
-		health = append(health, servingProber.Probe(ctx, p.Namespace, p.Name, p.IP, p.Port))
+		h := servingProber.Probe(ctx, p.Namespace, p.Name, p.IP, p.Port)
+		h.Node = p.NodeName
+		health = append(health, h)
 	}
-	storeServingCache(health)
-	c.JSON(200, gin.H{"pods": health})
+
+	if len(health) > 0 {
+		nodeNames := make([]string, 0, len(health))
+		seen := make(map[string]bool, len(health))
+		for _, h := range health {
+			if h.Node != "" && !seen[h.Node] {
+				seen[h.Node] = true
+				nodeNames = append(nodeNames, h.Node)
+			}
+		}
+		if placements, perr := s.k8sClient.GetNodePlacement(ctx, nodeNames); perr == nil {
+			for i := range health {
+				if p, ok := placements[health[i].Node]; ok {
+					health[i].NodeInstanceType = p.InstanceType
+					health[i].GPUModel = p.GPUModel
+					health[i].GPUCapacity = p.GPUCapacity
+				}
+			}
+		}
+	}
+	return health, nil
 }
 
 func servingCache() ([]llmhealth.PodHealth, bool) {

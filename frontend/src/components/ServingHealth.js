@@ -166,6 +166,39 @@ const STATUS_TONE_CLASSES = {
   red: 'bg-red-100 text-red-800 border-red-300',
 };
 
+// CopyableNode renders a node name; clicking copies it (for pasting into the CLI).
+function CopyableNode({ name }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const done = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(name).then(done).catch(done);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = name;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`${name} — click to copy`}
+      className="inline-flex items-center gap-1 font-mono text-[11px] max-w-full cursor-pointer truncate text-left hover:underline"
+    >
+      <Server className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate">{copied ? 'Copied' : name}</span>
+    </button>
+  );
+}
+
 // ServingCard renders inference health for a single LLM serving pod.
 function ServingCard({ pod, peers }) {
   const kv = pod.kvCachePercent;
@@ -196,6 +229,21 @@ function ServingCard({ pod, peers }) {
             <CardDescription className="truncate">
               {pod.model || 'unknown model'}
             </CardDescription>
+            {pod.node && (
+              <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                <CopyableNode name={pod.node} />
+                {pod.nodeInstanceType && (
+                  <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
+                    {pod.nodeInstanceType}
+                  </Badge>
+                )}
+                {pod.gpuModel && (
+                  <Badge variant="outline" className="text-[10px] border-purple-500 text-purple-700 shrink-0">
+                    {pod.gpuModel}{pod.gpuCapacity ? ` x${pod.gpuCapacity}` : ''}
+                  </Badge>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <Badge variant="outline" className="text-[10px]">{pod.backend}</Badge>
