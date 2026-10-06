@@ -2481,6 +2481,7 @@ type LLMPodInfo struct {
 	IP        string `json:"ip"`
 	Port      int32  `json:"port"`
 	Image     string `json:"image"`
+	NodeName  string `json:"nodeName"`
 }
 
 // llmImageMarkers are substrings matched against a container image or command
@@ -2515,6 +2516,7 @@ func (c *Client) FindLLMPods(ctx context.Context) ([]LLMPodInfo, error) {
 			IP:        pod.Status.PodIP,
 			Port:      port,
 			Image:     image,
+			NodeName:  pod.Spec.NodeName,
 		})
 	}
 	return out, nil
@@ -2555,6 +2557,59 @@ func portOrDefault(port int32) int32 {
 		return 8000
 	}
 	return port
+}
+
+// NodePlacement summarizes the hardware a workload runs on: node instance
+// type and GPU model/count (same label precedence as the node views).
+type NodePlacement struct {
+	NodeName     string `json:"nodeName"`
+	InstanceType string `json:"instanceType,omitempty"`
+	GPUModel     string `json:"gpuModel,omitempty"`
+	GPUCapacity  int    `json:"gpuCapacity,omitempty"`
+}
+
+// GetNodePlacement returns instance type and GPU info for the requested nodes.
+// Nodes that no longer exist are simply absent from the result.
+func (c *Client) GetNodePlacement(ctx context.Context, nodeNames []string) (map[string]NodePlacement, error) {
+	want := make(map[string]bool, len(nodeNames))
+	for _, n := range nodeNames {
+		if n != "" {
+			want[n] = true
+		}
+	}
+	if len(want) == 0 {
+		return map[string]NodePlacement{}, nil
+	}
+
+	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes for placement: %w", err)
+	}
+
+	out := make(map[string]NodePlacement, len(want))
+	for _, node := range nodes.Items {
+		if !want[node.Name] {
+			continue
+		}
+		placement := NodePlacement{
+			NodeName:     node.Name,
+			InstanceType: node.Labels["node.kubernetes.io/instance-type"],
+			GPUModel:     node.Labels["nvidia.com/gpu.product"],
+		}
+		// nvidia.com/gpu.count label wins (MIG/time-slicing inflates Status.Capacity).
+		if v, ok := node.Labels["nvidia.com/gpu.count"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				placement.GPUCapacity = n
+			}
+		}
+		if placement.GPUCapacity == 0 {
+			if gpu, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpu")]; ok {
+				placement.GPUCapacity = int(gpu.Value())
+			}
+		}
+		out[node.Name] = placement
+	}
+	return out, nil
 }
 
 // KarpenterPodInfo represents information about a Karpenter pod
