@@ -5,8 +5,9 @@ import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle } from 'lucide-react';
+import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle, History } from 'lucide-react';
 import { cn } from '../lib/utils';
+import Sparkline from './Sparkline';
 
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
   ? window.ENV.REACT_APP_API_URL
@@ -166,6 +167,46 @@ const STATUS_TONE_CLASSES = {
   red: 'bg-red-100 text-red-800 border-red-300',
 };
 
+// --- Historical trends (sparklines + "last issue seen") ---
+//
+// The backend samples each serving pod's health on the cluster history
+// interval (default 60s) into an in-memory ring buffer. /api/v1/serving/history
+// returns per-pod series for the requested window plus the last time the pod
+// was observed "unhealthy" (offline, queued requests, preemptions, or KV
+// cache pressure). We pick the metrics that diagnose the failure modes the
+// status badge cares about.
+const TREND_DEFS = [
+  { label: 'TTFT p95', key: 'ttft', get: (p) => p.ttftP95Seconds ?? p.ttftSeconds, stroke: '#f97316', fmt: (v) => `${v.toFixed(2)}s` },
+  { label: 'E2E p95', key: 'e2e', get: (p) => p.e2eP95Seconds ?? p.e2eSeconds, stroke: '#3b82f6', fmt: (v) => `${v.toFixed(2)}s` },
+  { label: 'KV cache %', key: 'kv', get: (p) => p.kvCachePercent, stroke: '#8b5cf6', fmt: (v) => `${v.toFixed(0)}%` },
+  { label: 'Throughput', key: 'tok', get: (p) => p.tokensPerSec, stroke: '#22c55e', fmt: (v) => `${v.toFixed(1)} tok/s` },
+  { label: 'Requests/s', key: 'req', get: (p) => p.requestsPerSec, stroke: '#eab308', fmt: (v) => `${v.toFixed(2)} req/s` },
+];
+
+// trendSeries maps raw history points to [{t, value}] for each trend that has
+// at least one non-null value. Returns [] when there is nothing to chart.
+function trendSeries(points) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  return TREND_DEFS.map((def) => {
+    const series = points
+      .filter((p) => def.get(p) !== null && def.get(p) !== undefined)
+      .map((p) => ({ t: p.t, value: def.get(p) }));
+    return series.length ? { ...def, points: series } : null;
+  }).filter(Boolean);
+}
+
+// formatRelativeTime renders a Unix-seconds timestamp as "5m ago" / "3h ago".
+function formatRelativeTime(unix) {
+  if (!unix) return '';
+  const secs = Math.max(0, Math.floor(Date.now() / 1000 - unix));
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 // CopyableNode renders a node name; clicking copies it (for pasting into the CLI).
 function CopyableNode({ name }) {
   const [copied, setCopied] = useState(false);
@@ -199,8 +240,53 @@ function CopyableNode({ name }) {
   );
 }
 
+// ServingTrends renders per-card sparklines for the trend metrics that
+// diagnose the failure modes the status badge cares about (latency, memory
+// pressure, demand), plus a "last issue seen" line. Hidden when there are no
+// historical samples yet. `history` is the per-pod entry from
+// /api/v1/serving/history: { points: Point[], lastIssue: unix }.
+function ServingTrends({ history }) {
+  const series = useMemo(() => trendSeries(history?.points), [history?.points]);
+  const lastIssue = history?.lastIssue;
+  if (series.length === 0 && !lastIssue) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md border bg-card/40 p-2">
+      <p className="text-[11px] font-semibold flex items-center gap-1.5 mb-1.5 text-muted-foreground">
+        <History className="h-3 w-3" />
+        Trends
+      </p>
+      {series.length > 0 && (
+        <div className="space-y-2">
+          {series.map((s) => (
+            <div key={s.key}>
+              <div className="flex justify-between text-[10px] mb-0.5">
+                <span className="text-muted-foreground">{s.label}</span>
+                <span className="font-mono font-semibold">{s.fmt(s.points[s.points.length - 1].value)}</span>
+              </div>
+              <Sparkline points={s.points} stroke={s.stroke} height={28} formatValue={s.fmt} />
+            </div>
+          ))}
+        </div>
+      )}
+      {lastIssue ? (
+        <p className="mt-1.5 text-[10px] text-amber-700 flex items-center gap-1" title="Last time this pod was offline, had queued requests, preemptions, or KV cache pressure.">
+          <AlertTriangle className="h-3 w-3" />
+          Last issue seen {formatRelativeTime(lastIssue)}
+        </p>
+      ) : (
+        <p className="mt-1.5 text-[10px] text-green-700 flex items-center gap-1" title="No offline/queue/preemption/KV-pressure events in the window.">
+          No issues in the window
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ServingCard renders inference health for a single LLM serving pod.
-function ServingCard({ pod, peers }) {
+function ServingCard({ pod, peers, history }) {
   const kv = pod.kvCachePercent;
   const status = useMemo(() => getServingStatus(pod, peers || [pod]), [pod, peers]);
   // Multi-line tooltip: what triggered it, what the state means, and what to do.
@@ -348,6 +434,8 @@ function ServingCard({ pod, peers }) {
                 </span>
               )}
             </div>
+
+            <ServingTrends history={history} />
           </div>
         )}
       </CardContent>
@@ -460,6 +548,11 @@ const METRIC_EXPLAINERS = [
     what: 'Tokens per second generated (Throughput) and requests per second served (Load).',
     why: 'These are the "most used" signals that drive the ranking chart. Load is the cleaner measure of demand; Throughput also reflects how long the answers are.',
   },
+  {
+    term: 'Trends (sparklines + last issue seen)',
+    what: 'Each card shows a small history of TTFT p95, E2E p95, KV cache %, throughput and requests/s over a selectable window (1h/6h/24h), plus when the last issue was detected.',
+    why: 'Current metrics are a single snapshot. Trends reveal how a model behaved at a specific time (e.g. was it slow or under pressure an hour ago?) and let you correlate an incident with a change. "Last issue seen" marks the last moment the pod was offline, had queued requests, preemptions, or KV cache near capacity. Data is sampled every 60s and kept in memory only — it resets when the app restarts, and starts filling from the first sample after launch.',
+  },
 ];
 
 function MetricExplainer() {
@@ -494,6 +587,8 @@ function ServingHealth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sortBy, setSortBy] = useState('throughput');
+  const [trendWindow, setTrendWindow] = useState('6h');
+  const [servingHistory, setServingHistory] = useState({}); // key: ns/name -> {points, lastIssue}
 
   const fetchServing = useCallback(async () => {
     setLoading(true);
@@ -508,11 +603,35 @@ function ServingHealth() {
     }
   }, []);
 
+  const fetchServingHistory = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/v1/serving/history`, {
+        params: { window: trendWindow },
+      });
+      const byKey = {};
+      (response.data.pods || []).forEach((p) => {
+        byKey[`${p.namespace}/${p.name}`] = { points: p.points || [], lastIssue: p.lastIssue || 0 };
+      });
+      setServingHistory(byKey);
+    } catch (err) {
+      // Non-fatal: trends are an enhancement, never block the health view.
+      setServingHistory({});
+    }
+  }, [trendWindow]);
+
   useEffect(() => {
     fetchServing();
     const interval = setInterval(fetchServing, 30000);
     return () => clearInterval(interval);
   }, [fetchServing]);
+
+  // Trend history is sampled server-side on the 60s cluster interval, so a
+  // slower refresh (60s) keeps sparklines current without hammering the API.
+  useEffect(() => {
+    fetchServingHistory();
+    const interval = setInterval(fetchServingHistory, 60000);
+    return () => clearInterval(interval);
+  }, [fetchServingHistory]);
 
   const sortedPods = useMemo(() => {
     if (!pods) return pods;
@@ -549,6 +668,16 @@ function ServingHealth() {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <Select value={trendWindow} onValueChange={setTrendWindow}>
+              <SelectTrigger className="w-[130px]" title="Trend history window">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1h">Trends: 1h</SelectItem>
+                <SelectItem value="6h">Trends: 6h</SelectItem>
+                <SelectItem value="24h">Trends: 24h</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={sortBy} onValueChange={setSortBy}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue />
@@ -594,7 +723,12 @@ function ServingHealth() {
                 <ModelUsageChart pods={pods} />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {sortedPods.map((pod) => (
-                    <ServingCard key={`${pod.namespace}/${pod.name}`} pod={pod} peers={pods} />
+                    <ServingCard
+                      key={`${pod.namespace}/${pod.name}`}
+                      pod={pod}
+                      peers={pods}
+                      history={servingHistory[`${pod.namespace}/${pod.name}`]}
+                    />
                   ))}
                 </div>
               </>

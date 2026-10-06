@@ -47,6 +47,7 @@ import (
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/power"
 	"github.com/karpenter-optimizer/internal/recommender"
+	"github.com/karpenter-optimizer/internal/servinghistory"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
@@ -62,12 +63,13 @@ func debugLog(debug bool, format string, args ...interface{}) {
 }
 
 type Server struct {
-	router            *gin.Engine
-	config            *config.Config
-	recommender       *recommender.Recommender
-	k8sClient         *kubernetes.Client
-	karpenterDetected bool
-	historyStore      *history.Store
+	router              *gin.Engine
+	config              *config.Config
+	recommender         *recommender.Recommender
+	k8sClient           *kubernetes.Client
+	karpenterDetected   bool
+	historyStore        *history.Store
+	servingHistoryStore *servinghistory.Store
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -132,19 +134,22 @@ func NewServer(cfg *config.Config) *Server {
 	}
 
 	server := &Server{
-		router:            r,
-		config:            cfg,
-		recommender:       rec,
-		k8sClient:         k8sClient,
-		karpenterDetected: karpenterDetected,
-		historyStore:      history.New(historyWindowFromEnv()),
+		router:              r,
+		config:              cfg,
+		recommender:         rec,
+		k8sClient:           k8sClient,
+		karpenterDetected:   karpenterDetected,
+		historyStore:        history.New(historyWindowFromEnv()),
+		servingHistoryStore: servinghistory.New(historyWindowFromEnv()),
 	}
 
 	server.setupRoutes()
 
-	// Sample cluster usage into the history store for trend sparklines.
+	// Sample cluster usage and serving pod health into the history stores for
+	// trend sparklines. Both samplers run on the same interval.
 	if k8sClient != nil {
 		server.startHistorySampler(context.Background())
+		server.startServingHistorySampler(context.Background())
 	}
 
 	return server
@@ -239,6 +244,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/cluster/summary", s.getClusterSummary)
 		api.GET("/history", s.getHistory)
 		api.GET("/serving", s.getServing)
+		api.GET("/serving/history", s.getServingHistory)
 		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
 
