@@ -48,12 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Disruptions backend N+1**: `GetNodeDisruptions` no longer lists PDBs or `GET`s a pod per disrupted node. Pods for all target nodes are fetched in a single paginated list (grouped by node in memory) and PDBs are listed once cluster-wide; PDB selectors are parsed once. `EventCount` now reflects the real number of FailedDraining events per node (was hardcoded to 1), deleted-node entries group all of a node's events into one entry, and `NodeDisruptionInfo` gains `capacityType` (from the `karpenter.sh/capacity-type` label).
 - **Inflated per-node GPU counts**: GPU count now prefers the `nvidia.com/gpu.count` node label over `Status.Capacity["nvidia.com/gpu"]` (which can be inflated by MIG/time-slicing, e.g. reporting 20 for a 2-GPU node). A debug log is emitted when the two disagree.
 - **Topology per-GPU lanes merged distinct cards**: the per-device GPU lanes and pod device badges are now keyed by the HAMi device **UUID** (short UUID labels, full UUID in tooltips) because the allocated **index** in `hami.io/vgpu-devices-allocated` can be wrong (two pods on different physical cards both reported index 0).
+- **Serving trends KV cache rounded to 0%**: the per-card trend sparkline and collapsed summary rendered KV cache with `toFixed(0)`, so any sub-5% usage (a lightly-loaded model) displayed as "0%" even though the live card shows it to one decimal. Both now use one decimal to match the live card, so low-but-nonzero KV usage is visible. (If KV still reads ~0.0%, the model's KV cache genuinely sits near empty — light load — not a bug.)
 
 ### Changed
 - `kubernetes.Client.clientset` is now typed as `kubernetes.Interface` (was `*kubernetes.Clientset`) to allow fake-client injection in tests.
 - **GPU overview under HAMi**: when HAMi is detected, the cluster overview, topology node badges, and node GPU gauges now lead with **GPU memory % in use** plus a **GPU pods** count (e.g. `NVIDIA-H100-NVL: 95% · 532.2/561.5 GiB (11 pods)`) instead of whole-GPU counts, which are meaningless for fractional GPU sharing. Non-HAMi clusters keep the count-based display.
 - **Topology GPU free segments show the amount**: the "free" segment in the per-GPU lanes and the aggregate GPU bar now reads `free · {GiB}` (total minus used) instead of just `free`.
 - **Topology pod names are click-to-copy**: clicking a pod name (in the CPU/Memory bar labels, the per-GPU lane segments, and the pod lists) copies its full `namespace/name` to the clipboard, for pasting into the CLI.
+- **Serving placement row is a single line**: the node name, instance-type badge, GPU model badge, and per-card GPU UUID badges on each serving card now share one line — the node name truncates to fit and the badges stay (previously the row wrapped to a second line).
 
 ## [0.0.29] - 2025-01-26
 
