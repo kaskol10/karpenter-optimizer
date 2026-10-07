@@ -178,7 +178,7 @@ const STATUS_TONE_CLASSES = {
 const TREND_DEFS = [
   { label: 'TTFT p95', key: 'ttft', get: (p) => p.ttftP95Seconds ?? p.ttftSeconds, stroke: '#f97316', fmt: (v) => `${v.toFixed(2)}s` },
   { label: 'E2E p95', key: 'e2e', get: (p) => p.e2eP95Seconds ?? p.e2eSeconds, stroke: '#3b82f6', fmt: (v) => `${v.toFixed(2)}s` },
-  { label: 'KV cache %', key: 'kv', get: (p) => p.kvCachePercent, stroke: '#8b5cf6', fmt: (v) => `${v.toFixed(0)}%` },
+  { label: 'KV cache %', key: 'kv', get: (p) => p.kvCachePercent, stroke: '#8b5cf6', fmt: (v) => `${v.toFixed(1)}%` },
   { label: 'Throughput', key: 'tok', get: (p) => p.tokensPerSec, stroke: '#22c55e', fmt: (v) => `${v.toFixed(1)} tok/s` },
   { label: 'Requests/s', key: 'req', get: (p) => p.requestsPerSec, stroke: '#eab308', fmt: (v) => `${v.toFixed(2)} req/s` },
 ];
@@ -278,7 +278,7 @@ function ServingTrends({ history }) {
         <span className="ml-auto flex items-center gap-1.5 min-w-0">
           {lastKV != null && (
             <span className="text-[10px] font-mono text-muted-foreground">
-              KV {lastKV.toFixed(0)}%
+              KV {lastKV.toFixed(1)}%
             </span>
           )}
           {lastTok != null && (
@@ -361,8 +361,12 @@ function ServingCard({ pod, peers, history }) {
               {pod.model || 'unknown model'}
             </CardDescription>
             {(pod.node || (pod.gpuDevices && pod.gpuDevices.length > 0)) && (
-              <div className="mt-1 flex items-center gap-1.5 min-w-0 flex-wrap">
-                {pod.node && <CopyableNode name={pod.node} />}
+              <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                {pod.node && (
+                  <div className="min-w-0 flex-1">
+                    <CopyableNode name={pod.node} />
+                  </div>
+                )}
                 {pod.nodeInstanceType && (
                   <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
                     {pod.nodeInstanceType}
