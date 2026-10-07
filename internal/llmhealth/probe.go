@@ -19,6 +19,17 @@ import (
 	"time"
 )
 
+// GPUDevice is a single (possibly fractional) GPU card allocated to a pod,
+// sourced from the HAMi/KAI hami.io/vgpu-devices-allocated annotation. Kept
+// local to this package (rather than imported from kubernetes) to avoid an
+// import cycle; it mirrors kubernetes.GPUDevice.
+type GPUDevice struct {
+	UUID      string `json:"uuid"`
+	Model     string `json:"model"`
+	MemoryMiB int    `json:"memoryMiB"`
+	Index     int    `json:"index"`
+}
+
 // PodHealth is the probed state of a single LLM serving pod.
 type PodHealth struct {
 	Namespace string `json:"namespace"`
@@ -41,10 +52,11 @@ type PodHealth struct {
 	RequestsPerSec *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
 
 	// Placement (filled server-side after probing, not from the pod's own metrics).
-	Node             string `json:"node,omitempty"`
-	NodeInstanceType string `json:"nodeInstanceType,omitempty"`
-	GPUModel         string `json:"gpuModel,omitempty"`
-	GPUCapacity      int    `json:"gpuCapacity,omitempty"`
+	Node             string      `json:"node,omitempty"`
+	NodeInstanceType string      `json:"nodeInstanceType,omitempty"`
+	GPUModel         string      `json:"gpuModel,omitempty"`
+	GPUCapacity      int         `json:"gpuCapacity,omitempty"`
+	GPUDevices       []GPUDevice `json:"gpuDevices,omitempty"` // physical cards from HAMi annotation
 }
 
 // Prober holds the last counter samples per pod so rates (tokens/sec) can be

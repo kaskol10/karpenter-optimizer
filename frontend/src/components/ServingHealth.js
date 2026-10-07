@@ -5,8 +5,8 @@ import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle, History } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle, History, ChevronDown, ChevronRight } from 'lucide-react';
+import { cn, shortGpuUuid, formatGPUMem } from '../lib/utils';
 import Sparkline from './Sparkline';
 
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
@@ -240,46 +240,91 @@ function CopyableNode({ name }) {
   );
 }
 
-// ServingTrends renders per-card sparklines for the trend metrics that
+// ServingTrends renders per-card trend sparklines for the metrics that
 // diagnose the failure modes the status badge cares about (latency, memory
-// pressure, demand), plus a "last issue seen" line. Hidden when there are no
-// historical samples yet. `history` is the per-pod entry from
-// /api/v1/serving/history: { points: Point[], lastIssue: unix }.
+// pressure, demand), plus a "last issue seen" marker. Collapsible so a card
+// stays at-a-glance: by default it shows a compact summary line (current KV
+// cache % + throughput + last issue) and the full 5 sparklines expand on
+// click. Hidden when there are no historical samples yet. `history` is the
+// per-pod entry from /api/v1/serving/history: { points: Point[], lastIssue: unix }.
 function ServingTrends({ history }) {
+  const [open, setOpen] = useState(false);
   const series = useMemo(() => trendSeries(history?.points), [history?.points]);
   const lastIssue = history?.lastIssue;
+
+  // Compact "now" figures for the collapsed summary line, from the last
+  // sample of the KV-cache and throughput series (both may be absent).
+  const last = (key) => {
+    const s = series.find((x) => x.key === key);
+    return s ? s.points[s.points.length - 1].value : null;
+  };
+  const lastKV = last('kv');
+  const lastTok = last('tok');
+
   if (series.length === 0 && !lastIssue) {
     return null;
   }
 
   return (
-    <div className="rounded-md border bg-card/40 p-2">
-      <p className="text-[11px] font-semibold flex items-center gap-1.5 mb-1.5 text-muted-foreground">
-        <History className="h-3 w-3" />
-        Trends
-      </p>
-      {series.length > 0 && (
-        <div className="space-y-2">
-          {series.map((s) => (
-            <div key={s.key}>
-              <div className="flex justify-between text-[10px] mb-0.5">
-                <span className="text-muted-foreground">{s.label}</span>
-                <span className="font-mono font-semibold">{s.fmt(s.points[s.points.length - 1].value)}</span>
-              </div>
-              <Sparkline points={s.points} stroke={s.stroke} height={28} formatValue={s.fmt} />
+    <div className="rounded-md border bg-card/40">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-1.5 px-2 py-1.5 hover:bg-muted/40 text-left"
+      >
+        <History className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] font-semibold text-muted-foreground">Trends</span>
+        <span className="ml-auto flex items-center gap-1.5 min-w-0">
+          {lastKV != null && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              KV {lastKV.toFixed(0)}%
+            </span>
+          )}
+          {lastTok != null && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {lastTok.toFixed(1)} tok/s
+            </span>
+          )}
+          {lastIssue ? (
+            <span className="text-[10px] text-amber-700 flex items-center gap-0.5" title="Last time this pod was offline, had queued requests, preemptions, or KV cache pressure.">
+              <AlertTriangle className="h-3 w-3" />
+              {formatRelativeTime(lastIssue)}
+            </span>
+          ) : (
+            <span className="text-[10px] text-green-700" title="No offline/queue/preemption/KV-pressure events in the window.">
+              ok
+            </span>
+          )}
+          {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+        </span>
+      </button>
+      {open && (
+        <div className="px-2 pb-2">
+          {series.length > 0 && (
+            <div className="space-y-2">
+              {series.map((s) => (
+                <div key={s.key}>
+                  <div className="flex justify-between text-[10px] mb-0.5">
+                    <span className="text-muted-foreground">{s.label}</span>
+                    <span className="font-mono font-semibold">{s.fmt(s.points[s.points.length - 1].value)}</span>
+                  </div>
+                  <Sparkline points={s.points} stroke={s.stroke} height={28} formatValue={s.fmt} />
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+          {lastIssue ? (
+            <p className="mt-1.5 text-[10px] text-amber-700 flex items-center gap-1" title="Last time this pod was offline, had queued requests, preemptions, or KV cache pressure.">
+              <AlertTriangle className="h-3 w-3" />
+              Last issue seen {formatRelativeTime(lastIssue)}
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[10px] text-green-700 flex items-center gap-1" title="No offline/queue/preemption/KV-pressure events in the window.">
+              No issues in the window
+            </p>
+          )}
         </div>
-      )}
-      {lastIssue ? (
-        <p className="mt-1.5 text-[10px] text-amber-700 flex items-center gap-1" title="Last time this pod was offline, had queued requests, preemptions, or KV cache pressure.">
-          <AlertTriangle className="h-3 w-3" />
-          Last issue seen {formatRelativeTime(lastIssue)}
-        </p>
-      ) : (
-        <p className="mt-1.5 text-[10px] text-green-700 flex items-center gap-1" title="No offline/queue/preemption/KV-pressure events in the window.">
-          No issues in the window
-        </p>
       )}
     </div>
   );
@@ -315,9 +360,9 @@ function ServingCard({ pod, peers, history }) {
             <CardDescription className="truncate">
               {pod.model || 'unknown model'}
             </CardDescription>
-            {pod.node && (
-              <div className="mt-1 flex items-center gap-1.5 min-w-0">
-                <CopyableNode name={pod.node} />
+            {(pod.node || (pod.gpuDevices && pod.gpuDevices.length > 0)) && (
+              <div className="mt-1 flex items-center gap-1.5 min-w-0 flex-wrap">
+                {pod.node && <CopyableNode name={pod.node} />}
                 {pod.nodeInstanceType && (
                   <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
                     {pod.nodeInstanceType}
@@ -328,6 +373,20 @@ function ServingCard({ pod, peers, history }) {
                     {pod.gpuModel}{pod.gpuCapacity ? ` x${pod.gpuCapacity}` : ''}
                   </Badge>
                 )}
+                {(pod.gpuDevices || []).map((d) => {
+                  const label = shortGpuUuid(d.uuid) || `GPU ${d.index}`;
+                  const mem = d.memoryMiB > 0 ? ` · ${formatGPUMem(d.memoryMiB)}` : '';
+                  return (
+                    <Badge
+                      key={`gpu-${d.uuid || d.index}`}
+                      variant="outline"
+                      className="text-[10px] font-mono border-indigo-500 text-indigo-700 shrink-0"
+                      title={d.uuid || undefined}
+                    >
+                      {label}{mem}
+                    </Badge>
+                  );
+                })}
               </div>
             )}
           </div>

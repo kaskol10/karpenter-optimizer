@@ -57,6 +57,15 @@ func (s *Server) probeServingPods(ctx context.Context) ([]llmhealth.PodHealth, e
 	for _, p := range pods {
 		h := servingProber.Probe(ctx, p.Namespace, p.Name, p.IP, p.Port)
 		h.Node = p.NodeName
+		// Surface the physical GPU cards (HAMi/KAI annotation) so the UI can
+		// show which specific card(s) each model occupies.
+		if len(p.GPUDevices) > 0 {
+			devices := make([]llmhealth.GPUDevice, len(p.GPUDevices))
+			for j, d := range p.GPUDevices {
+				devices[j] = llmhealth.GPUDevice{UUID: d.UUID, Model: d.Model, MemoryMiB: d.MemoryMiB, Index: d.Index}
+			}
+			h.GPUDevices = devices
+		}
 		health = append(health, h)
 	}
 
