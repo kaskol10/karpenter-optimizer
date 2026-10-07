@@ -207,19 +207,22 @@ function formatRelativeTime(unix) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-// CopyableNode renders a node name; clicking copies it (for pasting into the CLI).
-function CopyableNode({ name }) {
+// CopyableNode renders a node name; clicking copies it (for pasting into the
+// CLI). `copyValue` optionally overrides what gets copied (e.g. display the
+// hostname but copy the actual node name used by kubectl).
+function CopyableNode({ name, copyValue }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
+    const value = copyValue || name;
     const done = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(name).then(done).catch(done);
+      navigator.clipboard.writeText(value).then(done).catch(done);
     } else {
       const ta = document.createElement('textarea');
-      ta.value = name;
+      ta.value = value;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
@@ -231,7 +234,7 @@ function CopyableNode({ name }) {
     <button
       type="button"
       onClick={copy}
-      title={`${name} — click to copy`}
+      title={`${copyValue || name} — click to copy`}
       className="inline-flex items-center gap-1 font-mono text-[11px] max-w-full cursor-pointer truncate text-left hover:underline"
     >
       <Server className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -364,7 +367,10 @@ function ServingCard({ pod, peers, history }) {
               <div className="mt-1 flex items-center gap-1.5 min-w-0">
                 {pod.node && (
                   <div className="min-w-0 flex-1">
-                    <CopyableNode name={pod.node} />
+                    {/* Prefer the node's kubernetes.io/hostname (e.g. "empathy1")
+                        over the raw node name (e.g. "k3s" on a k3s node).
+                        Clicking still copies the real node name for kubectl. */}
+                    <CopyableNode name={pod.nodeHostname || pod.node} copyValue={pod.node} />
                   </div>
                 )}
                 {pod.nodeInstanceType && (

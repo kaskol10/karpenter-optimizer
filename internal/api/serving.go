@@ -81,6 +81,7 @@ func (s *Server) probeServingPods(ctx context.Context) ([]llmhealth.PodHealth, e
 		if placements, perr := s.k8sClient.GetNodePlacement(ctx, nodeNames); perr == nil {
 			for i := range health {
 				if p, ok := placements[health[i].Node]; ok {
+					health[i].NodeHostname = p.Hostname
 					health[i].NodeInstanceType = p.InstanceType
 					health[i].GPUModel = p.GPUModel
 					health[i].GPUCapacity = p.GPUCapacity

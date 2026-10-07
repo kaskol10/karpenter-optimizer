@@ -52,7 +52,8 @@ type PodHealth struct {
 	RequestsPerSec *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
 
 	// Placement (filled server-side after probing, not from the pod's own metrics).
-	Node             string      `json:"node,omitempty"`
+	Node             string      `json:"node,omitempty"`         // node name (spec.nodeName)
+	NodeHostname     string      `json:"nodeHostname,omitempty"` // kubernetes.io/hostname (falls back to node name)
 	NodeInstanceType string      `json:"nodeInstanceType,omitempty"`
 	GPUModel         string      `json:"gpuModel,omitempty"`
 	GPUCapacity      int         `json:"gpuCapacity,omitempty"`

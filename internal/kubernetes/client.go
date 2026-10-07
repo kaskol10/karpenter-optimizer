@@ -2568,6 +2568,7 @@ func portOrDefault(port int32) int32 {
 // type and GPU model/count (same label precedence as the node views).
 type NodePlacement struct {
 	NodeName     string `json:"nodeName"`
+	Hostname     string `json:"hostname,omitempty"` // kubernetes.io/hostname label (falls back to node name)
 	InstanceType string `json:"instanceType,omitempty"`
 	GPUModel     string `json:"gpuModel,omitempty"`
 	GPUCapacity  int    `json:"gpuCapacity,omitempty"`
@@ -2600,6 +2601,12 @@ func (c *Client) GetNodePlacement(ctx context.Context, nodeNames []string) (map[
 			NodeName:     node.Name,
 			InstanceType: node.Labels["node.kubernetes.io/instance-type"],
 			GPUModel:     node.Labels["nvidia.com/gpu.product"],
+			Hostname:     node.Labels["kubernetes.io/hostname"],
+		}
+		// Fall back to the node name when the hostname label is unset (the
+		// label is standard on AWS nodes; bare-metal/homelab nodes may lack it).
+		if placement.Hostname == "" {
+			placement.Hostname = node.Name
 		}
 		// nvidia.com/gpu.count label wins (MIG/time-slicing inflates Status.Capacity).
 		if v, ok := node.Labels["nvidia.com/gpu.count"]; ok {
