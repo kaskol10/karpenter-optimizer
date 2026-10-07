@@ -12,3 +12,12 @@ export function formatGPUMem(mib) {
   return `${(mib / 1024).toFixed(1)} GiB`
 }
 
+// shortGpuUuid shortens a GPU UUID for compact display (drops the "GPU-"
+// prefix and hyphens, keeps the first 8 chars). HAMi's allocated-index is
+// unreliable (two cards can both report index 0), so the UUID is the only
+// stable identifier of a physical GPU.
+export function shortGpuUuid(uuid) {
+  if (!uuid) return '';
+  return String(uuid).replace(/^GPU-/, '').replace(/-/g, '').slice(0, 8);
+}
+

@@ -283,13 +283,16 @@ Discovers in-cluster LLM serving pods (vLLM/sglang, matched by image or command)
       "node": "ip-10-0-1-2.ec2.internal",
       "nodeInstanceType": "g5.2xlarge",
       "gpuModel": "NVIDIA-A10G",
-      "gpuCapacity": 1
+      "gpuCapacity": 1,
+      "gpuDevices": [
+        { "uuid": "GPU-b3d6e634-2050-5cca-daf2-1777c4e3ed51", "model": "NVIDIA", "memoryMiB": 45000, "index": 0 }
+      ]
     }
   ]
 }
 ```
 
-Placement fields (`node`, `nodeInstanceType`, `gpuModel`, `gpuCapacity`) are filled from node labels and may be empty when the node lacks them.
+Placement fields (`node`, `nodeInstanceType`, `gpuModel`, `gpuCapacity`) are filled from node labels and may be empty when the node lacks them. `gpuDevices` lists the specific physical GPU cards a pod occupies (from the HAMi/KAI `hami.io/vgpu-devices-allocated` annotation) and is only present on HAMi/KAI clusters — it is omitted for standard whole-GPU pods.
 
 ### Get Serving History
 

@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { Check, Loader2, RefreshCw } from 'lucide-react';
-import { cn, formatGPUMem } from '../lib/utils';
+import { cn, formatGPUMem, shortGpuUuid } from '../lib/utils';
 
 const API_URL =
   window.ENV && Object.prototype.hasOwnProperty.call(window.ENV, 'REACT_APP_API_URL')
@@ -85,15 +85,6 @@ function hasDevicePlacement(node, pods) {
     (node.gpuCapacity || 0) > 1 &&
     pods.some((p) => (p.gpuDevices || []).length > 0)
   );
-}
-
-// shortGpuUuid shortens a HAMi device UUID to a compact label, e.g.
-// "GPU-83026582-9368-..." -> "83026582". Returns '' when the uuid is empty.
-// HAMi's allocated-index is unreliable (two cards can both report index 0),
-// so the UUID is the only stable identifier of a physical GPU.
-function shortGpuUuid(uuid) {
-  if (!uuid) return '';
-  return String(uuid).replace(/^GPU-/, '').replace(/-/g, '').slice(0, 8);
 }
 
 // useCopyPodName copies a pod's namespace/name to the clipboard and tracks

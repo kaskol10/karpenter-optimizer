@@ -2482,6 +2482,10 @@ type LLMPodInfo struct {
 	Port      int32  `json:"port"`
 	Image     string `json:"image"`
 	NodeName  string `json:"nodeName"`
+	// GPUDevices are the physical GPU cards actually allocated to this pod,
+	// parsed from the HAMi/KAI hami.io/vgpu-devices-allocated annotation.
+	// Empty on standard whole-GPU pods (no HAMi annotation).
+	GPUDevices []GPUDevice `json:"gpuDevices,omitempty"`
 }
 
 // llmImageMarkers are substrings matched against a container image or command
@@ -2511,12 +2515,13 @@ func (c *Client) FindLLMPods(ctx context.Context) ([]LLMPodInfo, error) {
 			continue
 		}
 		out = append(out, LLMPodInfo{
-			Namespace: pod.Namespace,
-			Name:      pod.Name,
-			IP:        pod.Status.PodIP,
-			Port:      port,
-			Image:     image,
-			NodeName:  pod.Spec.NodeName,
+			Namespace:  pod.Namespace,
+			Name:       pod.Name,
+			IP:         pod.Status.PodIP,
+			Port:       port,
+			Image:      image,
+			NodeName:   pod.Spec.NodeName,
+			GPUDevices: parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
 		})
 	}
 	return out, nil
