@@ -281,6 +281,7 @@ Discovers in-cluster LLM serving pods (vLLM/sglang, matched by image or command)
       "tokensPerSec": 120.0,
       "requestsPerSec": 2.4,
       "node": "ip-10-0-1-2.ec2.internal",
+      "nodeHostname": "ip-10-0-1-2.ec2.internal",
       "nodeInstanceType": "g5.2xlarge",
       "gpuModel": "NVIDIA-A10G",
       "gpuCapacity": 1,
@@ -292,7 +293,7 @@ Discovers in-cluster LLM serving pods (vLLM/sglang, matched by image or command)
 }
 ```
 
-Placement fields (`node`, `nodeInstanceType`, `gpuModel`, `gpuCapacity`) are filled from node labels and may be empty when the node lacks them. `gpuDevices` lists the specific physical GPU cards a pod occupies (from the HAMi/KAI `hami.io/vgpu-devices-allocated` annotation) and is only present on HAMi/KAI clusters — it is omitted for standard whole-GPU pods.
+Placement fields (`node`, `nodeInstanceType`, `gpuModel`, `gpuCapacity`) are filled from node labels and may be empty when the node lacks them. `nodeHostname` is the node's `kubernetes.io/hostname` label (falls back to the node name); it is the friendly identifier shown on the serving cards, while `node` stays the raw node name used by `kubectl`. `gpuDevices` lists the specific physical GPU cards a pod occupies (from the HAMi/KAI `hami.io/vgpu-devices-allocated` annotation) and is only present on HAMi/KAI clusters — it is omitted for standard whole-GPU pods.
 
 ### Get Serving History
 

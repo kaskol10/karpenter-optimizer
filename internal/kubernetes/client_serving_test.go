@@ -90,3 +90,45 @@ func TestFindLLMPodsGPUDevices(t *testing.T) {
 		t.Errorf("vllm-plain GPUDevices = %+v, want none (no HAMi annotation)", plainPod.GPUDevices)
 	}
 }
+
+func TestGetNodePlacementHostname(t *testing.T) {
+	t.Parallel()
+
+	// #given: a node named "k3s" carrying kubernetes.io/hostname=empathy1,
+	// and a node with no hostname label (must fall back to its name).
+	objects := []runtime.Object{
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:   "k3s",
+			Labels: map[string]string{"kubernetes.io/hostname": "empathy1"},
+		}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a"}},
+	}
+	clientset := fake.NewClientset(objects...)
+	c := &Client{clientset: clientset, debug: false}
+
+	// #when
+	placements, err := c.GetNodePlacement(context.Background(), []string{"k3s", "worker-a"})
+	if err != nil {
+		t.Fatalf("GetNodePlacement() error = %v", err)
+	}
+
+	// #then
+	k3s, ok := placements["k3s"]
+	if !ok {
+		t.Fatal("expected placement for node k3s")
+	}
+	if k3s.NodeName != "k3s" {
+		t.Errorf("k3s NodeName = %q, want k3s", k3s.NodeName)
+	}
+	if k3s.Hostname != "empathy1" {
+		t.Errorf("k3s Hostname = %q, want empathy1 (from kubernetes.io/hostname)", k3s.Hostname)
+	}
+
+	workerA, ok := placements["worker-a"]
+	if !ok {
+		t.Fatal("expected placement for node worker-a")
+	}
+	if workerA.Hostname != "worker-a" {
+		t.Errorf("worker-a Hostname = %q, want worker-a (fallback to node name)", workerA.Hostname)
+	}
+}
