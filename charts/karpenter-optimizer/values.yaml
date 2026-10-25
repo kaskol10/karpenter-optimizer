@@ -131,7 +131,11 @@ config:
     # For Bedrock: a model or inference profile ID, e.g. "eu.anthropic.claude-3-haiku-20240307-v1:0"
     model: ""
     # API key (optional, mainly for LiteLLM with authentication; not used for Bedrock)
+    # Dev-only: rendered into the pod spec (visible via `kubectl get pod -o yaml`).
+    # Prefer apiKeySecret in production.
     apiKey: ""
+    # Preferred: reference an existing Secret containing key `api-key`.
+    apiKeySecret: ""
     # AWS region for Bedrock, if different from the pricing region (optional)
     awsRegion: ""
     # Response token cap for Bedrock requests, bounds the worst-case cost per
@@ -178,12 +182,18 @@ config:
 # Channels are provided two ways (chart env, or the /api/v1/alerts/config API):
 #   - urls: a comma-separated list of "type=url" entries (type one of
 #     ntfy/discord/slack/webhook; a bare URL is treated as a webhook). URLs are
-#     secrets — put them in .Values.env or a secret, not here, for prod.
+#     secrets — dev-only here (visible in the pod spec); use urlsSecret in
+#     production, or set them via the /api/v1/alerts/config API.
 #   - stateFile: where the engine persists its firing state (survives restart).
 alerts:
   enabled: false
   # Example: "ntfy=https://ntfy.sh/my-topic,slack=https://hooks.slack.com/..."
+  # Dev-only: rendered into the pod spec (visible via `kubectl get pod -o yaml`).
+  # Prefer urlsSecret in production.
   urls: ""
+  # Preferred: reference an existing Secret containing key `urls`
+  # (comma-separated "type=url" channel entries).
+  urlsSecret: ""
   # Where the engine persists its state machine. The chart mounts a writable
   # emptyDir at /tmp/alerts when alerts are enabled, so the default lives there.
   stateFile: /tmp/alerts/alerts.json

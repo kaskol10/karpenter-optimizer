@@ -13,32 +13,32 @@ import (
 
 // OptimizationOutcome represents the result of applying an optimization
 type OptimizationOutcome struct {
-	PlanID              string    `json:"planId"`
-	NodePoolName        string    `json:"nodePoolName"`
-	Strategy            OptimizationStrategy `json:"strategy"`
-	AppliedAt           time.Time `json:"appliedAt"`
-	
+	PlanID       string               `json:"planId"`
+	NodePoolName string               `json:"nodePoolName"`
+	Strategy     OptimizationStrategy `json:"strategy"`
+	AppliedAt    time.Time            `json:"appliedAt"`
+
 	// Predicted values (from plan)
-	PredictedSavings    float64   `json:"predictedSavings"`
-	PredictedConfidence float64   `json:"predictedConfidence"`
-	PredictedRiskLevel  string    `json:"predictedRiskLevel"`
-	
+	PredictedSavings    float64 `json:"predictedSavings"`
+	PredictedConfidence float64 `json:"predictedConfidence"`
+	PredictedRiskLevel  string  `json:"predictedRiskLevel"`
+
 	// Actual outcomes
-	ActualSavings       float64   `json:"actualSavings,omitempty"`       // Actual cost savings achieved
-	ActualCost          float64   `json:"actualCost,omitempty"`          // Actual cost after optimization
-	PerformanceImpact   string    `json:"performanceImpact,omitempty"`   // "positive", "neutral", "negative"
-	Incidents           []string  `json:"incidents,omitempty"`            // Any incidents/issues encountered
-	UserFeedback        string    `json:"userFeedback,omitempty"`        // User feedback: "approved", "rejected", "partial"
-	
+	ActualSavings     float64  `json:"actualSavings,omitempty"`     // Actual cost savings achieved
+	ActualCost        float64  `json:"actualCost,omitempty"`        // Actual cost after optimization
+	PerformanceImpact string   `json:"performanceImpact,omitempty"` // "positive", "neutral", "negative"
+	Incidents         []string `json:"incidents,omitempty"`         // Any incidents/issues encountered
+	UserFeedback      string   `json:"userFeedback,omitempty"`      // User feedback: "approved", "rejected", "partial"
+
 	// Metrics
-	ActualNodes         int       `json:"actualNodes,omitempty"`
+	ActualNodes         int      `json:"actualNodes,omitempty"`
 	ActualInstanceTypes []string `json:"actualInstanceTypes,omitempty"`
-	ActualCapacityType  string    `json:"actualCapacityType,omitempty"`
-	
+	ActualCapacityType  string   `json:"actualCapacityType,omitempty"`
+
 	// Learning data
-	Success             bool      `json:"success"`                        // Whether optimization was successful
-	Accuracy            float64   `json:"accuracy"`                       // How close prediction was to actual (0-1)
-	LessonsLearned      []string  `json:"lessonsLearned,omitempty"`       // Key learnings from this outcome
+	Success        bool     `json:"success"`                  // Whether optimization was successful
+	Accuracy       float64  `json:"accuracy"`                 // How close prediction was to actual (0-1)
+	LessonsLearned []string `json:"lessonsLearned,omitempty"` // Key learnings from this outcome
 }
 
 // LearningAgent learns from optimization outcomes
@@ -58,29 +58,29 @@ type LearningAgent struct {
 // LearnedPatterns stores patterns learned from history
 type LearnedPatterns struct {
 	StrategySuccessRates map[OptimizationStrategy]float64 `json:"strategySuccessRates"`
-	NodePoolPatterns     map[string]*NodePoolPattern       `json:"nodePoolPatterns"`
-	RiskFactors          map[string]float64                `json:"riskFactors"` // Risk factor -> impact score
-	InstanceTypePrefs    map[string]float64                `json:"instanceTypePrefs"` // Instance type -> success rate
-	LastUpdated          time.Time                         `json:"lastUpdated"`
+	NodePoolPatterns     map[string]*NodePoolPattern      `json:"nodePoolPatterns"`
+	RiskFactors          map[string]float64               `json:"riskFactors"`       // Risk factor -> impact score
+	InstanceTypePrefs    map[string]float64               `json:"instanceTypePrefs"` // Instance type -> success rate
+	LastUpdated          time.Time                        `json:"lastUpdated"`
 }
 
 // NodePoolPattern stores learned patterns for a specific NodePool
 type NodePoolPattern struct {
-	NodePoolName         string                            `json:"nodePoolName"`
-	BestStrategy         OptimizationStrategy              `json:"bestStrategy"`
-	StrategyHistory      map[OptimizationStrategy]int      `json:"strategyHistory"` // Count of uses
-	SuccessRate          float64                           `json:"successRate"`
-	AvgSavings           float64                           `json:"avgSavings"`
-	CommonIssues         []string                          `json:"commonIssues"`
-	OptimalConfig        *OptimalConfiguration             `json:"optimalConfig,omitempty"`
+	NodePoolName    string                       `json:"nodePoolName"`
+	BestStrategy    OptimizationStrategy         `json:"bestStrategy"`
+	StrategyHistory map[OptimizationStrategy]int `json:"strategyHistory"` // Count of uses
+	SuccessRate     float64                      `json:"successRate"`
+	AvgSavings      float64                      `json:"avgSavings"`
+	CommonIssues    []string                     `json:"commonIssues"`
+	OptimalConfig   *OptimalConfiguration        `json:"optimalConfig,omitempty"`
 }
 
 // OptimalConfiguration stores optimal configuration learned for a NodePool
 type OptimalConfiguration struct {
-	InstanceTypes    []string `json:"instanceTypes"`
-	CapacityType     string   `json:"capacityType"`
-	NodeCount        int      `json:"nodeCount"`
-	Confidence       float64  `json:"confidence"`
+	InstanceTypes []string `json:"instanceTypes"`
+	CapacityType  string   `json:"capacityType"`
+	NodeCount     int      `json:"nodeCount"`
+	Confidence    float64  `json:"confidence"`
 }
 
 // NewLearningAgent creates a new learning agent
@@ -184,12 +184,12 @@ func (l *LearningAgent) RecordOutcome(ctx context.Context, outcome OptimizationO
 func (l *LearningAgent) GetBestStrategyForNodePool(nodePoolName string) (OptimizationStrategy, float64) {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	pattern, ok := l.patterns.NodePoolPatterns[nodePoolName]
 	if !ok || pattern.BestStrategy == "" {
 		return StrategyBalanced, 0.5 // Default
 	}
-	
+
 	return pattern.BestStrategy, pattern.SuccessRate
 }
 
@@ -197,7 +197,7 @@ func (l *LearningAgent) GetBestStrategyForNodePool(nodePoolName string) (Optimiz
 func (l *LearningAgent) GetStrategySuccessRate(strategy OptimizationStrategy) float64 {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	rate, ok := l.patterns.StrategySuccessRates[strategy]
 	if !ok {
 		return 0.5 // Default if no data
@@ -209,7 +209,7 @@ func (l *LearningAgent) GetStrategySuccessRate(strategy OptimizationStrategy) fl
 func (l *LearningAgent) GetOptimalConfiguration(nodePoolName string) *OptimalConfiguration {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	pattern, ok := l.patterns.NodePoolPatterns[nodePoolName]
 	if !ok {
 		return nil
@@ -221,23 +221,23 @@ func (l *LearningAgent) GetOptimalConfiguration(nodePoolName string) *OptimalCon
 func (l *LearningAgent) AdjustConfidence(baseConfidence float64, nodePoolName string, strategy OptimizationStrategy) float64 {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	// Get strategy success rate
 	strategyRate := l.patterns.StrategySuccessRates[strategy]
 	if strategyRate == 0 {
 		strategyRate = 0.5 // Default
 	}
-	
+
 	// Get NodePool-specific success rate
 	pattern, ok := l.patterns.NodePoolPatterns[nodePoolName]
 	nodePoolRate := 0.5 // Default
 	if ok {
 		nodePoolRate = pattern.SuccessRate
 	}
-	
+
 	// Weighted average: 60% base confidence, 20% strategy rate, 20% NodePool rate
 	adjusted := baseConfidence*0.6 + strategyRate*0.2 + nodePoolRate*0.2
-	
+
 	// Ensure between 0 and 1
 	if adjusted < 0 {
 		adjusted = 0
@@ -245,7 +245,7 @@ func (l *LearningAgent) AdjustConfidence(baseConfidence float64, nodePoolName st
 	if adjusted > 1 {
 		adjusted = 1
 	}
-	
+
 	return adjusted
 }
 
@@ -253,7 +253,7 @@ func (l *LearningAgent) AdjustConfidence(baseConfidence float64, nodePoolName st
 func (l *LearningAgent) GetRiskFactorImpact(riskFactor string) float64 {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	impact, ok := l.patterns.RiskFactors[riskFactor]
 	if !ok {
 		return 0.5 // Default impact
@@ -267,55 +267,55 @@ func (l *LearningAgent) learnFromHistory() {
 	history := make([]OptimizationOutcome, len(l.history))
 	copy(history, l.history)
 	l.historyMu.RUnlock()
-	
+
 	if len(history) == 0 {
 		return
 	}
-	
+
 	l.patternsMu.Lock()
 	defer l.patternsMu.Unlock()
-	
+
 	// Reset patterns
 	l.patterns.StrategySuccessRates = make(map[OptimizationStrategy]float64)
 	l.patterns.NodePoolPatterns = make(map[string]*NodePoolPattern)
 	l.patterns.RiskFactors = make(map[string]float64)
 	l.patterns.InstanceTypePrefs = make(map[string]float64)
-	
+
 	// Calculate strategy success rates
 	strategySuccesses := make(map[OptimizationStrategy]int)
 	strategyCounts := make(map[OptimizationStrategy]int)
-	
+
 	// Calculate NodePool patterns
 	nodePoolOutcomes := make(map[string][]OptimizationOutcome)
-	
+
 	for _, outcome := range history {
 		// Strategy success rate
 		strategyCounts[outcome.Strategy]++
 		if outcome.Success {
 			strategySuccesses[outcome.Strategy]++
 		}
-		
+
 		// NodePool patterns
 		nodePoolOutcomes[outcome.NodePoolName] = append(nodePoolOutcomes[outcome.NodePoolName], outcome)
 	}
-	
+
 	// Calculate strategy success rates
 	for strategy, count := range strategyCounts {
 		successes := strategySuccesses[strategy]
 		l.patterns.StrategySuccessRates[strategy] = float64(successes) / float64(count)
 	}
-	
+
 	// Calculate NodePool-specific patterns
 	for nodePoolName, outcomes := range nodePoolOutcomes {
 		pattern := &NodePoolPattern{
 			NodePoolName:    nodePoolName,
 			StrategyHistory: make(map[OptimizationStrategy]int),
 		}
-		
+
 		successes := 0
 		totalSavings := 0.0
 		allIssues := make(map[string]int)
-		
+
 		for _, outcome := range outcomes {
 			pattern.StrategyHistory[outcome.Strategy]++
 			if outcome.Success {
@@ -328,19 +328,19 @@ func (l *LearningAgent) learnFromHistory() {
 				allIssues[issue]++
 			}
 		}
-		
+
 		pattern.SuccessRate = float64(successes) / float64(len(outcomes))
 		if len(outcomes) > 0 {
 			pattern.AvgSavings = totalSavings / float64(len(outcomes))
 		}
-		
+
 		// Find most common issues
 		for issue, count := range allIssues {
 			if count >= 2 { // At least 2 occurrences
 				pattern.CommonIssues = append(pattern.CommonIssues, issue)
 			}
 		}
-		
+
 		// Find best strategy for this NodePool
 		bestStrategy := StrategyBalanced
 		bestRate := 0.0
@@ -360,7 +360,7 @@ func (l *LearningAgent) learnFromHistory() {
 			}
 		}
 		pattern.BestStrategy = bestStrategy
-		
+
 		// Find optimal configuration (most successful)
 		bestOutcome := l.findBestOutcome(outcomes)
 		if bestOutcome != nil && bestOutcome.Success {
@@ -371,10 +371,10 @@ func (l *LearningAgent) learnFromHistory() {
 				Confidence:    bestOutcome.Accuracy,
 			}
 		}
-		
+
 		l.patterns.NodePoolPatterns[nodePoolName] = pattern
 	}
-	
+
 	l.patterns.LastUpdated = time.Now()
 }
 
@@ -382,7 +382,7 @@ func (l *LearningAgent) learnFromHistory() {
 func (l *LearningAgent) learnFromOutcome(outcome OptimizationOutcome) {
 	l.patternsMu.Lock()
 	defer l.patternsMu.Unlock()
-	
+
 	// Update strategy success rate
 	currentRate, ok := l.patterns.StrategySuccessRates[outcome.Strategy]
 	if !ok {
@@ -392,7 +392,7 @@ func (l *LearningAgent) learnFromOutcome(outcome OptimizationOutcome) {
 	alpha := 0.3 // Learning rate
 	newRate := currentRate*(1-alpha) + boolToFloat(outcome.Success)*alpha
 	l.patterns.StrategySuccessRates[outcome.Strategy] = newRate
-	
+
 	// Update NodePool pattern
 	pattern, ok := l.patterns.NodePoolPatterns[outcome.NodePoolName]
 	if !ok {
@@ -402,12 +402,12 @@ func (l *LearningAgent) learnFromOutcome(outcome OptimizationOutcome) {
 		}
 		l.patterns.NodePoolPatterns[outcome.NodePoolName] = pattern
 	}
-	
+
 	pattern.StrategyHistory[outcome.Strategy]++
-	
+
 	// Update success rate (exponential moving average)
 	pattern.SuccessRate = pattern.SuccessRate*(1-alpha) + boolToFloat(outcome.Success)*alpha
-	
+
 	// Update average savings
 	if outcome.ActualSavings > 0 {
 		if pattern.AvgSavings == 0 {
@@ -416,7 +416,7 @@ func (l *LearningAgent) learnFromOutcome(outcome OptimizationOutcome) {
 			pattern.AvgSavings = pattern.AvgSavings*(1-alpha) + outcome.ActualSavings*alpha
 		}
 	}
-	
+
 	// Update optimal configuration if this is better
 	if outcome.Success && (pattern.OptimalConfig == nil || outcome.ActualSavings > pattern.AvgSavings*1.1) {
 		pattern.OptimalConfig = &OptimalConfiguration{
@@ -435,10 +435,10 @@ func (l *LearningAgent) determineSuccess(outcome OptimizationOutcome) bool {
 	// 2. Achieved positive savings (or close to predicted)
 	// 3. No major incidents
 	// 4. Performance impact is not negative
-	
+
 	// Check user feedback
 	success := outcome.UserFeedback != "rejected"
-	
+
 	// Check savings (should be positive or close to predicted)
 	if outcome.ActualSavings < 0 {
 		success = false
@@ -448,24 +448,24 @@ func (l *LearningAgent) determineSuccess(outcome OptimizationOutcome) bool {
 			success = false
 		}
 	}
-	
+
 	// Check incidents
 	if len(outcome.Incidents) > 0 {
 		success = false
 	}
-	
+
 	// Check performance impact
 	if outcome.PerformanceImpact == "negative" {
 		success = false
 	}
-	
+
 	return success
 }
 
 // extractLessons extracts key lessons from an outcome
 func (l *LearningAgent) extractLessons(outcome OptimizationOutcome) []string {
 	var lessons []string
-	
+
 	if outcome.Success {
 		lessons = append(lessons, fmt.Sprintf("Strategy %s worked well for %s", outcome.Strategy, outcome.NodePoolName))
 		if outcome.ActualSavings > outcome.PredictedSavings {
@@ -480,11 +480,11 @@ func (l *LearningAgent) extractLessons(outcome OptimizationOutcome) []string {
 			lessons = append(lessons, "Actual savings were significantly lower than predicted")
 		}
 	}
-	
+
 	if outcome.Accuracy < 0.7 {
 		lessons = append(lessons, "Prediction accuracy was low - need better estimation")
 	}
-	
+
 	return lessons
 }
 
@@ -493,14 +493,14 @@ func (l *LearningAgent) findBestOutcome(outcomes []OptimizationOutcome) *Optimiz
 	if len(outcomes) == 0 {
 		return nil
 	}
-	
+
 	best := &outcomes[0]
 	for i := range outcomes {
 		if outcomes[i].Success && outcomes[i].ActualSavings > best.ActualSavings {
 			best = &outcomes[i]
 		}
 	}
-	
+
 	return best
 }
 
@@ -509,7 +509,7 @@ func (l *LearningAgent) loadHistory() error {
 	if l.historyFile == "" {
 		return nil // No file specified
 	}
-	
+
 	data, err := os.ReadFile(l.historyFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -517,16 +517,16 @@ func (l *LearningAgent) loadHistory() error {
 		}
 		return err
 	}
-	
+
 	var history []OptimizationOutcome
 	if err := json.Unmarshal(data, &history); err != nil {
 		return fmt.Errorf("failed to parse history: %w", err)
 	}
-	
+
 	l.historyMu.Lock()
 	l.history = history
 	l.historyMu.Unlock()
-	
+
 	return nil
 }
 
@@ -535,25 +535,25 @@ func (l *LearningAgent) saveHistory() error {
 	if l.historyFile == "" {
 		return nil // No file specified
 	}
-	
+
 	l.historyMu.RLock()
 	data, err := json.MarshalIndent(l.history, "", "  ")
 	l.historyMu.RUnlock()
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
-	
+
 	// Ensure directory exists
 	dir := filepath.Dir(l.historyFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	
+
 	if err := os.WriteFile(l.historyFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write history: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -583,7 +583,7 @@ func boolToFloat(b bool) float64 {
 func (l *LearningAgent) GetHistory() []OptimizationOutcome {
 	l.historyMu.RLock()
 	defer l.historyMu.RUnlock()
-	
+
 	history := make([]OptimizationOutcome, len(l.history))
 	copy(history, l.history)
 	return history
@@ -600,7 +600,7 @@ func (l *LearningAgent) GetHistoryCount() int {
 func (l *LearningAgent) GetStrategySuccessRates() map[OptimizationStrategy]float64 {
 	l.patternsMu.RLock()
 	defer l.patternsMu.RUnlock()
-	
+
 	rates := make(map[OptimizationStrategy]float64)
 	for k, v := range l.patterns.StrategySuccessRates {
 		rates[k] = v
@@ -621,4 +621,3 @@ func (l *LearningAgent) GetLastUpdated() time.Time {
 	defer l.patternsMu.RUnlock()
 	return l.patterns.LastUpdated
 }
-

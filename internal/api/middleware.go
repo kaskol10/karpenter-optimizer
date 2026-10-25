@@ -58,8 +58,8 @@ func bearerAuthMiddleware(token string) gin.HandlerFunc {
 			return
 		}
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-			"error":          "unauthorized",
-			"hint":           "set Authorization: Bearer <token> (API_AUTH_TOKEN)",
+			"error": "unauthorized",
+			"hint":  "set Authorization: Bearer <token> (API_AUTH_TOKEN)",
 		})
 	}
 }

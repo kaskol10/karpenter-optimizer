@@ -15,8 +15,11 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/karpenter-optimizer/internal/api"
 	"github.com/karpenter-optimizer/internal/config"
@@ -24,7 +27,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	
+
 	// Log configuration
 	log.Printf("Starting Karpenter Optimizer API")
 	log.Printf("  Port: %s", cfg.APIPort)
@@ -38,17 +41,21 @@ func main() {
 	if cfg.OllamaURL != "" {
 		log.Printf("  Ollama URL: %s", cfg.OllamaURL)
 	}
-	
+
+	// Root context cancelled by SIGINT/SIGTERM drives graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	server := api.NewServer(cfg)
-	
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = cfg.APIPort
 	}
-	
+
 	log.Printf("Starting server on port %s", port)
-	if err := server.Run(":" + port); err != nil {
+	if err := server.RunContext(ctx, ":"+port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+	log.Printf("Server shut down cleanly")
 }
-
