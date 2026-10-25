@@ -111,11 +111,13 @@ func NewLearningAgent(historyFile string) (*LearningAgent, error) {
 	return agent, nil
 }
 
-// RecordOutcome records an optimization outcome for learning
+// RecordOutcome records an optimization outcome for learning.
+//
+// The history lock is held only for the slice append: saveHistory re-takes
+// historyMu (to snapshot the slice) and learnFromOutcome takes patternsMu,
+// so neither may run while the write lock is held — a self-deadlock on the
+// non-reentrant RWMutex.
 func (l *LearningAgent) RecordOutcome(ctx context.Context, outcome OptimizationOutcome) error {
-	l.historyMu.Lock()
-	defer l.historyMu.Unlock()
-	
 	// Calculate accuracy if we have actual savings
 	if outcome.PredictedSavings > 0 && outcome.ActualSavings >= 0 {
 		// Accuracy: how close predicted was to actual (1.0 = perfect match)
@@ -130,24 +132,26 @@ func (l *LearningAgent) RecordOutcome(ctx context.Context, outcome OptimizationO
 			outcome.Accuracy = 1.0 // Perfect if both are 0
 		}
 	}
-	
+
 	// Determine success
 	outcome.Success = l.determineSuccess(outcome)
-	
+
 	// Extract lessons learned
 	outcome.LessonsLearned = l.extractLessons(outcome)
-	
-	// Add to history
+
+	// Add to history (lock held only for the append)
+	l.historyMu.Lock()
 	l.history = append(l.history, outcome)
-	
-	// Save history
+	l.historyMu.Unlock()
+
+	// Save history (snapshots the slice under RLock internally)
 	if err := l.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
-	
-	// Learn from this outcome
+
+	// Learn from this outcome (takes patternsMu)
 	l.learnFromOutcome(outcome)
-	
+
 	return nil
 }
 

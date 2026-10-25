@@ -141,14 +141,51 @@ jobs:
           echo "Extracted version: $VERSION"
 
       - name: Update chart and image tags
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ steps.version.outputs.version }}
           sed -i "s/^version:.*/version: $VERSION/" charts/karpenter-optimizer/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/karpenter-optimizer/Chart.yaml
-          sed -i "s|^\(\s*tag:\s*\).*|\1\"$VERSION\"|" charts/karpenter-optimizer/values.yaml
+          # Bump ONLY the app image tags (backend + frontend): the tag line
+          # that follows an app repository line (pullPolicy/comments in
+          # between are fine). Never touch unrelated tags like
+          # database.cluster.postgresImage.tag (the CNPG postgres version).
+          python3 - <<'EOF'
+          import re
+          import os
+          version = os.environ["VERSION"]
+          app_repos = (
+              "ghcr.io/kaskol10/karpenter-optimizer",
+              "ghcr.io/kaskol10/karpenter-optimizer-frontend",
+          )
+          path = "charts/karpenter-optimizer/values.yaml"
+          with open(path) as f:
+              lines = f.readlines()
+          changed = 0
+          in_app_image = False
+          for i, line in enumerate(lines):
+              if re.search(r"repository:\s*\S+", line):
+                  in_app_image = any(f"repository: {repo}" in line for repo in app_repos)
+                  continue
+              if in_app_image and re.match(r"\s*tag:", line):
+                  indent = re.match(r"(\s*)tag:", line).group(1)
+                  lines[i] = f'{indent}tag: "{version}"\n'
+                  in_app_image = False
+                  changed += 1
+          if changed != 2:
+              raise SystemExit(f"expected exactly 2 app image tags, updated {changed}")
+          with open(path, "w") as f:
+              f.writelines(lines)
+          EOF
+
+          # Guard: the CNPG postgres image tag must never be clobbered.
+          if ! grep -A2 'postgresImage:' charts/karpenter-optimizer/values.yaml | grep -q "tag: \"16.4\""; then
+            echo "::error::postgresImage.tag was modified — release tag bump is out of scope"
+            exit 1
+          fi
           echo "Updated Chart.yaml:"
           cat charts/karpenter-optimizer/Chart.yaml
-          echo "Updated values.yaml image tags:"
+          echo "Updated values.yaml app image tags:"
           grep -nE "^[[:space:]]*tag:" charts/karpenter-optimizer/values.yaml
 
       - name: Configure Git

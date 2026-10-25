@@ -24,6 +24,7 @@ type Point struct {
 	Nodes             int     `json:"nodes"`
 	Pods              int     `json:"pods"`
 	CostPerHour       float64 `json:"costPerHour"`
+	CostUnknown       bool    `json:"costUnknown"` // true when at least one node's price is unavailable (costPerHour is a partial sum, not the true total)
 	Currency          string  `json:"currency"`
 	CostUSDPerHour    float64 `json:"costUSDPerHour,omitempty"` // Deprecated: use CostPerHour with Currency.
 }
