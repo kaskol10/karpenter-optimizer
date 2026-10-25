@@ -19,11 +19,12 @@ type NodePoolCapacityRecommendation struct {
 	NodePoolName             string             `json:"nodePoolName"`
 	CurrentNodes             int                `json:"currentNodes"`
 	CurrentInstanceTypes     []string           `json:"currentInstanceTypes"`
-	CurrentCPUUsed           float64            `json:"currentCPUUsed"`        // Total CPU used across all nodes
-	CurrentCPUCapacity       float64            `json:"currentCPUCapacity"`    // Total CPU allocatable across all nodes
-	CurrentMemoryUsed        float64            `json:"currentMemoryUsed"`     // Total Memory used across all nodes
-	CurrentMemoryCapacity    float64            `json:"currentMemoryCapacity"` // Total Memory allocatable across all nodes
-	CurrentCost              float64            `json:"currentCost"`           // Current hourly cost
+	CurrentCPUUsed           float64            `json:"currentCPUUsed"`               // Total CPU used across all nodes
+	CurrentCPUCapacity       float64            `json:"currentCPUCapacity"`           // Total CPU allocatable across all nodes
+	CurrentMemoryUsed        float64            `json:"currentMemoryUsed"`            // Total Memory used across all nodes
+	CurrentMemoryCapacity    float64            `json:"currentMemoryCapacity"`        // Total Memory allocatable across all nodes
+	CurrentCost              float64            `json:"currentCost"`                  // Current hourly cost
+	CurrentCostUnknown       bool               `json:"currentCostUnknown,omitempty"` // true when some current nodes could not be priced (currentCost is a partial sum)
 	Currency                 string             `json:"currency"`
 	RecommendedNodes         int                `json:"recommendedNodes"`
 	RecommendedInstanceTypes []string           `json:"recommendedInstanceTypes"`
@@ -97,6 +98,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 		var currentCPUUsed, currentCPUCapacity, currentMemoryUsed, currentMemoryCapacity float64
 		currentInstanceTypes := make(map[string]int) // instance type -> count
 		currentCost := 0.0
+		currentCostUnknown := false
 		architecture := np.Architecture
 		capacityType := np.CapacityType
 
@@ -126,8 +128,13 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 				if nodeCapacityType == "" {
 					nodeCapacityType = "on-demand" // Default
 				}
-				nodeCost := r.estimateCost(ctx, []string{node.InstanceType}, nodeCapacityType, 1)
-				currentCost += nodeCost
+				nodePricingResult, _ := r.estimateCostWithSource(ctx, []string{node.InstanceType}, nodeCapacityType, 1)
+				currentCost += nodePricingResult.Cost
+				if nodePricingResult.Source == PricingSourceUnknown {
+					// Unpriced node counted as $0 understates the pool's
+					// current cost; flag it so totals don't fake savings.
+					currentCostUnknown = true
+				}
 			}
 
 			// Use node's architecture if available
@@ -263,6 +270,7 @@ func (r *Recommender) GenerateRecommendationsFromNodePools(ctx context.Context, 
 			CurrentMemoryUsed:        currentMemoryUsed,
 			CurrentMemoryCapacity:    currentMemoryCapacity,
 			CurrentCost:              currentCost,
+			CurrentCostUnknown:       currentCostUnknown,
 			Currency:                 awspricing.PricingCurrencyForRegion(r.config.AWSRegion),
 			RecommendedNodes:         bestNodes,
 			RecommendedInstanceTypes: bestTypes,

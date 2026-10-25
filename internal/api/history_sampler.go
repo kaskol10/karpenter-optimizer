@@ -10,6 +10,7 @@ import (
 
 	"github.com/karpenter-optimizer/internal/awspricing"
 	"github.com/karpenter-optimizer/internal/history"
+	"github.com/karpenter-optimizer/internal/recommender"
 )
 
 const (
@@ -108,6 +109,7 @@ func (s *Server) sampleCluster() {
 	// is cheap once the AWS Pricing API results are cached. Per-NodePool cost
 	// is accumulated in the same pass for the /metrics snapshot.
 	var costPerHour float64
+	costUnknown := false
 	poolCost := map[string]float64{}
 	if s.recommender != nil {
 		for _, n := range nodes {
@@ -120,6 +122,12 @@ func (s *Server) sampleCluster() {
 			}
 			pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{n.InstanceType}, capacityType, 1)
 			costPerHour += pricingResult.Cost
+			if pricingResult.Source == recommender.PricingSourceUnknown {
+				// Unpriced node counted as $0: the sample is a partial sum,
+				// not the true cluster cost. Downstream consumers (cost-spike
+				// baseline) must treat it as no-data.
+				costUnknown = true
+			}
 			poolName := n.NodePool
 			if poolName == "" {
 				poolName = "unmanaged"
@@ -145,6 +153,7 @@ func (s *Server) sampleCluster() {
 		Nodes:             len(nodes),
 		Pods:              totalPods,
 		CostPerHour:       costPerHour,
+		CostUnknown:       costUnknown,
 		Currency:          awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
 	})
 }

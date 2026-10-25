@@ -22,9 +22,17 @@ func (s *Server) buildAlertSnapshot(ctx context.Context, disruptions []kubernete
 		points := s.historyStore.Series(24 * time.Hour)
 		var costs []float64
 		for _, p := range points {
-			if p.CostPerHour > 0 {
+			// Partially-priced samples (an unpriceable node counted as $0)
+			// understate the true cost and would fake a spike/dip, so they
+			// are treated as no-data.
+			if p.CostPerHour > 0 && !p.CostUnknown {
 				costs = append(costs, p.CostPerHour)
 			}
+		}
+		// The current cost must be the most recent sample; if the latest
+		// sample has an unknown cost there is no data for this tick.
+		if len(points) > 0 && points[len(points)-1].CostUnknown {
+			costs = nil
 		}
 		// Need a reasonable baseline: at least a dozen priced points.
 		if len(costs) >= 12 {

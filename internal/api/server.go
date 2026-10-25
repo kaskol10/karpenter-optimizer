@@ -614,9 +614,13 @@ func (s *Server) getRecommendations(c *gin.Context) {
 	// Calculate cluster-wide costs
 	// Since recommendations now includes all NodePools, we can sum directly
 	var currentClusterCost, recommendedClusterCost float64
+	costUnknown := false
 	for _, rec := range recommendations {
 		currentClusterCost += rec.CurrentCost
 		recommendedClusterCost += rec.RecommendedCost
+		if rec.CurrentCostUnknown {
+			costUnknown = true
+		}
 	}
 
 	c.JSON(200, gin.H{
@@ -626,6 +630,7 @@ func (s *Server) getRecommendations(c *gin.Context) {
 			"current":     currentClusterCost,
 			"recommended": recommendedClusterCost,
 			"savings":     currentClusterCost - recommendedClusterCost,
+			"costUnknown": costUnknown,
 			"currency":    awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
 		},
 		"note": "Recommendations based on actual NodePool capacity and node usage data",
@@ -720,11 +725,15 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 	var recommendedNodes int
 	var totalCurrentNodes int
 	var totalCurrentCost float64
+	costUnknown := false
 	for _, rec := range recommendations {
 		recommendedClusterCost += rec.RecommendedCost
 		recommendedNodes += rec.RecommendedNodes
 		totalCurrentCost += rec.CurrentCost
 		totalCurrentNodes += rec.CurrentNodes
+		if rec.CurrentCostUnknown {
+			costUnknown = true
+		}
 	}
 
 	// Send final progress update
@@ -740,6 +749,7 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 			"current":     totalCurrentCost,
 			"recommended": recommendedClusterCost,
 			"savings":     totalCurrentCost - recommendedClusterCost,
+			"costUnknown": costUnknown,
 			"currency":    awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
 		},
 		"clusterNodes": gin.H{
@@ -1001,6 +1011,7 @@ func (s *Server) listNodePools(c *gin.Context) {
 			np := &nodePools[i]
 			var totalCost float64
 			var overallPricingSource = recommender.PricingSourceUnknown
+			costUnknown := false
 
 			// Calculate cost based on actual nodes if available
 			if len(np.ActualNodes) > 0 {
@@ -1021,6 +1032,11 @@ func (s *Server) listNodePools(c *gin.Context) {
 						pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{node.InstanceType}, capacityType, 1)
 						nodeCost := pricingResult.Cost
 						totalCost += nodeCost
+						if pricingResult.Source == recommender.PricingSourceUnknown {
+							// Unpriceable node: summing it as $0 would understate
+							// the pool's cost, so the total is flagged unknown.
+							costUnknown = true
+						}
 						// Prioritize AWS Pricing API as the overall source if any node used it
 						if pricingResult.Source == recommender.PricingSourceAWSPricingAPI {
 							overallPricingSource = recommender.PricingSourceAWSPricingAPI
@@ -1043,9 +1059,11 @@ func (s *Server) listNodePools(c *gin.Context) {
 				pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, np.InstanceTypes, capacityType, np.CurrentNodes)
 				totalCost = pricingResult.Cost
 				overallPricingSource = pricingResult.Source
+				costUnknown = pricingResult.Source == recommender.PricingSourceUnknown
 			}
 
 			// Update NodePool with calculated cost
+			np.CostUnknown = costUnknown
 			if totalCost > 0 {
 				np.EstimatedCost = totalCost
 				np.PricingSource = string(overallPricingSource)
@@ -1679,8 +1697,9 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 	// Calculate cluster cost using AWS Pricing API if available
 	var totalClusterCost float64
 	var overallPricingSource = recommender.PricingSourceUnknown
+	costUnknown := false
 	if s.recommender != nil {
-		fmt.Printf("Calculating cluster cost for %d nodes...\n", totalNodes)
+		debugLog(s.config.Debug, "Calculating cluster cost for %d nodes...\n", totalNodes)
 		for _, node := range nodes {
 			if node.InstanceType != "" {
 				capacityType := node.CapacityType
@@ -1695,7 +1714,12 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 				pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{node.InstanceType}, capacityType, 1)
 				nodeCost := pricingResult.Cost
 				totalClusterCost += nodeCost
-				fmt.Printf("Node %s (%s): $%.4f/hr (source: %s)\n", node.Name, node.InstanceType, nodeCost, pricingResult.Source)
+				if pricingResult.Source == recommender.PricingSourceUnknown {
+					// Unpriceable node: summing it as $0 would understate the
+					// cluster cost (and fake savings), so flag the total.
+					costUnknown = true
+				}
+				debugLog(s.config.Debug, "Node %s (%s): %.4f/hr (source: %s)\n", node.Name, node.InstanceType, nodeCost, pricingResult.Source)
 				// Prioritize AWS Pricing API as the overall source if any node used it
 				if pricingResult.Source == recommender.PricingSourceAWSPricingAPI {
 					overallPricingSource = recommender.PricingSourceAWSPricingAPI
@@ -1704,7 +1728,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 				}
 			}
 		}
-		fmt.Printf("Total cluster cost: $%.4f/hr (source: %s)\n", totalClusterCost, overallPricingSource)
+		debugLog(s.config.Debug, "Total cluster cost: %.4f/hr (source: %s)\n", totalClusterCost, overallPricingSource)
 	}
 
 	summaryData := gin.H{
@@ -1730,6 +1754,11 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 	// When no node has instance-type metadata, costs cannot be calculated
 	// (on-prem nodes). Signal this to the frontend so it shows "n/a" instead of $0.00.
 	if totalNodes > 0 && nodesWithInstanceType == 0 {
+		summaryData["costUnknown"] = true
+	} else if costUnknown {
+		// At least one node's price is unavailable: the total is a partial sum
+		// (unpriced nodes counted as $0) and would understate cost. Mark it so
+		// consumers don't treat the number as the true cluster cost.
 		summaryData["costUnknown"] = true
 	}
 
@@ -1835,6 +1864,7 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 	// Use CurrentCost from recommendations for NodePools with recommendations
 	var totalCurrentNodes int
 	var totalCurrentCost float64
+	costUnknown := false
 	recommendedNodePoolNames := make(map[string]bool)
 	for _, rec := range recommendations {
 		recommendedNodePoolNames[rec.NodePoolName] = true
@@ -1862,9 +1892,13 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 					} else if nodeCapacityType != "spot" {
 						nodeCapacityType = "on-demand"
 					}
-					// Calculate cost using the exported EstimateCost method
-					nodeCost := s.recommender.EstimateCost(ctx, []string{node.InstanceType}, nodeCapacityType, 1)
-					totalCurrentCost += nodeCost
+					// Calculate cost using the exported EstimateCostWithSource method
+					pricingResult, _ := s.recommender.EstimateCostWithSource(ctx, []string{node.InstanceType}, nodeCapacityType, 1)
+					totalCurrentCost += pricingResult.Cost
+					if pricingResult.Source == recommender.PricingSourceUnknown {
+						// Unpriced node counted as $0 understates the total.
+						costUnknown = true
+					}
 				}
 			}
 		}
@@ -1878,6 +1912,7 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 			"current":     totalCurrentCost,
 			"recommended": recommendedClusterCost,
 			"savings":     totalCurrentCost - recommendedClusterCost,
+			"costUnknown": costUnknown,
 		},
 		"clusterNodes": gin.H{
 			"current": totalCurrentNodes,

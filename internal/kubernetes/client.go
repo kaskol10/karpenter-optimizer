@@ -841,6 +841,7 @@ type NodePoolInfo struct {
 	Taints        []Taint           `json:"taints,omitempty"`        // Node taints
 	EstimatedCost float64           `json:"estimatedCost"`           // Cost per hour per instance type
 	PricingSource string            `json:"pricingSource,omitempty"` // Source of pricing data (aws-pricing-api, hardcoded, etc.)
+	CostUnknown   bool              `json:"costUnknown,omitempty"`   // true when some nodes in this pool could not be priced (EstimatedCost is a partial sum)
 	CurrentNodes  int               `json:"currentNodes"`            // Actual number of nodes in the cluster
 	PodCount      int               `json:"podCount"`                // Total number of pods across all nodes in this NodePool
 	ActualNodes   []NodeInfo        `json:"actualNodes,omitempty"`   // Actual node details
