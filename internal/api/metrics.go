@@ -291,9 +291,17 @@ func (s *Server) initMetrics() {
 		return
 	}
 	s.metricsHandler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
-	s.router.GET("/metrics", func(c *gin.Context) {
-		s.metricsHandler.ServeHTTP(c.Writer, c.Request)
-	})
+	// Gate /metrics behind the same bearer token as the API when auth is
+	// enabled; otherwise it is registered directly on the router.
+	if s.config.APIAuthToken != "" {
+		s.router.GET("/metrics", bearerAuthMiddleware(s.config.APIAuthToken), func(c *gin.Context) {
+			s.metricsHandler.ServeHTTP(c.Writer, c.Request)
+		})
+	} else {
+		s.router.GET("/metrics", func(c *gin.Context) {
+			s.metricsHandler.ServeHTTP(c.Writer, c.Request)
+		})
+	}
 	debugLog(s.config.Debug, "metrics: /metrics enabled\n")
 }
 

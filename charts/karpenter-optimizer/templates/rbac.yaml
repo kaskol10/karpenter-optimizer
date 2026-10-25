@@ -11,6 +11,11 @@ rules:
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
   # Read pods and pod logs
+  # NOTE: pods/log is granted cluster-wide because Karpenter may be installed
+  # in any namespace. The application enforces the constraint:
+  # kubernetes.Client.GetKarpenterLogs only fetches logs from pods carrying
+  # the app.kubernetes.io/name=karpenter label (ErrNotKarpenterPod -> 403),
+  # so this grant cannot be used to read arbitrary pod logs.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]

@@ -48,8 +48,9 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 	
-	// Create agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, strategy, s.config.AgentHistoryFile)
+	// Create agent (reuses the process-wide learning agent to avoid
+	// per-request history I/O and goroutine leaks).
+	costAgent := agent.NewCostOptimizationAgentWithLearning(s.recommender, s.k8sClient, strategy, s.learningAgent())
 	
 	// Generate recommendations with error handling
 	plans, err := costAgent.GenerateRecommendations(ctx)
@@ -96,9 +97,8 @@ func (s *Server) recordOptimizationOutcome(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
-	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
-	learningAgent := costAgent.GetLearningAgent()
+	// Use the process-wide learning agent (avoid per-request construction).
+	learningAgent := s.learningAgent()
 	
 	if learningAgent == nil {
 		c.JSON(503, gin.H{"error": "Learning agent not available"})
@@ -132,9 +132,8 @@ func (s *Server) getLearningStats(c *gin.Context) {
 		return
 	}
 	
-	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
-	learningAgent := costAgent.GetLearningAgent()
+	// Use the process-wide learning agent (avoid per-request construction).
+	learningAgent := s.learningAgent()
 	
 	if learningAgent == nil {
 		c.JSON(200, gin.H{
@@ -185,9 +184,8 @@ func (s *Server) getOptimizationHistory(c *gin.Context) {
 		return
 	}
 	
-	// Create agent to access learning agent
-	costAgent := agent.NewCostOptimizationAgent(s.recommender, s.k8sClient, agent.StrategyBalanced, s.config.AgentHistoryFile)
-	learningAgent := costAgent.GetLearningAgent()
+	// Use the process-wide learning agent (avoid per-request construction).
+	learningAgent := s.learningAgent()
 	
 	if learningAgent == nil {
 		c.JSON(200, gin.H{

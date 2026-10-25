@@ -5,6 +5,7 @@ set -e
 # Create config.js from environment variable
 # Use single quotes in the JS to prevent issues with empty strings
 API_URL="${REACT_APP_API_URL:-}"
+API_TOKEN="${REACT_APP_API_TOKEN:-}"
 FINAL_CONFIG="/usr/share/nginx/html/config.js"
 VOLUME_CONFIG="/tmp/frontend-config/config.js"
 
@@ -15,6 +16,7 @@ cat > "$VOLUME_CONFIG" <<EOF
 // This file is generated at container startup from environment variables
 window.ENV = window.ENV || {};
 window.ENV.REACT_APP_API_URL = '${API_URL}';
+window.ENV.REACT_APP_API_TOKEN = '${API_TOKEN}';
 EOF
 
 # Copy from volume to final location
@@ -25,6 +27,7 @@ cp "$VOLUME_CONFIG" "$FINAL_CONFIG" || {
 }
 
 echo "Generated config.js with REACT_APP_API_URL='${API_URL}'"
+echo "API token configured: $([ -n "${API_TOKEN}" ] && echo yes || echo no)"
 echo "Config.js location: $FINAL_CONFIG"
 echo "Config.js contents:"
 cat "$FINAL_CONFIG"

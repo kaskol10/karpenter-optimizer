@@ -36,7 +36,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -46,6 +48,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/karpenter-optimizer/internal/agent"
 	"github.com/karpenter-optimizer/internal/alerts"
 	"github.com/karpenter-optimizer/internal/awspricing"
 	"github.com/karpenter-optimizer/internal/config"
@@ -88,6 +91,34 @@ type Server struct {
 	metricsMu               sync.RWMutex
 	metricsSnap             *metricsSnapState
 	metricsHandler          http.Handler
+	// sharedLearningAgent is a process singleton for the cost-optimization
+	// learning state. Constructing a new LearningAgent per request (the old
+	// behavior) re-read the history file, leaked an initial learn goroutine,
+	// and let concurrent requests write the same file uncoordinated.
+	sharedLearningAgent *agent.LearningAgent
+	learningOnce        sync.Once
+}
+
+// learningAgent returns the process-wide LearningAgent, constructing it (once)
+// on first use. The history file comes from AGENT_HISTORY_FILE.
+func (s *Server) learningAgent() *agent.LearningAgent {
+	s.learningOnce.Do(func() {
+		l, err := agent.NewLearningAgent(s.config.AgentHistoryFile)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize learning agent: %v", err)
+			return
+		}
+		s.sharedLearningAgent = l
+	})
+	return s.sharedLearningAgent
+}
+
+// CloseAgentState shuts down the learning agent (cancels its initial
+// background learning pass if it has not started). Called on graceful shutdown.
+func (s *Server) CloseAgentState() {
+	if s.sharedLearningAgent != nil {
+		s.sharedLearningAgent.Close()
+	}
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -97,20 +128,9 @@ func NewServer(cfg *config.Config) *Server {
 
 	r := gin.Default()
 
-	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
+	// CORS: same-origin by default (nginx serves the SPA + API). Only
+	// CORS_ALLOWED_ORIGIN deployments get headers — never wildcard+credentials.
+	r.Use(corsMiddleware(corsAllowedOrigin()))
 
 	// Initialize Kubernetes client
 	// Always try to initialize (will use provided kubeconfig, context, or default locations)
@@ -186,6 +206,10 @@ func NewServer(cfg *config.Config) *Server {
 	litellmProber = litellm.NewProber(cfg.LiteLLMMetricsAPIKey)
 	server.setupRoutes()
 	server.initMetrics()
+
+	if cfg.APIAuthToken == "" {
+		log.Println("Warning: API_AUTH_TOKEN is not set — the API has no authentication. Do not expose it beyond a trusted network.")
+	}
 
 	// Sample cluster usage and serving pod health into the history stores for
 	// trend sparklines. Both samplers run on the same interval.
@@ -324,49 +348,59 @@ func (s *Server) setupRoutes() {
 	})
 
 	api := s.router.Group("/api/v1")
+	// /health is always open: k8s liveness/readiness probes cannot carry an
+	// Authorization header. Every other route is behind the shared bearer
+	// token when API_AUTH_TOKEN is set (opt-in hardening; empty = open, as
+	// before).
+	api.GET("/health", s.healthCheck)
+
+	protected := api
+	if s.config.APIAuthToken != "" {
+		protected = api.Group("")
+		protected.Use(bearerAuthMiddleware(s.config.APIAuthToken))
+	}
 	{
-		api.GET("/health", s.healthCheck)
-		api.GET("/config", s.getConfig)
-		api.POST("/analyze", s.analyzeWorkloads)
-		api.GET("/recommendations", s.getRecommendations)
-		api.POST("/recommendations", s.generateRecommendations)
-		api.GET("/metrics/workload", s.getWorkloadMetrics)
-		api.POST("/metrics/workloads", s.getWorkloadsMetrics)
-		api.GET("/namespaces", s.listNamespaces)
-		api.GET("/workloads", s.listWorkloads)
-		api.GET("/workloads/all", s.listAllWorkloads)
-		api.GET("/workloads/:namespace/:name", s.getWorkload)
-		api.GET("/nodepools", s.listNodePools)
-		api.GET("/nodepools/:name", s.getNodePool)
-		api.GET("/nodepools/recommendations", s.getNodePoolRecommendations)
-		api.GET("/disruptions", s.getNodeDisruptions)
-		api.GET("/disruptions/recent", s.getRecentNodeDeletions)
-		api.GET("/nodes", s.getNodesWithUsage)
-		api.GET("/topology", s.getTopology)
-		api.GET("/cluster/summary", s.getClusterSummary)
-		api.GET("/history", s.getHistory)
-		api.GET("/serving", s.getServing)
-		api.GET("/serving/gateway", s.getServingGateway)
-		api.GET("/serving/gateway/history", s.getServingGatewayHistory)
-		api.GET("/serving/history", s.getServingHistory)
-		api.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
-		api.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
+		protected.GET("/config", s.getConfig)
+		protected.POST("/analyze", s.analyzeWorkloads)
+		protected.GET("/recommendations", s.getRecommendations)
+		protected.POST("/recommendations", s.generateRecommendations)
+		protected.GET("/metrics/workload", s.getWorkloadMetrics)
+		protected.POST("/metrics/workloads", s.getWorkloadsMetrics)
+		protected.GET("/namespaces", s.listNamespaces)
+		protected.GET("/workloads", s.listWorkloads)
+		protected.GET("/workloads/all", s.listAllWorkloads)
+		protected.GET("/workloads/:namespace/:name", s.getWorkload)
+		protected.GET("/nodepools", s.listNodePools)
+		protected.GET("/nodepools/:name", s.getNodePool)
+		protected.GET("/nodepools/recommendations", s.getNodePoolRecommendations)
+		protected.GET("/disruptions", s.getNodeDisruptions)
+		protected.GET("/disruptions/recent", s.getRecentNodeDeletions)
+		protected.GET("/nodes", s.getNodesWithUsage)
+		protected.GET("/topology", s.getTopology)
+		protected.GET("/cluster/summary", s.getClusterSummary)
+		protected.GET("/history", s.getHistory)
+		protected.GET("/serving", s.getServing)
+		protected.GET("/serving/gateway", s.getServingGateway)
+		protected.GET("/serving/gateway/history", s.getServingGatewayHistory)
+		protected.GET("/serving/history", s.getServingHistory)
+		protected.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
+		protected.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)
 
 		// Karpenter log analysis
-		api.POST("/karpenter/logs/analyze", s.analyzeKarpenterLog)
-		api.GET("/karpenter/pods", s.getKarpenterPods)
-		api.GET("/karpenter/logs", s.getKarpenterLogs)
+		protected.POST("/karpenter/logs/analyze", s.analyzeKarpenterLog)
+		protected.GET("/karpenter/pods", s.getKarpenterPods)
+		protected.GET("/karpenter/logs", s.getKarpenterLogs)
 
 		// Agent endpoints
-		api.GET("/agent/cost-optimization", s.getCostOptimizationRecommendations)
-		api.POST("/agent/outcomes", s.recordOptimizationOutcome)
-		api.GET("/agent/learning/stats", s.getLearningStats)
-		api.GET("/agent/learning/history", s.getOptimizationHistory)
+		protected.GET("/agent/cost-optimization", s.getCostOptimizationRecommendations)
+		protected.POST("/agent/outcomes", s.recordOptimizationOutcome)
+		protected.GET("/agent/learning/stats", s.getLearningStats)
+		protected.GET("/agent/learning/history", s.getOptimizationHistory)
 
 		// Alerting
-		api.GET("/alerts/config", s.getAlertsConfig)
-		api.PUT("/alerts/config", s.putAlertsConfig)
-		api.POST("/alerts/test", s.testAlerts)
+		protected.GET("/alerts/config", s.getAlertsConfig)
+		protected.PUT("/alerts/config", s.putAlertsConfig)
+		protected.POST("/alerts/test", s.testAlerts)
 	}
 }
 
@@ -2044,6 +2078,12 @@ func (s *Server) getKarpenterLogs(c *gin.Context) {
 
 	logs, err := s.k8sClient.GetKarpenterLogs(ctx, namespace, podName, errorOnly, tailLines)
 	if err != nil {
+		// The pod exists but isn't a Karpenter pod: a policy refusal, not a
+		// server fault.
+		if errors.Is(err, kubernetes.ErrNotKarpenterPod) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "pod is not a Karpenter pod"})
+			return
+		}
 		c.JSON(500, gin.H{"error": fmt.Sprintf("Failed to get Karpenter logs: %v", err)})
 		return
 	}

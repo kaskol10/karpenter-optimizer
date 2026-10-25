@@ -42,13 +42,13 @@ func NewCostOptimizationAgent(
 		log.Printf("Warning: Failed to initialize learning agent: %v", err)
 		learningAgent = nil
 	}
-	
+
 	// Check if LLM is actually available
 	useLLM := llmEnhancer.HasLLM()
 	if !useLLM {
 		log.Printf("LLM not configured - agent will use rule-based recommendations only")
 	}
-	
+
 	return &CostOptimizationAgent{
 		analyzer:      NewAnalyzer(rec, k8sClient),
 		planner:       NewPlanner(rec),
@@ -59,6 +59,34 @@ func NewCostOptimizationAgent(
 		learningAgent: learningAgent,
 		useLLM:        useLLM,  // Only enable if LLM is actually available
 		useLearning:   true,    // Enable learning by default
+	}
+}
+
+// NewCostOptimizationAgentWithLearning reuses an existing LearningAgent
+// (process singleton) instead of constructing a new one. This avoids
+// per-request history-file I/O and concurrent writes to the same file.
+func NewCostOptimizationAgentWithLearning(
+	rec *recommender.Recommender,
+	k8sClient *kubernetes.Client,
+	strategy OptimizationStrategy,
+	learningAgent *LearningAgent,
+) *CostOptimizationAgent {
+	if strategy == "" {
+		strategy = StrategyBalanced
+	}
+	llmEnhancer := NewLLMEnhancer(rec)
+	useLLM := llmEnhancer.HasLLM()
+
+	return &CostOptimizationAgent{
+		analyzer:      NewAnalyzer(rec, k8sClient),
+		planner:       NewPlanner(rec),
+		recommender:   rec,
+		k8sClient:     k8sClient,
+		strategy:      strategy,
+		llmEnhancer:   llmEnhancer,
+		learningAgent: learningAgent,
+		useLLM:        useLLM,
+		useLearning:   true,
 	}
 }
 
