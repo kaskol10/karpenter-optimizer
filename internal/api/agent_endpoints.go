@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"time"
-	
+
 	"github.com/gin-gonic/gin"
 	"github.com/karpenter-optimizer/internal/agent"
 )
@@ -43,15 +43,15 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 	default:
 		strategy = agent.StrategyBalanced
 	}
-	
+
 	// Use request context with timeout to allow cancellation
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
-	
+
 	// Create agent (reuses the process-wide learning agent to avoid
 	// per-request history I/O and goroutine leaks).
 	costAgent := agent.NewCostOptimizationAgentWithLearning(s.recommender, s.k8sClient, strategy, s.learningAgent())
-	
+
 	// Generate recommendations with error handling
 	plans, err := costAgent.GenerateRecommendations(ctx)
 	if err != nil {
@@ -63,7 +63,7 @@ func (s *Server) getCostOptimizationRecommendations(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	c.JSON(200, gin.H{
 		"plans":    plans,
 		"count":    len(plans),
@@ -87,30 +87,30 @@ func (s *Server) recordOptimizationOutcome(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "Recommender not configured"})
 		return
 	}
-	
+
 	var outcome agent.OptimizationOutcome
 	if err := c.ShouldBindJSON(&outcome); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-	
+
 	// Use the process-wide learning agent (avoid per-request construction).
 	learningAgent := s.learningAgent()
-	
+
 	if learningAgent == nil {
 		c.JSON(503, gin.H{"error": "Learning agent not available"})
 		return
 	}
-	
+
 	// Record outcome for learning
 	if err := learningAgent.RecordOutcome(ctx, outcome); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	c.JSON(200, gin.H{
 		"message": "Outcome recorded successfully",
 		"planId":  outcome.PlanID,
@@ -131,10 +131,10 @@ func (s *Server) getLearningStats(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "Recommender not configured"})
 		return
 	}
-	
+
 	// Use the process-wide learning agent (avoid per-request construction).
 	learningAgent := s.learningAgent()
-	
+
 	if learningAgent == nil {
 		c.JSON(200, gin.H{
 			"enabled": false,
@@ -142,12 +142,12 @@ func (s *Server) getLearningStats(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Get stats from learning agent
 	stats := map[string]interface{}{
 		"enabled": true,
 	}
-	
+
 	// Get strategy success rates
 	strategyRates := make(map[string]float64)
 	strategies := []agent.OptimizationStrategy{
@@ -162,10 +162,10 @@ func (s *Server) getLearningStats(c *gin.Context) {
 		strategyRates[string(strategy)] = rate
 	}
 	stats["strategySuccessRates"] = strategyRates
-	
+
 	// Get history count
 	stats["totalOutcomes"] = learningAgent.GetHistoryCount()
-	
+
 	c.JSON(200, stats)
 }
 
@@ -183,10 +183,10 @@ func (s *Server) getOptimizationHistory(c *gin.Context) {
 		c.JSON(503, gin.H{"error": "Recommender not configured"})
 		return
 	}
-	
+
 	// Use the process-wide learning agent (avoid per-request construction).
 	learningAgent := s.learningAgent()
-	
+
 	if learningAgent == nil {
 		c.JSON(200, gin.H{
 			"history": []agent.OptimizationOutcome{},
@@ -194,13 +194,12 @@ func (s *Server) getOptimizationHistory(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Get history
 	history := learningAgent.GetHistory()
-	
+
 	c.JSON(200, gin.H{
 		"history": history,
 		"count":   len(history),
 	})
 }
-

@@ -57,8 +57,8 @@ func NewCostOptimizationAgent(
 		strategy:      strategy,
 		llmEnhancer:   llmEnhancer,
 		learningAgent: learningAgent,
-		useLLM:        useLLM,  // Only enable if LLM is actually available
-		useLearning:   true,    // Enable learning by default
+		useLLM:        useLLM, // Only enable if LLM is actually available
+		useLearning:   true,   // Enable learning by default
 	}
 }
 
@@ -97,22 +97,22 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to list NodePools: %w", err)
 	}
-	
+
 	var plans []*OptimizationPlan
-	
+
 	for _, np := range nodePools {
 		// Skip NodePools with no nodes
 		if len(np.ActualNodes) == 0 {
 			continue
 		}
-		
+
 		// Analyze NodePool
 		analysis, err := a.analyzer.AnalyzeNodePool(ctx, np)
 		if err != nil {
 			log.Printf("Warning: Failed to analyze NodePool %s: %v", np.Name, err)
 			continue
 		}
-		
+
 		// Apply learning: adjust strategy if we have learned patterns
 		strategy := a.strategy
 		if a.useLearning && a.learningAgent != nil {
@@ -122,37 +122,37 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 				analysis.Confidence = a.learningAgent.AdjustConfidence(analysis.Confidence, np.Name, strategy)
 			}
 		}
-		
+
 		// Plan optimization
 		plan, err := a.planner.PlanOptimization(ctx, analysis, strategy, np)
 		if err != nil {
 			log.Printf("Warning: Failed to plan optimization for %s: %v", np.Name, err)
 			continue
 		}
-		
+
 		// Apply learning insights
 		if a.useLearning && a.learningAgent != nil {
 			plan.LearnedFromHistory = true
-			
+
 			// Get optimal configuration if learned
 			optimalConfig := a.learningAgent.GetOptimalConfiguration(np.Name)
 			if optimalConfig != nil && optimalConfig.Confidence > 0.7 {
-				plan.LearningInsights = append(plan.LearningInsights, 
-					fmt.Sprintf("Based on %d previous optimizations, optimal config: %v %s nodes", 
+				plan.LearningInsights = append(plan.LearningInsights,
+					fmt.Sprintf("Based on %d previous optimizations, optimal config: %v %s nodes",
 						optimalConfig.NodeCount, optimalConfig.InstanceTypes, optimalConfig.CapacityType))
 			}
-			
+
 			// Adjust confidence based on learning
 			plan.Confidence = a.learningAgent.AdjustConfidence(plan.Confidence, np.Name, strategy)
-			
+
 			// Add strategy success rate insight
 			strategyRate := a.learningAgent.GetStrategySuccessRate(strategy)
 			if strategyRate > 0.7 {
-				plan.LearningInsights = append(plan.LearningInsights, 
+				plan.LearningInsights = append(plan.LearningInsights,
 					fmt.Sprintf("Strategy '%s' has %.0f%% success rate historically", strategy, strategyRate*100))
 			}
 		}
-		
+
 		// Enhance recommendations with LLM if available and enabled
 		// This ensures AI-enhanced explanations are applied when LLM is configured
 		// Use a shorter timeout for LLM enhancement to avoid blocking
@@ -161,7 +161,7 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 			llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 			enhancedRecs, err := a.llmEnhancer.EnhanceRecommendationsWithLLM(llmCtx, plan.Recommendations)
 			llmCancel()
-			
+
 			if err == nil && len(enhancedRecs) > 0 {
 				plan.Recommendations = enhancedRecs
 				// AI-enhanced explanations are now in plan.Recommendations[].AIReasoning
@@ -176,13 +176,13 @@ func (a *CostOptimizationAgent) GenerateRecommendations(ctx context.Context) ([]
 			// Log when LLM is requested but not available
 			log.Printf("Info: LLM enhancement requested but LLM client not configured for NodePool %s", np.Name)
 		}
-		
+
 		// Only include plans with recommendations
 		if len(plan.Recommendations) > 0 {
 			plans = append(plans, plan)
 		}
 	}
-	
+
 	return plans, nil
 }
 
@@ -193,7 +193,7 @@ func (a *CostOptimizationAgent) GenerateRecommendationsForNodePool(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("failed to list NodePools: %w", err)
 	}
-	
+
 	var targetNodePool *kubernetes.NodePoolInfo
 	for i := range nodePools {
 		if nodePools[i].Name == nodePoolName {
@@ -201,23 +201,23 @@ func (a *CostOptimizationAgent) GenerateRecommendationsForNodePool(ctx context.C
 			break
 		}
 	}
-	
+
 	if targetNodePool == nil {
 		return nil, fmt.Errorf("NodePool %s not found", nodePoolName)
 	}
-	
+
 	// Analyze
 	analysis, err := a.analyzer.AnalyzeNodePool(ctx, *targetNodePool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze NodePool: %w", err)
 	}
-	
+
 	// Plan
 	plan, err := a.planner.PlanOptimization(ctx, analysis, a.strategy, *targetNodePool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to plan optimization: %w", err)
 	}
-	
+
 	// Enhance recommendations with LLM if available and enabled
 	// This ensures AI-enhanced explanations are applied when LLM is configured
 	if a.useLLM && a.llmEnhancer.HasLLM() && len(plan.Recommendations) > 0 {
@@ -229,7 +229,7 @@ func (a *CostOptimizationAgent) GenerateRecommendationsForNodePool(ctx context.C
 			log.Printf("Warning: Failed to enhance recommendations with LLM for NodePool %s: %v", nodePoolName, err)
 		}
 	}
-	
+
 	return plan, nil
 }
 
@@ -247,4 +247,3 @@ func (a *CostOptimizationAgent) GetStrategy() OptimizationStrategy {
 func (a *CostOptimizationAgent) GetLearningAgent() *LearningAgent {
 	return a.learningAgent
 }
-

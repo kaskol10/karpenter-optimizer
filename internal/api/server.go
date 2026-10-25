@@ -39,6 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -97,6 +98,11 @@ type Server struct {
 	// and let concurrent requests write the same file uncoordinated.
 	sharedLearningAgent *agent.LearningAgent
 	learningOnce        sync.Once
+	// cancelRoot cancels the background sampler contexts (history, serving,
+	// gateway, alerts). It is created in NewServer and invoked by Close() on
+	// graceful shutdown, so the samplers stop instead of running for the life
+	// of the process.
+	cancelRoot context.CancelFunc
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -201,6 +207,12 @@ func NewServer(cfg *config.Config) *Server {
 		alertsManager:           newAlertsManager(cfg),
 	}
 
+	// Root cancellable context for all background samplers. Created here so
+	// Close() can stop them on graceful shutdown instead of letting them run
+	// for the process lifetime (which also leaked samplers in tests).
+	rootCtx, cancelRoot := context.WithCancel(context.Background())
+	server.cancelRoot = cancelRoot
+
 	// Configure the process-wide LiteLLM gateway prober with the metrics
 	// auth key (empty = unauthenticated).
 	litellmProber = litellm.NewProber(cfg.LiteLLMMetricsAPIKey)
@@ -212,15 +224,38 @@ func NewServer(cfg *config.Config) *Server {
 	}
 
 	// Sample cluster usage and serving pod health into the history stores for
-	// trend sparklines. Both samplers run on the same interval.
+	// trend sparklines. Both samplers run on the same interval. They all honor
+	// rootCtx so Close() stops them.
 	if k8sClient != nil {
-		server.startHistorySampler(context.Background())
-		server.startServingHistorySampler(context.Background())
-		server.startGatewayHistorySampler(context.Background())
-		server.startAlertsSampler(context.Background())
+		server.startHistorySampler(rootCtx)
+		server.startServingHistorySampler(rootCtx)
+		server.startGatewayHistorySampler(rootCtx)
+		server.startAlertsSampler(rootCtx)
 	}
 
 	return server
+}
+
+// Close releases process resources on graceful shutdown: it stops the
+// background samplers (via the root context) and closes the durable history
+// store pools (Postgres/CNPG). It is idempotent and safe to call on a server
+// whose samplers never started.
+func (s *Server) Close() {
+	if s.cancelRoot != nil {
+		s.cancelRoot()
+	}
+	if s.servingDurableStore != nil {
+		if err := s.servingDurableStore.Close(); err != nil {
+			log.Printf("warning: close serving durable store: %v", err)
+		}
+	}
+	if s.gatewayHistoryStore != nil {
+		if err := s.gatewayHistoryStore.Close(); err != nil {
+			log.Printf("warning: close gateway history store: %v", err)
+		}
+	}
+	// Stop the learning agent's initial background pass if it has not started.
+	s.CloseAgentState()
 }
 
 // newAlertsManager constructs the alerts engine. It persists to the file named
@@ -472,6 +507,39 @@ func (s *Server) Run(addr string) error {
 	return s.router.Run(addr)
 }
 
+// RunContext serves HTTP on addr and, when ctx is canceled (SIGINT/SIGTERM),
+// gracefully drains in-flight requests (up to a 10s deadline) and releases
+// process resources via Close(). It returns nil on a clean shutdown.
+func (s *Server) RunContext(ctx context.Context, addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: s.router}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+		debugLog(s.config.Debug, "shutdown: draining in-flight requests (10s deadline)\n")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		shutdownErr := srv.Shutdown(shutdownCtx)
+		s.Close()
+		return shutdownErr
+	case err := <-errCh:
+		s.Close()
+		return err
+	}
+}
+
 // HealthCheck godoc
 // @Summary      Health check
 // @Description  Check API health and service status
@@ -628,7 +696,7 @@ func (s *Server) getRecommendations(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	// Get NodePools with actual node data
@@ -688,7 +756,7 @@ func (s *Server) getRecommendationsFromClusterSummarySSE(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 
 	// Set up SSE headers
@@ -859,7 +927,7 @@ func (s *Server) listNamespaces(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
 	namespaces, err := s.k8sClient.ListNamespaces(ctx)
@@ -903,7 +971,7 @@ func (s *Server) listWorkloads(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	workloads, err := s.k8sClient.ListWorkloads(ctx, namespace)
@@ -948,7 +1016,7 @@ func (s *Server) listAllWorkloads(c *gin.Context) {
 
 	// Use longer timeout for large clusters - listing workloads across all namespaces
 	// and fetching all pods can take time
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 
 	workloads, err := s.k8sClient.ListAllWorkloads(ctx)
@@ -997,7 +1065,7 @@ func (s *Server) getWorkload(c *gin.Context) {
 	name := c.Param("name")
 	workloadType := c.DefaultQuery("type", "deployment")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
 	workload, err := s.k8sClient.GetWorkload(ctx, namespace, name, workloadType)
@@ -1030,7 +1098,7 @@ func (s *Server) listNodePools(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for cost calculations
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second) // Increased timeout for cost calculations
 	defer cancel()
 
 	nodePools, err := s.k8sClient.ListNodePools(ctx)
@@ -1126,7 +1194,7 @@ func (s *Server) getNodePoolRecommendations(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	// Get NodePools with actual node data
@@ -1171,7 +1239,7 @@ func (s *Server) getNodePool(c *gin.Context) {
 
 	name := c.Param("name")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
 	nodePool, err := s.k8sClient.GetNodePool(ctx, name)
@@ -1222,7 +1290,7 @@ func (s *Server) getNodeDisruptions(c *gin.Context) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
 	disruptions, err := s.k8sClient.GetNodeDisruptions(ctx, sinceHours)
@@ -1331,7 +1399,7 @@ func (s *Server) getRecentNodeDeletions(c *gin.Context) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
 	deletions, err := s.k8sClient.GetRecentNodeDeletions(ctx, sinceHours)
@@ -1365,7 +1433,7 @@ func (s *Server) getNodesWithUsage(c *gin.Context) {
 
 	// Increase timeout to 60 seconds to handle many nodes with retries
 	// Each node can take time with retries, so we need more time for clusters with many nodes
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
@@ -1506,7 +1574,7 @@ func (s *Server) getTopology(c *gin.Context) {
 		maxPodsPerNode,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 
 	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
@@ -1635,7 +1703,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
@@ -1865,7 +1933,7 @@ func (s *Server) getRecommendationsFromClusterSummary(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 
 	// Get NodePools with actual node data
