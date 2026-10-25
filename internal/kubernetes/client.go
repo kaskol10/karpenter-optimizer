@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -2752,8 +2753,38 @@ func (c *Client) FindKarpenterPods(ctx context.Context) ([]KarpenterPodInfo, err
 	return karpenterPods, nil
 }
 
-// GetKarpenterLogs gets logs from a Karpenter pod, optionally filtered for ERROR level
+// karpenterPodLabelKey/Value identify Karpenter controller pods
+// (app.kubernetes.io/name=karpenter). It is the same label FindKarpenterPods
+// uses to discover them, and is the gate that keeps GetKarpenterLogs from
+// becoming a cluster-wide log dumper (the RBAC grants pods/log broadly, so
+// the application must enforce the constraint).
+const (
+	karpenterPodLabelKey   = "app.kubernetes.io/name"
+	karpenterPodLabelValue = "karpenter"
+)
+
+// ErrNotKarpenterPod is returned by GetKarpenterLogs when the requested pod
+// does not carry the Karpenter label. Callers surface it as a 403 rather than
+// a 500, since it is a policy decision, not a server fault.
+var ErrNotKarpenterPod = errors.New("not a Karpenter pod")
+
+// isKarpenterPod reports whether the pod carries the Karpenter label.
+func isKarpenterPod(pod *corev1.Pod) bool {
+	return pod != nil && pod.Labels[karpenterPodLabelKey] == karpenterPodLabelValue
+}
+
+// GetKarpenterLogs gets logs from a Karpenter pod, optionally filtered for ERROR level.
+// It verifies the pod actually carries the Karpenter label before fetching, so a
+// caller cannot point it at an arbitrary pod in an arbitrary namespace.
 func (c *Client) GetKarpenterLogs(ctx context.Context, namespace, podName string, errorOnly bool, tailLines *int64) ([]string, error) {
+	pod, err := c.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s/%s: %w", namespace, podName, err)
+	}
+	if !isKarpenterPod(pod) {
+		return nil, fmt.Errorf("%s/%s: %w", namespace, podName, ErrNotKarpenterPod)
+	}
+
 	// Get pod logs
 	opts := &corev1.PodLogOptions{
 		Container: "", // Use default container

@@ -48,6 +48,11 @@ type LearningAgent struct {
 	historyMu   sync.RWMutex
 	patterns    *LearnedPatterns
 	patternsMu  sync.RWMutex
+	// done lets the initial learnFromHistory goroutine bail out early if the
+	// agent is closed before it runs. The process should hold a single
+	// LearningAgent (see api.Server) so it is spawned once, not per request.
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // LearnedPatterns stores patterns learned from history
@@ -89,26 +94,46 @@ func NewLearningAgent(historyFile string) (*LearningAgent, error) {
 			RiskFactors:          make(map[string]float64),
 			InstanceTypePrefs:    make(map[string]float64),
 		},
+		done: make(chan struct{}),
 	}
-	
+
 	// Load existing history (non-blocking - continue even if it fails)
 	if err := agent.loadHistory(); err != nil {
 		log.Printf("Warning: Failed to load optimization history: %v (continuing without history)", err)
 		// Continue with empty history - this is not critical
 	}
-	
-	// Analyze history to learn patterns (non-blocking)
-	// Use a goroutine to avoid blocking initialization
+
+	// Analyze history to learn patterns (non-blocking). A goroutine is used to
+	// avoid blocking initialization; it can be cancelled via Close() if the
+	// agent is shut down before it starts.
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("Warning: Panic in learnFromHistory: %v", r)
 			}
 		}()
+		select {
+		case <-agent.done:
+			return
+		default:
+		}
 		agent.learnFromHistory()
 	}()
-	
+
 	return agent, nil
+}
+
+// Close cancels the initial background learning pass if it has not started.
+// Safe to call multiple times and on a nil agent. Once learnFromHistory is
+// running it cannot be interrupted, but it is bounded by the history size and
+// holds no state that outlives the process.
+func (l *LearningAgent) Close() {
+	if l == nil {
+		return
+	}
+	l.closeOnce.Do(func() {
+		close(l.done)
+	})
 }
 
 // RecordOutcome records an optimization outcome for learning.

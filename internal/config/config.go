@@ -41,6 +41,10 @@ type Config struct {
 	AWSSessionToken    string // AWS session token (for temporary credentials)
 	AgentHistoryFile   string // Where the cost-optimization agent persists its learning history
 	Debug              bool
+	// APIAuthToken is the shared bearer token for /api/v1 (and /metrics when
+	// enabled). Empty = API left open (legacy behavior, logged as a warning);
+	// /health stays open either way for probes.
+	APIAuthToken string
 }
 
 func Load() *Config {
@@ -116,6 +120,7 @@ func Load() *Config {
 		AWSSessionToken:      getEnv("AWS_SESSION_TOKEN", ""),
 		AgentHistoryFile:     getEnv("AGENT_HISTORY_FILE", "/tmp/karpenter-optimizer-history.json"),
 		Debug:                getEnvBool("DEBUG", false),
+		APIAuthToken:         getEnv("API_AUTH_TOKEN", ""),
 	}
 }
 

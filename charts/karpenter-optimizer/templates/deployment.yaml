@@ -127,6 +127,21 @@ spec:
             - name: METRICS_ENABLED
               value: "true"
             {{- end }}
+            {{- if .Values.config.apiAuthTokenSecret }}
+            # Shared bearer token for the API (protects /api/v1 and /metrics).
+            # Reference an existing Secret; the key must be api-auth-token.
+            - name: API_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.apiAuthTokenSecret }}
+                  key: api-auth-token
+                  optional: true
+            {{- else if .Values.config.apiAuthToken }}
+            # Dev-only: plain token (visible in the pod spec — prefer the
+            # secret in production).
+            - name: API_AUTH_TOKEN
+              value: {{ .Values.config.apiAuthToken | quote }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -171,6 +186,18 @@ spec:
           env:
             - name: REACT_APP_API_URL
               value: {{ .Values.frontend.apiUrl | quote }}
+            {{- if .Values.config.apiAuthTokenSecret }}
+            # Send the shared API token as a Bearer header on every API call.
+            - name: REACT_APP_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.apiAuthTokenSecret }}
+                  key: api-auth-token
+                  optional: true
+            {{- else if .Values.config.apiAuthToken }}
+            - name: REACT_APP_API_TOKEN
+              value: {{ .Values.config.apiAuthToken | quote }}
+            {{- end }}
           volumeMounts:
             {{- if .Values.frontend.nginxConfig }}
             - name: nginx-config

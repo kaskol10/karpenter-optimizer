@@ -162,6 +162,14 @@ config:
   port: 8080
   logLevel: "info"
 
+  # API authentication (opt-in). When set, /api/v1 (except /health) and
+  # /metrics require `Authorization: Bearer <token>`. Leave both empty for the
+  # legacy open API (a startup warning is logged).
+  # Preferred: reference an existing Secret containing key `api-auth-token`.
+  apiAuthTokenSecret: ""
+  # Dev-only: plain token (rendered into the pod spec — avoid in production).
+  apiAuthToken: ""
+
 # Alerting engine (opt-in). When enabled, the backend evaluates a set of
 # conditions on each sampler tick and delivers new alerts to the configured
 # channels (ntfy / Discord / Slack / generic webhook). All channels are
