@@ -21,8 +21,11 @@ const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
   : (process.env.REACT_APP_API_URL || '');
 
 const TAIL_OPTIONS = ['100', '500', '1000', '5000'];
+// "any" is a non-empty sentinel for "no time window" (Radix Select.Item
+// forbids value=""; the empty string is reserved for clearing the selection).
+// fetchLogs maps it back to omitting the sinceSeconds query param.
 const SINCE_OPTIONS = [
-  { value: '', label: 'Any time (by tail)' },
+  { value: 'any', label: 'Any time (by tail)' },
   { value: '300', label: 'Last 5m' },
   { value: '900', label: 'Last 15m' },
   { value: '3600', label: 'Last 1h' },
@@ -118,7 +121,7 @@ function LogExplorer({ seedPod }) {
   const [containers, setContainers] = useState([]);
   const [container, setContainer] = useState('');
   const [tail, setTail] = useState('500');
-  const [since, setSince] = useState('');
+  const [since, setSince] = useState('any');
   const [previous, setPrevious] = useState(false);
   const [errorOnly, setErrorOnly] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -163,7 +166,8 @@ function LogExplorer({ seedPod }) {
         tailLines: opts?.tail ?? tail,
       };
       if (opts?.container ?? container) params.container = opts?.container ?? container;
-      if (opts?.since ?? since) params.sinceSeconds = opts?.since ?? since;
+      const sinceVal = opts?.since ?? since;
+      if (sinceVal && sinceVal !== 'any') params.sinceSeconds = sinceVal;
       if (opts?.previous ?? previous) params.previous = 'true';
       const res = await axios.get(`${API_URL}/api/v1/pods/logs`, { params });
       setLogs(res.data.logs || []);
