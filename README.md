@@ -27,7 +27,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 💾 **Durable Serving History**: per-pod serving samples persisted to Postgres/CNPG (same instance as the gateway cost history) when `SERVING_HISTORY_DSN` (or `GATEWAY_HISTORY_DB_*`) is set — the Serving tab's trend window gains **7d** alongside 1h/6h/24h, surviving restarts; without a DSN it stays in-memory as before
 - 🌗 **Dark/Light Theme**: sun/moon toggle in the header (persisted, defaults to system preference, no flash on first paint) — every view, chart, and table is themed through semantic tokens
 - 🖼️ **Polished UI States**: consistent empty-state cards with retry actions, loading skeletons that avoid layout shift, and error banners with retry across every tab
-- 🔍 **Karpenter Log Analyzer**: Analyze Karpenter error logs with AI-powered explanations and actionable recommendations
+- 🔍 **Cluster-Wide Log Analyzer**: pick **any pod** in the cluster and read/analyze its logs — container selection, tail/since/previous-container controls, search with match highlighting, and AI (or built-in heuristic) analysis of error lines with actionable recommendations. Karpenter's structured error logs get the dedicated Karpenter analysis; everything else is analyzed generically. Workloads rows deep-link straight into the explorer for that workload's pods
 - 🎮 **GPU Allocation Visualization**: See GPU count, memory, and allocation per node, pod, and cluster (allocation-based, no DCGM/Prometheus). GPU count/memory read from node labels (`nvidia.com/gpu.count`, `nvidia.com/gpu.memory`); HAMi/KAI memory partitioning aware (`nvidia.com/gpumem` + `hami.io/vgpu-devices-allocated`) — when HAMi is detected, GPU usage is reported as **memory % in use** plus a **GPU pod** count (fractional-GPU friendly)
 - 🤖 **LLM Serving Health**: A "Serving" tab probes in-cluster vLLM/sglang pods to show inference health — model, KV cache %, running/waiting, TTFT (mean/p95), end-to-end latency (mean/p95), preemptions, token throughput, and request rate. Each card shows a one-glance status (OK/Busy/Slow/Under pressure) with fix hints, where the model runs (node, instance type, GPU model, and the specific GPU card UUID on HAMi/KAI clusters), a "Model usage" chart that ranks models by throughput, and collapsible per-metric trend sparklines (1h/6h/24h) with a "last issue seen" marker for historical traceability
 - 🚦 **LiteLLM AI-Gateway Health**: when LiteLLM proxy pods are detected, the Serving tab shows a **LiteLLM Gateway** card — fleet-wide in-flight requests, admission queue, 503 rejections, error rate, E2E p95, gateway **overhead** p95 (isolates gateway cost from model latency), requests/s, cumulative spend, and a breakdown table you can **split by App / API key / Team** (`metadata_trace_name` / `api_key_alias` / `team_alias`, default App) — per calling dimension: total tokens split input/output, requests, tokens/s, spend; the **Models** view shows per-model latency + spend with **expandable rows** revealing which apps/keys/teams use each model. A **Usage by day** dashboard tracks per-day spend and token usage (UTC, 00:00–23:59) over 7/14/30 days — stacked bars by the selected split dimension plus a per-day table with the top consumer. Set `LITELLM_METRICS_API_KEY` if the proxy's `/metrics` requires auth (LiteLLM ≥ v1.85.0); a 401/403 shows an actionable hint instead of failing
@@ -300,6 +300,10 @@ make swagger
 - `GET /api/v1/serving/gateway/history?split=app&window=14d` - Per-day LiteLLM gateway cost & token usage by split dimension (or fleet total); in-memory by default, durable CNPG Postgres when enabled
 - `GET /api/v1/disruptions` - Get node disruption information
 - `GET /api/v1/disruptions/recent` - Get recent node deletions
+- `GET /api/v1/pods?namespace=` - List pods as compact summaries (status, readiness, containers, restarts, Karpenter flag) for the Log Analyzer picker
+- `GET /api/v1/pods/logs?namespace=&pod=&container=&tailLines=&sinceSeconds=&previous=` - Container logs for any pod (no Karpenter gate)
+- `POST /api/v1/logs/analyze` - Analyze a Karpenter JSON error line or a block of generic container logs (LLM when configured, built-in heuristic classifier otherwise)
+- `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs (Karpenter-JSON only; the Karpenter pod log gate is unchanged)
 - `GET /api/v1/alerts/config` - Alerting config (channel URLs masked); 503 when alerts are not configured
 - `PUT /api/v1/alerts/config` - Replace the alerting config (conditions, reminder interval, channels); masked URLs are preserved
 - `POST /api/v1/alerts/test` - Send a test alert through every configured channel
@@ -385,7 +389,7 @@ The tool fetches existing Karpenter NodePool configurations:
 │   │   │   ├── AgentRecommendations.js
 │   │   │   ├── DisruptionTracker.js
 │   │   │   ├── GlobalClusterSummary.js
-│   │   │   ├── KarpenterLogAnalyzer.js
+│   │   │   ├── LogExplorer.js
 │   │   │   ├── NodePoolCard.js
 │   │   │   ├── NodeUsageView.js
 │   │   │   ├── TopologyView.js

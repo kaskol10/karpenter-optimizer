@@ -13,7 +13,7 @@ import TopologyView from './components/TopologyView';
 import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
-import KarpenterLogAnalyzer from './components/KarpenterLogAnalyzer';
+import LogExplorer from './components/LogExplorer';
 import AlertsSettings from './components/AlertsSettings';
 import ServingHealth from './components/ServingHealth';
 import { cn } from './lib/utils';
@@ -354,7 +354,7 @@ function App() {
           {/* Overview Tab */}
           {activeTab === 'overview' && (
             <>
-              <GlobalClusterSummary 
+              <GlobalClusterSummary
                 onRecommendationsGenerated={setRecommendations}
                 onClusterCostUpdate={setClusterCost}
               />
@@ -455,7 +455,7 @@ function App() {
           {activeTab === 'disruptions' && <DisruptionTracker />}
 
           {/* Log Analyzer Tab */}
-          {activeTab === 'logs' && <KarpenterLogAnalyzer />}
+          {activeTab === 'logs' && <LogExplorer />}
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (

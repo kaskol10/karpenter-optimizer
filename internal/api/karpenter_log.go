@@ -481,3 +481,319 @@ func (s *Server) generateLogRecommendations(parsedError *KarpenterLogError, erro
 
 	return result
 }
+
+// genericLogPattern is a built-in heuristic for classifying container log
+// lines when no LLM is configured. Order matters: the first match wins, and
+// specific patterns (OOM, image pull) come before generic "error".
+type genericLogPattern struct {
+	name     string
+	category string
+	severity string
+	// match is applied to the lowercased line.
+	match func(lineLower string) bool
+	// explanation is the user-facing text; %s is not used — keep it static
+	// so multiple lines in the same category dedupe cleanly.
+	explanation string
+	recs        []string
+}
+
+func genericLogPatterns() []genericLogPattern {
+	contains := func(substrs ...string) func(string) bool {
+		return func(lineLower string) bool {
+			for _, s := range substrs {
+				if strings.Contains(lineLower, s) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return []genericLogPattern{
+		{
+			name:        "OOMKilled",
+			category:    "Out of memory",
+			severity:    "critical",
+			match:       contains("oomkilled", "oom_kill", "out of memory", "memory cgroup out of memory"),
+			explanation: "A container was killed by the OOM killer: it exceeded its memory limit (or the node ran out of memory). The pod will typically restart in a loop until the memory request/limit is fixed.",
+			recs: []string{
+				"Raise the container memory limit, or reduce the workload's memory footprint (heap size, batch size, cache).",
+				"kubectl describe pod <pod> shows the OOMKilled reason and the limit that was hit.",
+			},
+		},
+		{
+			name:        "ImagePull",
+			category:    "Image pull failure",
+			severity:    "critical",
+			match:       contains("imagepullbackoff", "errimagepull", "pullaccessdenied", "notfound", "pull secret"),
+			explanation: "The kubelet could not pull the container image: wrong tag/repository, private registry without a pull secret, or an unreachable registry.",
+			recs: []string{
+				"Verify the image name and tag exist in the registry.",
+				"For private registries, check the serviceAccountName's imagePullSecrets and the node's network path to the registry.",
+			},
+		},
+		{
+			name:        "CrashLoop",
+			category:    "Crash loop",
+			severity:    "critical",
+			match:       contains("crashloopbackoff", "back-off restarting failed container", "container exited with code"),
+			explanation: "The container keeps exiting and being restarted by kubelet. The exit code in this message (or in the previous container's logs) points at the failure — use the 'previous' log toggle to see why it exited.",
+			recs: []string{
+				"Check the exit code: 137 is usually OOMKilled, 127 a missing command, 1 an application error.",
+				"Fetch the previous container's logs to see the exit-time error.",
+			},
+		},
+		{
+			name:        "Permission",
+			category:    "Permission / admission",
+			severity:    "warning",
+			match:       contains("permission denied", "operation not permitted", "access denied", "forbidden", "unauthorized", "admission webhook", "denied the request"),
+			explanation: "The process or an admission webhook was denied access: missing RBAC/SA permissions, a read-only filesystem where a write was attempted, or a policy webhook rejecting the object.",
+			recs: []string{
+				"Check RBAC (ClusterRole/Role bindings) or the SA token for the API calls being made.",
+				"For webhooks, identify the denying webhook in the message and check its config.",
+			},
+		},
+		{
+			name:        "Connection",
+			category:    "Network / dependency",
+			severity:    "warning",
+			match:       contains("connection refused", "connection reset", "no route to host", "i/o timeout", "context deadline exceeded", "dial tcp", "dns", "no such host"),
+			explanation: "The process failed to reach a network dependency: the target is down, a Service/endpoint is missing, DNS cannot resolve the name, or a firewall is blocking the path.",
+			recs: []string{
+				"Verify the dependency's Service and endpoints exist in the same cluster (or the remote network is reachable).",
+				"Check NetworkPolicy rules between this pod's namespace and the target.",
+			},
+		},
+		{
+			name:        "DiskPressure",
+			category:    "Disk pressure",
+			severity:    "warning",
+			match:       contains("no space left on device", "evicted", "nodefs", "imagefs", "disk pressure"),
+			explanation: "The node or container hit a disk limit: ephemeral storage, container images, or logs filled the volume and the kubelet may evict pods.",
+			recs: []string{
+				"Check node disk usage (kubectl describe node) and PVC/ephemeral storage requests.",
+				"Rotate or limit log volume; raise ephemeral-storage requests if the workload writes large temp data.",
+			},
+		},
+		{
+			name:        "PanicFatal",
+			category:    "Application crash",
+			severity:    "critical",
+			match:       contains("panic:", "fatal error", "segmentation fault", "core dumped", "uncaught exception"),
+			explanation: "The application crashed (panic, segfault, fatal error). The stack trace above this line is the real payload — analyze the frames, not this marker.",
+			recs: []string{
+				"Read the stack trace / top of the crash for the failing function.",
+				"Check for nil dereferences, missing config, or incompatible data in the crashing container's language/runtime logs.",
+			},
+		},
+		{
+			name:        "Error",
+			category:    "Error",
+			severity:    "warning",
+			match:       contains(`"level":"error"`, `level=error`, "error:", "error=", "[error]", " err ", "exception"),
+			explanation: "A generic error-level log line. The message content identifies the subsystem; pair it with the surrounding context lines for root cause.",
+			recs: []string{
+				"Look at the lines around the error for the failing operation and its input (request id, object name).",
+			},
+		},
+	}
+}
+
+// genericLogLine is one matched log line with its classification.
+type genericLogLine struct {
+	Line        string
+	Category    string
+	Severity    string
+	Explanation string
+}
+
+// classifyGenericLogs scans a block of container log lines and returns the
+// matched (line, category) pairs, capped to keep the analysis payload small.
+func classifyGenericLogs(logText string) []genericLogLine {
+	patterns := genericLogPatterns()
+	seen := make(map[string]bool) // dedupe by category
+	var out []genericLogLine
+	for _, raw := range strings.Split(logText, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		lineLower := strings.ToLower(line)
+		for _, p := range patterns {
+			if p.match(lineLower) {
+				out = append(out, genericLogLine{
+					Line:        line,
+					Category:    p.category,
+					Severity:    p.severity,
+					Explanation: p.explanation,
+				})
+				seen[p.category] = true
+				break // first (most specific) match wins per line
+			}
+		}
+		if len(out) >= 25 {
+			break
+		}
+	}
+	// Drop duplicate categories: keep the first occurrence of each.
+	unique := make(map[string]bool)
+	result := out[:0]
+	for _, l := range out {
+		if unique[l.Category] {
+			continue
+		}
+		unique[l.Category] = true
+		result = append(result, l)
+	}
+	return result
+}
+
+// analyzeGenericLog analyzes a block of (non-Karpenter-JSON) container logs.
+// With an LLM configured it asks the LLM for an explanation of the matched
+// error lines; without one it relies purely on the built-in heuristics.
+func (s *Server) analyzeGenericLog(ctx context.Context, logText string) (*LogAnalysisResponse, error) {
+	matches := classifyGenericLogs(logText)
+
+	errorCauses := make([]ErrorCauseDetail, 0, len(matches))
+	for _, m := range matches {
+		// Keep the error text short for display.
+		display := m.Line
+		if len(display) > 300 {
+			display = display[:300] + "..."
+		}
+		errorCauses = append(errorCauses, ErrorCauseDetail{
+			Error:       display,
+			Category:    m.Category,
+			Explanation: m.Explanation,
+			Severity:    m.Severity,
+		})
+	}
+
+	// Recommendations: union of the matched categories' recs, deduped.
+	recSet := make(map[string]bool)
+	var recommendations []string
+	for _, p := range genericLogPatterns() {
+		matched := false
+		for _, m := range matches {
+			if m.Category == p.category {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		for _, r := range p.recs {
+			if !recSet[r] {
+				recSet[r] = true
+				recommendations = append(recommendations, r)
+			}
+		}
+	}
+
+	summary := fmt.Sprintf("%d line(s) analyzed, %d error pattern(s) matched", countLines(logText), len(matches))
+	if len(matches) == 0 {
+		summary = fmt.Sprintf("%d line(s) analyzed, no known error patterns matched", countLines(logText))
+	}
+
+	explanation := ""
+	if s.recommender != nil && s.recommender.HasLLM() {
+		explanation, _ = s.generateGenericAIExplanation(ctx, logText, matches)
+	}
+	if explanation == "" {
+		explanation = s.generateGenericBasicExplanation(matches, logText)
+	}
+
+	return &LogAnalysisResponse{
+		Summary:         summary,
+		Explanation:     explanation,
+		ErrorCauses:     errorCauses,
+		Recommendations: recommendations,
+	}, nil
+}
+
+// countLines counts non-empty lines in a log block.
+func countLines(text string) int {
+	n := 0
+	for _, l := range strings.Split(text, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// generateGenericBasicExplanation builds a heuristic-only explanation.
+func (s *Server) generateGenericBasicExplanation(matches []genericLogLine, logText string) string {
+	if len(matches) == 0 {
+		return "No known error patterns were detected in the selected log lines. If the workload is misbehaving, try widening the tail window, enabling 'previous' for terminated containers, or selecting the container that owns the failing workload."
+	}
+	var parts []string
+	parts = append(parts, "Built-in analysis (no LLM configured). Matched patterns:")
+	for i, m := range matches {
+		if i >= 5 {
+			parts = append(parts, "- ... (truncated)")
+			break
+		}
+		parts = append(parts, fmt.Sprintf("- [%s] %s: %s", m.Severity, m.Category, m.Explanation))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// generateGenericAIExplanation asks the LLM to explain the matched log
+// context. The log is truncated to keep the prompt bounded.
+func (s *Server) generateGenericAIExplanation(ctx context.Context, logText string, matches []genericLogLine) (string, error) {
+	if s.recommender == nil || !s.recommender.HasLLM() {
+		return "", fmt.Errorf("llm client not available")
+	}
+	llmClient := s.recommender.GetLLMClient()
+	if llmClient == nil {
+		return "", fmt.Errorf("LLM client not available")
+	}
+
+	trimmed := logText
+	const maxLogChars = 12000
+	if len(trimmed) > maxLogChars {
+		trimmed = trimmed[:maxLogChars] + "\n... (truncated)"
+	}
+
+	heuristicLines := ""
+	for i, m := range matches {
+		if i >= 10 {
+			break
+		}
+		heuristicLines += fmt.Sprintf("- [%s/%s] %s\n", m.Severity, m.Category, m.Line[:minInt(200, len(m.Line))])
+	}
+
+	prompt := fmt.Sprintf(`You are a Kubernetes operations expert. Below is a block of container log lines from a pod in the cluster, followed by the error patterns a heuristic classifier detected in them.
+
+Log excerpt:
+%s
+
+Detected patterns:
+%s
+
+Provide a concise explanation (3-5 sentences) that:
+1. Names the most likely root cause given the log content
+2. Explains why it happens and its impact
+3. Gives 1-3 concrete next actions a platform engineer should take
+
+Be specific and technical. Do not invent details not present in the logs; if the excerpt is ambiguous, say so and what to fetch next (e.g. previous container logs, node events).`, trimmed, heuristicLines)
+
+	aiCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	response, err := llmClient.Chat(aiCtx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("ai explanation failed: %w", err)
+	}
+	return strings.TrimSpace(response), nil
+}
+
+// minInt returns the smaller of a and b.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
