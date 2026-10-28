@@ -15,6 +15,10 @@ func setupTestServer() *Server {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
 		APIPort: "8080",
+		// A nonexistent kubeconfig keeps the server hermetic: no real cluster
+		// connection, and no background samplers started by NewServer.
+		// Tests that need a k8s client assign server.k8sClient directly.
+		KubeconfigPath: "/nonexistent/kubeconfig-test",
 	}
 	return NewServer(cfg)
 }

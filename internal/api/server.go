@@ -426,6 +426,11 @@ func (s *Server) setupRoutes() {
 		protected.GET("/karpenter/pods", s.getKarpenterPods)
 		protected.GET("/karpenter/logs", s.getKarpenterLogs)
 
+		// Generic log explorer (any pod in the cluster)
+		protected.GET("/pods", s.listPods)
+		protected.GET("/pods/logs", s.getPodLogs)
+		protected.POST("/logs/analyze", s.analyzeLog)
+
 		// Agent endpoints
 		protected.GET("/agent/cost-optimization", s.getCostOptimizationRecommendations)
 		protected.POST("/agent/outcomes", s.recordOptimizationOutcome)

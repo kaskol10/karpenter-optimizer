@@ -67,6 +67,13 @@ func NewClient(kubeconfigPath, kubeContext string) (*Client, error) {
 	return NewClientWithDebug(kubeconfigPath, kubeContext, false)
 }
 
+// NewClientWithClientset builds a Client around an existing clientset
+// (dependency injection; used by tests and by callers that already hold an
+// authenticated clientset). It has no in-cluster/kubeconfig fallback.
+func NewClientWithClientset(cs kubernetes.Interface) *Client {
+	return &Client{clientset: cs}
+}
+
 func NewClientWithDebug(kubeconfigPath, kubeContext string, debug bool) (*Client, error) {
 	var config *rest.Config
 	var err error

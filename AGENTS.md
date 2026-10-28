@@ -21,7 +21,7 @@ This document provides context and guidelines for AI coding assistants working o
   - `internal/api/server.go` - REST API endpoints
   - `internal/recommender/recommender.go` - Legacy recommendation logic (cluster-summary based)
   - `internal/recommender/node_pool_recommender.go` - **PRIMARY** recommendation engine (NodePool-based)
-  - `internal/kubernetes/client.go` - Kubernetes API client (nodes, pods, NodePools)
+  - `internal/kubernetes/client.go` - Kubernetes API client (nodes, pods, NodePools); `pods.go` adds `ListPods` (compact `PodSummary` for the Log Explorer picker) and generic `GetPodLogs` (no Karpenter gate — the gated `GetKarpenterLogs` stays for `/karpenter/logs`), plus `NewClientWithClientset` for DI and `IsNotFound` for 404 mapping
  - `internal/awspricing/client.go` - AWS Pricing API client for region-aware instance pricing, currency selection, regional endpoints, and transient endpoint failover
  - `internal/power/power.go` - Static EC2-family wattage table; `Estimate(instanceTypes)` returns fleet watts + coverage
  - `internal/ollama/client.go` - Ollama LLM client for AI explanations
@@ -42,6 +42,7 @@ This document provides context and guidelines for AI coding assistants working o
   - `components/ui/empty-state.jsx` + `components/ui/skeleton.jsx` - Shared empty-state card (icon + title + hint + optional retry/action) and pulse `Skeleton`/`SkeletonRows` used by every tab (no layout shift while loading); error banners carry a retry button
   - `components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
   - `components/NodePoolCard.js` - Displays individual NodePool recommendations
+ - `components/LogExplorer.js` - Log Analyzer tab (generic, any pod). Pod picker (namespace dropdown + name/namespace typeahead, Karpenter pods flagged + sorted to top, restart count) → log viewer (container select, tail 100/500/1000/5000, since 5m/15m/1h/1d, "previous terminated container" toggle, client-side error-only filter, search with match highlight + prev/next, error-line tinting). "Analyze selection" / "Analyze errors" / "Analyze last 50" POST to `POST /api/v1/logs/analyze`; results render `summary`/`explanation`/`errorCauses`/`recommendations` (Karpenter `parsedError` block only when present). Accepts a `seedPod` ("namespace/name" or "namespace") prop for deep-links from other tabs (Workloads row **Logs**). Replaces the old Karpenter-only `KarpenterLogAnalyzer`
  - `components/NodeUsageView.js` - Real-time node resource usage visualization
  - `components/ServingHealth.js` - LLM serving (vLLM/sglang) inference health cards + "Model usage" throughput ranking & sort + per-server status badge (OK/Busy/Slow/Under pressure via `getServingStatus`, with meaning + fix hints in the tooltip) + metric-explanation tooltips and collapsible "What do these metrics mean?" accordion + per-card **collapsible** Trends sparklines (TTFT p95, E2E p95, KV cache %, throughput, req/s over 1h/6h/24h; collapsed by default showing a KV%/throughput/last-issue summary line) + per-card GPU card-UUID badges (`gpuDevices` from the HAMi annotation, short UUID + memory, full UUID in tooltip) + **LiteLLM Gateway card** (stat tiles: in-flight, queued, 503s, error rate, E2E p95, overhead p95, req/s; **Split by** segmented control — App / API key / Team, default App — driving both the breakdown table and the expandable per-model detail; per-model table with **expandable rows** revealing the per-model breakdown for the selected split dimension (tokens in/out/total + spend); **Apps/Models toggle** (default Apps) with a per-dimension table — token total + input/output split, req total, tokens/s, spend; amber banner with `LITELLM_METRICS_API_KEY` hint on 401/403; hidden when no LiteLLM proxy is detected) fed by `/api/v1/serving/gateway`. The card also renders a **Usage by day** dashboard (`GatewayCostHistory`, recharts) fed by `/api/v1/serving/gateway/history` — a stacked per-day bar chart (UTC days, 00:00–23:59) following the active Split-by dimension with a spend/tokens toggle + optional daily-total line, plus a per-day table (day / spend / tokens / top consumer) and a 7/14/30-day window selector. Series are colored on a **single-hue violet ramp ranked by window usage** (darkest = biggest consumer). **Interactive**: hovering a series (bar segment or pill legend chip) highlights it across all days with a soft gradient area under its evolution curve, dims the others, shows a rich tooltip (value, % of day, % of window, day total) and a live stat strip (window total, share, avg/day, today-vs-average delta); clicking a chip pins the highlight. The legend is a row of pill chips (name + window share %).
  - `components/DisruptionTracker.js` - Node disruption tracking (on-demand)
@@ -144,6 +145,11 @@ type NodeInfo struct {
 ### Karpenter Log Analysis Endpoints
 - `POST /api/v1/karpenter/logs/analyze` - Analyze Karpenter error logs and provide explanations
 
+### Log Explorer Endpoints (generic, any pod)
+- `GET /api/v1/pods?namespace=` - Compact pod summaries for the Log Explorer picker (`name`, `namespace`, `nodeName`, `status`, `ready`, `age`, `containers[]`, `restartCount`, `karpenter`). Paginated internally; no label gate (unlike Karpenter pod discovery). Backed by `kubernetes.Client.ListPods`
+- `GET /api/v1/pods/logs?namespace=&pod=&container=&tailLines=&sinceSeconds=&previous=` - Container logs for **any** pod (generic counterpart of the gated `GET /api/v1/karpenter/logs`). `container` is validated against the pod spec (400 if unknown); a missing pod is a 404. Backed by `kubernetes.Client.GetPodLogs` — **no** Karpenter label gate, so it is a deliberate cluster-wide log surface gated only by the standard `/api/v1` auth
+- `POST /api/v1/logs/analyze` - Body `{log}`. Tries the Karpenter-JSON analyzer first (when the body parses as a Karpenter structured log line), otherwise the **generic** analyzer: LLM explanation when an LLM client is configured, else a built-in heuristic classifier (OOM, image pull, crash loop, permission/admission, network, disk pressure, panic, generic error) with per-pattern recommendations. Returns a `LogAnalysisResponse` (`summary`, `explanation`, `errorCauses[]`, `recommendations[]`; `parsedError` is only set on the Karpenter-JSON path)
+
 ### Alerting Endpoints
 - `GET /api/v1/alerts/config` - Alerting config with channel URLs **masked** (host kept, path redacted to `/*`). 503 `alerts not configured` when no channels/state are set up
 - `PUT /api/v1/alerts/config` - Replace the config (conditions + `for` durations + thresholds, `remindWhileFiring`, channels). A masked or blank URL at index `i` restores the previously stored URL by index so toggling never wipes secrets. Persists to `alerts.stateFile`
@@ -233,19 +239,21 @@ type NodeInfo struct {
   - `getRecommendationsFromClusterSummary()` - Enhanced with Ollama
   - `getNodePoolRecommendations()` - NodePool-specific recommendations
   - `analyzeKarpenterLog()` - Karpenter error log analysis endpoint
+  - `listPods()` / `getPodLogs()` / `analyzeLog()` (`internal/api/pod_logs.go`) - Generic Log Explorer endpoints: `GET /pods`, `GET /pods/logs` (any pod), `POST /logs/analyze` (Karpenter-JSON first, generic LLM+heuristic fallback)
 
-- `internal/api/karpenter_log.go` - Karpenter log analysis
+- `internal/api/karpenter_log.go` - Karpenter log analysis + generic log analysis
   - `analyzeKarpenterLogInternal()` - Parses and analyzes Karpenter error logs
+  - `analyzeGenericLog()` - LLM explanation (when configured) else heuristic classifier (`classifyGenericLogs`, `genericLogPatterns`) over non-Karpenter log text; `isKarpenterJSONLog()` routes `/logs/analyze` between the two paths
   - `parseKarpenterLog()` - Parses JSON error logs
   - `categorizeErrorCause()` - Categorizes error causes (Label Error, Taint Tolerance, etc.)
   - `generateAIExplanation()` - Uses Ollama to generate intelligent explanations
   - `generateLogRecommendations()` - Generates actionable recommendations
 
 ### Frontend Core Files
-- `frontend/src/App.js` - Main app, manages recommendations state
+- `frontend/src/App.js` - Main app, manages recommendations state; the Log Analyzer tab is the generic `LogExplorer` (replaces `KarpenterLogAnalyzer`)
+- `frontend/src/components/LogExplorer.js` - **Log Analyzer tab** (replaces the old Karpenter-only analyzer). Pod picker (namespace dropdown + typeahead over pod names/namespace, Karpenter pods flagged and sorted to the top, restart count shown) feeding a log viewer (container select, tail 100/500/1000/5000, since 5m/15m/1h/1d, "previous terminated container" toggle, client-side error-only filter, line numbers, error-line tinting, search with match highlight + prev/next). "Analyze selection" (text selected in the pane), "Analyze errors" and "Analyze last 50" all POST to `/api/v1/logs/analyze`; the results panel renders `summary`/`explanation`/`errorCauses`/`recommendations` and shows the Karpenter `parsedError` block only when present. Accepts a `seedPod` prop ("namespace/name" or "namespace") so other tabs deep-link into it
 - `frontend/src/components/NodePoolCard.js` - Displays recommendation cards (supports both formats)
 - `frontend/src/components/GlobalClusterSummary.js` - Cluster overview and recommendation trigger
-- `frontend/src/components/KarpenterLogAnalyzer.js` - Karpenter error log analysis UI
 
 ## Important Notes
 
@@ -422,6 +430,7 @@ Before marking any task complete, verify:
 - **China recommendation candidates**: China fallback candidates filter unavailable families and include available AMD types while respecting the requested architecture.
 - **LiteLLM AI-Gateway Health**: `GET /api/v1/serving/gateway` + Serving-tab Gateway card (fleet stats, usage split by **App / API key / Team** (`metadata_trace_name` / `api_key_alias` / `team_alias`) — top-level table + expandable per-model detail, overhead-vs-model latency split, 401 hint via `LITELLM_METRICS_API_KEY`)
 - **Karpenter Log Analyzer**: Analyze error logs with AI-powered explanations
+- **Generic Log Explorer** (Log Analyzer tab): cluster-wide pod picker + log viewer (container/tail/since/previous, search with match highlight, error filter) with Karpenter-JSON-first and generic (LLM + heuristic) analysis via `GET /api/v1/pods`, `GET /api/v1/pods/logs`, `POST /api/v1/logs/analyze`. The old `KarpenterLogAnalyzer` is removed; `GET /karpenter/logs` keeps its Karpenter-pod gate
 - **NodePool-based recommendations**: Primary recommendation engine
 - **AWS Pricing API integration**: Dynamic instance type discovery
 - **Capacity type optimization**: Analyzes spot vs on-demand
