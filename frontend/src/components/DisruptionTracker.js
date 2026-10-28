@@ -92,12 +92,16 @@ const formatTime = (timeStr) => {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return `${diffDays}d ago`;
+    // Absolute UTC for the title tooltip; relative for the visible text.
+    const absolute = date.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+    let rel;
+    if (diffMins < 1) rel = 'Just now';
+    else if (diffMins < 60) rel = `${diffMins}m ago`;
+    else if (diffHours < 24) rel = `${diffHours}h ago`;
+    else rel = `${diffDays}d ago`;
+    return { rel, absolute };
   } catch {
-    return timeStr;
+    return { rel: timeStr, absolute: '' };
   }
 };
 
@@ -106,8 +110,11 @@ const getReasonColor = (reason) => {
   if (reasonLower.includes('consolidat')) {
     return { className: 'bg-blue-500', label: 'Consolidation' };
   }
-  if (reasonLower.includes('expir') || reasonLower.includes('drift')) {
-    return { className: 'bg-orange-500', label: 'Expiration/Drift' };
+  if (reasonLower.includes('expir')) {
+    return { className: 'bg-amber-500', label: 'Expiration' };
+  }
+  if (reasonLower.includes('drift')) {
+    return { className: 'bg-orange-500', label: 'Drift' };
   }
   if (reasonLower.includes('terminat') || reasonLower.includes('delet')) {
     return { className: 'bg-red-500', label: 'Termination' };
@@ -120,8 +127,11 @@ const getReasonType = (reason) => {
   if (reasonLower.includes('consolidat')) {
     return 'consolidation';
   }
-  if (reasonLower.includes('expir') || reasonLower.includes('drift')) {
+  if (reasonLower.includes('expir')) {
     return 'expiration';
+  }
+  if (reasonLower.includes('drift')) {
+    return 'drift';
   }
   if (reasonLower.includes('terminat') || reasonLower.includes('delet')) {
     return 'termination';
@@ -193,9 +203,9 @@ function DisruptionCard({ disruption }) {
                   {pods.length} pod{pods.length !== 1 ? 's' : ''}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <span className="text-xs text-muted-foreground flex items-center gap-1" title={formatTime(disruption.lastSeen).absolute || undefined}>
                 <Clock className="w-3 h-3" />
-                {formatTime(disruption.lastSeen)}
+                {formatTime(disruption.lastSeen).rel}
               </span>
             </div>
           </div>
@@ -479,19 +489,12 @@ function DisruptionTracker() {
         <div className="flex justify-between items-start">
           <div>
             <CardTitle>Node Disruptions</CardTitle>
-            <CardDescription>Live node disruptions based on current node state</CardDescription>
+            <CardDescription>
+              Active node disruptions, sampled live. The history window below only
+              controls the "Recently Terminated" list.
+            </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={windowHours} onValueChange={setWindowHours}>
-              <SelectTrigger className="w-[110px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WINDOW_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button onClick={fetchDisruptions} disabled={loading} variant="outline" size="sm">
               <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
               Refresh
@@ -541,7 +544,7 @@ function DisruptionTracker() {
           />
         ) : (
           <div className="space-y-4">
-            {/* Cost still being incurred */}
+            {/* Cost still being incurred — or unknown when pricing failed */}
             {summary && summary.totalCostPerHour > 0 && (
               <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/40 dark:bg-amber-950/40">
                 <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 dark:text-amber-400" />
@@ -553,6 +556,15 @@ function DisruptionTracker() {
                     still billed across {disruptions.length} disrupted node{disruptions.length !== 1 ? 's' : ''}
                     {summary.blockedCount > 0 && ` (${summary.blockedCount} blocked)`}
                   </span>
+                </div>
+              </div>
+            )}
+            {summary && summary.totalCostPerHour === 0 && summary.costUnknown && (
+              <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 px-4 py-3">
+                <AlertCircle className="h-5 w-5 text-muted-foreground shrink-0" />
+                <div className="text-sm text-muted-foreground">
+                  Cost unknown (pricing unavailable) for {disruptions.length} disrupted node{disruptions.length !== 1 ? 's' : ''}.
+                  Nodes without an instance-type label or an unpriceable instance type are not billed here.
                 </div>
               </div>
             )}
@@ -591,6 +603,10 @@ function DisruptionTracker() {
                         </span>
                       )}
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      "Blocked" = a PodDisruptionBudget reports 0 disruptions allowed; "blocking pods" = pods
+                      whose eviction is held by a PDB; "affected pods" = all pods on blocked nodes.
+                    </p>
                     <Button
                       variant={showOnlyBlocked ? 'default' : 'outline'}
                       size="sm"
@@ -620,7 +636,12 @@ function DisruptionTracker() {
                     {availableTypes.map(type => {
                       const isSelected = selectedTypes.size === 0 || selectedTypes.has(type);
                       const count = disruptions.filter(d => getReasonType(d.reason) === type).length;
-
+                      const typeLabel = {
+                        consolidation: 'Consolidation',
+                        expiration: 'Expiration',
+                        drift: 'Drift',
+                        termination: 'Termination',
+                      }[type] || 'Other';
                       return (
                         <div key={type} className="flex items-center gap-2">
                           <Checkbox
@@ -629,11 +650,7 @@ function DisruptionTracker() {
                             id={`filter-${type}`}
                           />
                           <label htmlFor={`filter-${type}`} className="text-sm cursor-pointer flex items-center gap-1">
-                            <span className="capitalize">
-                              {type === 'consolidation' ? 'Consolidation' :
-                               type === 'expiration' ? 'Expiration/Drift' :
-                               type === 'termination' ? 'Termination' : 'Other'}
-                            </span>
+                            <span>{typeLabel}</span>
                             <Badge variant="secondary" className="text-xs">{count}</Badge>
                           </label>
                         </div>
@@ -667,11 +684,26 @@ function DisruptionTracker() {
             </div>
 
             {/* Recent deletions (nodes that were disrupted and already left) */}
-            {recentDeletions.length > 0 && (
-              <div className="space-y-2 pt-2 border-t">
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Recently Terminated ({recentDeletions.length})
+                  Recently Terminated {recentDeletions.length > 0 ? `(${recentDeletions.length})` : ''}
                 </h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">History:</span>
+                  <Select value={windowHours} onValueChange={setWindowHours}>
+                    <SelectTrigger className="h-7 w-[110px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WINDOW_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {recentDeletions.length > 0 ? (
                 <div className="rounded-md border divide-y">
                   {recentDeletions.map((d) => {
                     const color = getReasonColor(d.reason);
@@ -691,16 +723,20 @@ function DisruptionTracker() {
                         {d.instanceType && (
                           <Badge variant="secondary" className="font-mono text-xs">{d.instanceType}</Badge>
                         )}
-                        <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
+                        <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1" title={formatTime(d.lastSeen).absolute || undefined}>
                           <Clock className="w-3 h-3" />
-                          {formatTime(d.lastSeen)}
+                          {formatTime(d.lastSeen).rel}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-xs text-muted-foreground italic">
+                  No nodes were terminated in the selected window.
+                </p>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

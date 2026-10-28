@@ -65,6 +65,16 @@ function App() {
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  // seedPod is a "namespace/name" (or "namespace" alone) deep-link handed to
+  // the Log Explorer tab by other tabs (e.g. a Workloads row "View logs").
+  const [logSeedPod, setLogSeedPod] = useState(null);
+
+  // openLogExplorer switches to the Log Analyzer tab, optionally deep-linking
+  // a "namespace/name" (or "namespace") seed from another tab.
+  const openLogExplorer = (seedPod) => {
+    if (seedPod) setLogSeedPod(seedPod);
+    setActiveTab('logs');
+  };
   const [showKarpenterBanner, setShowKarpenterBanner] = useState(true);
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
@@ -357,6 +367,7 @@ function App() {
               <GlobalClusterSummary
                 onRecommendationsGenerated={setRecommendations}
                 onClusterCostUpdate={setClusterCost}
+                onOpenAgentPlans={() => setActiveTab('recommendations')}
               />
               {recommendations.length > 0 && clusterCost && (
                 <Card>
@@ -449,13 +460,13 @@ function App() {
           {activeTab === 'serving' && <ServingHealth />}
 
           {/* Workloads Tab */}
-          {activeTab === 'workloads' && <WorkloadUsageView />}
+          {activeTab === 'workloads' && <WorkloadUsageView onViewLogs={openLogExplorer} />}
 
           {/* Disruptions Tab */}
           {activeTab === 'disruptions' && <DisruptionTracker />}
 
           {/* Log Analyzer Tab */}
-          {activeTab === 'logs' && <LogExplorer />}
+          {activeTab === 'logs' && <LogExplorer seedPod={logSeedPod} />}
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (

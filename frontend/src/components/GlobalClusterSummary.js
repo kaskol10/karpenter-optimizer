@@ -110,7 +110,7 @@ function ClusterTrends({ API_URL }) {
   );
 }
 
-function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate }) {
+function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate, onOpenAgentPlans }) {
   const currency = useCurrencyFormatter();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -365,16 +365,27 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
       <CardContent>
         <div className="space-y-4">
           {/* Generate Recommendations Button */}
-          <div className="flex justify-center p-4 bg-gradient-to-br from-purple-500 to-purple-700 rounded-lg">
+          <div className="flex flex-col items-center gap-3 p-4 bg-gradient-to-br from-purple-500 to-purple-700 rounded-lg">
             <Button
               onClick={handleGenerateRecommendations}
               disabled={!summary || generatingRecommendations}
               size="lg"
               className="bg-card text-purple-600 hover:bg-accent font-bold min-w-[250px]"
+              title="Cluster-wide scan: uses the live cluster summary (node counts, usage, cost) to compute NodePool recommendations. For strategy-based AI plans, use the Recommendations tab."
             >
               <Zap className="h-5 w-5 mr-2" />
-              Generate Recommendations
+              Run cluster-wide scan
             </Button>
+            {onOpenAgentPlans && (
+              <button
+                type="button"
+                onClick={onOpenAgentPlans}
+                className="text-xs font-medium text-white/90 underline underline-offset-2 hover:text-white"
+                title="AI agent recommendations with strategy selection (balanced / aggressive / conservative / spot-first / right-size)"
+              >
+                Prefer AI Agent plans with strategy selection →
+              </button>
+            )}
           </div>
 
           {generatingRecommendations && progressMessage && (

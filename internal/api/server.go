@@ -1309,6 +1309,7 @@ func (s *Server) getNodeDisruptions(c *gin.Context) {
 	var totalCostPerHour float64
 	blockedCount := 0
 	activeCount := 0
+	costUnknown := false
 	byNodePool := map[string]float64{}
 	for i := range disruptions {
 		d := &disruptions[i]
@@ -1322,6 +1323,10 @@ func (s *Server) getNodeDisruptions(c *gin.Context) {
 			if d.NodePool != "" {
 				byNodePool[d.NodePool] += *d.CostPerHour
 			}
+		} else if d.NodeStillExists {
+			// A live disrupted node we could not price: surface as unknown
+			// cost rather than silently treating it as $0.
+			costUnknown = true
 		}
 	}
 
@@ -1331,6 +1336,7 @@ func (s *Server) getNodeDisruptions(c *gin.Context) {
 		"totalCostPerHour": totalCostPerHour,
 		"totalCostPerDay":  totalCostPerHour * 24,
 		"byNodePool":       byNodePool,
+		"costUnknown":      costUnknown,
 		"currency":         awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
 	}
 
