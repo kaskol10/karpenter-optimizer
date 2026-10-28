@@ -7,7 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from './ui/badge';
 import { Skeleton, SkeletonRows } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
-import { Loader2, Sparkles, TrendingDown, Shield, Zap, Target } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Loader2, Sparkles, TrendingDown, Shield, Zap, Target, Info } from 'lucide-react';
 import { cn } from '../lib/utils';
 import NodePoolCard from './NodePoolCard';
 import { useCurrencyFormatter } from '../lib/currency';
@@ -141,7 +142,33 @@ function AgentRecommendations({ onRecommendationsGenerated, onClusterCostUpdate 
               AI Agent Recommendations
             </CardTitle>
             <CardDescription>
-              Cost optimization recommendations powered by AI agent
+              Strategy-based, AI-assisted NodePool optimization plans. Distinct from the
+              cluster-wide scan in Overview.
+              <div className="mt-1">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                      aria-label="How these numbers are made"
+                    >
+                      <Info className="h-3 w-3" />
+                      How these numbers are made
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 space-y-2 text-xs text-muted-foreground" align="start">
+                    <p className="font-semibold text-foreground">How these numbers are made</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>On-demand price comes from the live AWS Pricing API for the configured region.</li>
+                      <li>Spot cost is an estimate at 25% of on-demand (75% discount) — not a live Spot quote.</li>
+                      <li>Candidates are filtered by region + architecture (arm64/amd64) and CPU/memory ratio.</li>
+                      <li>Combinations of 1–3 instance types are tried and sorted by cost efficiency.</li>
+                      <li>Recommendations that would raise cost by more than 10% are dropped.</li>
+                      <li>"Confidence" is the LLM's self-assessment — indicative only, not a measurement.</li>
+                    </ul>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </CardDescription>
           </div>
         </div>
@@ -274,7 +301,10 @@ function AgentRecommendations({ onRecommendationsGenerated, onClusterCostUpdate 
                               Save {currency(plan.estimatedSavings)}/hr
                             </span>
                           )}
-                          <span>
+                          <span
+                            className="cursor-help"
+                            title="LLM self-assessed confidence score. Indicative only, not a measured value — treat as a rough signal of how strongly the plan fits the current cluster state."
+                          >
                             Confidence: {(plan.confidence * 100).toFixed(0)}%
                           </span>
                         </div>

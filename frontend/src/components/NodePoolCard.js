@@ -8,6 +8,27 @@ import { Check, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useCurrencyFormatter } from '../lib/currency';
 
+// instanceTypeBase strips a trailing " (N)" node-count suffix so a current
+// "m6g.2xlarge (27)" and a recommended "m6g.2xlarge" compare equal.
+const instanceTypeBase = (t) => (typeof t === 'string' ? t.replace(/\s*\(\d+\)\s*$/, '').trim() : String(t ?? ''));
+
+// isGPUType recognizes GPU instance families broadly (the old g4/g5-only
+// check missed g6, g5g, p3, p4d, trn, etc.).
+const GPU_TYPE_RE = /^(g4|g5|g6|p2|p3|p4|p5|trn|vt1|inf2|dl1|ml1)\b/;
+const isGPUType = (t) => GPU_TYPE_RE.test(instanceTypeBase(t));
+
+// withNodeCounts distributes `totalNodes` evenly across the recommended
+// instance types (the same even allocation the cost model assumes) and
+// renders each as "type (count)", matching the current-side format.
+// Returns the types unchanged when there is no positive node count.
+const withNodeCounts = (types, totalNodes) => {
+  const bases = types.map(instanceTypeBase).filter(Boolean);
+  if (!totalNodes || totalNodes <= 0 || bases.length === 0) return types;
+  const per = Math.floor(totalNodes / bases.length);
+  const remainder = totalNodes % bases.length;
+  return bases.map((base, i) => `${base} (${per + (i < remainder ? 1 : 0)})`);
+};
+
 function NodePoolCard({ recommendation }) {
   const currency = useCurrencyFormatter();
   if (!recommendation) {
@@ -53,15 +74,26 @@ function NodePoolCard({ recommendation }) {
     ? recommendation.recommendedTotalMemory || 0
     : 0;
   
-  const hasChanges = 
+  const costUnknown = isNewFormat
+    ? Boolean(recommendation.currentCostUnknown)
+    : false;
+
+  // Recommended types rendered with per-type node counts (even split), so the
+  // card reads symmetrically against the current "type (N)" badges.
+  const recommendedDisplayTypes = withNodeCounts(recommendedInstanceTypes, recommendedNodes);
+
+  const hasChanges =
     currentNodes !== recommendedNodes ||
-    JSON.stringify(currentInstanceTypes.sort()) !== JSON.stringify(recommendedInstanceTypes.sort()) ||
+    JSON.stringify([...currentInstanceTypes].map(instanceTypeBase).sort()) !==
+      JSON.stringify([...recommendedInstanceTypes].map(instanceTypeBase).sort()) ||
     currentCapacityType !== recommendedCapacityType;
-  
-  const hasGPU = recommendation.requirements?.gpu > 0 || recommendedInstanceTypes.some(t => t.startsWith('g4') || t.startsWith('g5'));
+
+  const hasGPU = (recommendation.requirements?.gpu > 0) || recommendedInstanceTypes.some(isGPUType);
 
   const costSavings = isNewFormat ? (recommendation.costSavings || 0) : (currentCost - recommendedCost);
   const costSavingsPercent = isNewFormat ? (recommendation.costSavingsPercent || 0) : (currentCost > 0 ? ((costSavings / currentCost) * 100) : 0);
+  // Only color the card green when the recommendation actually saves money.
+  const savesMoney = costSavings > 0 && !costUnknown;
 
   // Get taints - handle both formats
   const taints = recommendation?.taints || [];
@@ -71,7 +103,7 @@ function NodePoolCard({ recommendation }) {
     <Card
       className={cn(
         "h-full",
-        hasChanges && "border-2 border-green-500"
+        hasChanges && (savesMoney ? "border-2 border-green-500" : "border-2 border-yellow-400")
       )}
     >
       <CardHeader>
@@ -79,9 +111,13 @@ function NodePoolCard({ recommendation }) {
           <div className="flex items-center gap-2">
             <CardTitle>{nodePoolName}</CardTitle>
             {hasChanges && (
-              <Badge variant="default" className="bg-green-500">
-                <Check className="h-3 w-3 mr-1" />
-                Changes recommended
+              <Badge
+                variant="default"
+                className={cn(savesMoney ? "bg-green-500" : "bg-yellow-500 text-yellow-950")}
+                title={savesMoney ? "Recommended config saves money" : "Config change does not save money (may increase cost)"}
+              >
+                {savesMoney && <Check className="h-3 w-3 mr-1" />}
+                {savesMoney ? 'Saves money' : 'Changes recommended'}
               </Badge>
             )}
           </div>
@@ -119,20 +155,27 @@ function NodePoolCard({ recommendation }) {
             {currentMemory > 0 && (
               <p className="text-xs text-muted-foreground">Memory: {currentMemory.toFixed(2)} GiB</p>
             )}
-            {currentCost > 0 && (
+            {costUnknown ? (
+              <div className="mt-2" title="Some current nodes could not be priced (no instance-type label or no regional price). The figure below is a partial sum.">
+                <p className="text-sm font-semibold text-muted-foreground">
+                  {currency(currentCost)}/hr <span className="text-xs font-normal">(partial)</span>
+                </p>
+                <p className="text-[11px] text-muted-foreground">pricing unavailable for some nodes</p>
+              </div>
+            ) : currentCost > 0 ? (
               <div className="mt-2">
                 <p className="text-sm font-semibold">
                   {currency(currentCost)}/hr
                 </p>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Recommended State */}
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground font-semibold">Recommended</p>
             <div className="space-y-1">
-              <p className="text-2xl font-semibold text-green-600">{recommendedNodes}</p>
+              <p className={cn("text-2xl font-semibold", savesMoney && "text-green-600")}>{recommendedNodes}</p>
               <p className="text-xs text-muted-foreground">
                 {!isNewFormat && recommendation.minSize > 0 && recommendation.maxSize > 0
                   ? `nodes (${recommendation.minSize}-${recommendation.maxSize})`
@@ -141,14 +184,14 @@ function NodePoolCard({ recommendation }) {
             </div>
             {recommendedInstanceTypes.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {recommendedInstanceTypes.slice(0, 2).map((type, idx) => (
+                {recommendedDisplayTypes.slice(0, 2).map((type, idx) => (
                   <Badge key={idx} variant="outline" className="font-mono text-xs">
                     {type}
                   </Badge>
                 ))}
-                {recommendedInstanceTypes.length > 2 && (
+                {recommendedDisplayTypes.length > 2 && (
                   <Badge variant="outline" className="font-mono text-xs">
-                    +{recommendedInstanceTypes.length - 2}
+                    +{recommendedDisplayTypes.length - 2}
                   </Badge>
                 )}
               </div>
@@ -161,14 +204,19 @@ function NodePoolCard({ recommendation }) {
             )}
             {recommendedCost > 0 && (
               <div className="mt-2">
-                <p className="text-sm font-semibold text-green-600">
+                <p className={cn("text-sm font-semibold", savesMoney && "text-green-600")}>
                   {currency(recommendedCost)}/hr
                 </p>
               </div>
             )}
-            {costSavings > 0 && (
+            {savesMoney && (
               <p className="text-xs text-green-600 font-medium mt-2">
                 Savings: {currency(costSavings)}/hr ({costSavingsPercent.toFixed(1)}%)
+              </p>
+            )}
+            {costUnknown && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Savings can't be computed: current cost is partially unknown.
               </p>
             )}
           </div>
@@ -212,10 +260,10 @@ function NodePoolCard({ recommendation }) {
               Recommended Instance Types ({recommendedInstanceTypes.length})
             </p>
             <div className="flex flex-wrap gap-2">
-              {recommendedInstanceTypes.map((type, idx) => (
+              {recommendedDisplayTypes.map((type, idx) => (
                 <Badge
                   key={idx}
-                  variant={hasGPU && (type.startsWith('g4') || type.startsWith('g5')) ? 'destructive' : 'secondary'}
+                  variant={isGPUType(type) ? 'destructive' : 'secondary'}
                   className="font-mono text-xs"
                 >
                   {type}
@@ -233,7 +281,7 @@ function NodePoolCard({ recommendation }) {
             </p>
             <div className="flex flex-wrap gap-2">
               {currentInstanceTypes.map((type, idx) => {
-                const isKept = recommendedInstanceTypes.includes(type);
+                const isKept = recommendedInstanceTypes.map(instanceTypeBase).includes(instanceTypeBase(type));
                 return (
                   <Badge
                     key={idx}
@@ -288,9 +336,15 @@ function NodePoolCard({ recommendation }) {
         )}
 
         {hasGPU && (
-          <Alert variant="destructive" className="mt-4">
+          <Alert className="mt-4">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>GPU instances detected</AlertTitle>
+            <AlertTitle>GPU instances in recommendation</AlertTitle>
+            <AlertDescription>
+              The recommended mix includes GPU instance types. GPU instances are
+              significantly more expensive than CPU-only equivalents and require
+              drivers/workloads that use them — verify your workload actually needs
+              GPU before applying this recommendation.
+            </AlertDescription>
           </Alert>
         )}
       </CardContent>
