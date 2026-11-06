@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Area, Bar, Line, ComposedChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { cn } from '../../lib/utils';
 import { API_URL } from '../../lib/api';
+import { SimpleSelect } from '../ui/simple-select';
 import { usePolling } from '../../hooks/usePolling';
 import { SPLIT_DIMS } from './GatewayCard';
 import { formatTokens } from './shared';
@@ -254,16 +255,14 @@ export function GatewayCostHistory({ split = 'app' }) {
           >
             Total
           </button>
-          <select
-            value={windowDays}
-            onChange={(e) => setWindowDays(e.target.value)}
-            className="rounded border border-purple-500/30 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+          <SimpleSelect
+            className="h-6 w-[68px] border-purple-500/30 bg-muted/40 px-1.5 py-0 text-[11px] text-muted-foreground"
+            ariaLabel="History window"
             title="History window"
-          >
-            {['7', '14', '30'].map((w) => (
-              <option key={w} value={w}>{w}d</option>
-            ))}
-          </select>
+            value={windowDays}
+            onValueChange={setWindowDays}
+            options={['7', '14', '30'].map((w) => ({ value: w, label: `${w}d` }))}
+          />
         </div>
       </div>
 

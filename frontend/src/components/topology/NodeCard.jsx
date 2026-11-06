@@ -7,6 +7,7 @@ import { cn, formatGPUMem } from '../../lib/utils';
 import { CopyablePodName } from './CopyablePodName';
 import { GPULaneBar } from './GPULaneBar';
 import { NodePodBar } from './NodePodBar';
+import { GpuSummaryBadge, MetaLine } from '../NodeBits';
 import { getPodKey, formatNodeAge, hashToHue, isDaemonSetPod, hasDevicePlacement } from './podUtils';
 
 // NodeCard renders one node: its badges, request bars, GPU lanes and the
@@ -32,66 +33,24 @@ export function NodeCard({
 
   return (
     <Card ref={cardRef} className={cn(isFocusNode && 'ring-2 ring-primary shadow-lg')}>
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-2 space-y-1">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <CardTitle className="text-sm font-mono">{node.name}</CardTitle>
-          <div className="flex flex-wrap gap-1">
-            {node.instanceType && (
-              <Badge variant="outline">{node.instanceType}</Badge>
-            )}
-            {node.capacityType && (
-              <Badge variant="outline">{node.capacityType}</Badge>
-            )}
-            {node.zone && <Badge variant="secondary">{node.zone}</Badge>}
-            {(() => {
-              const age = formatNodeAge(node.creationTime);
-              return age ? <Badge variant="outline">{age}</Badge> : null;
-            })()}
-            {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
-              <Badge
-                variant="outline"
-                className="border-purple-500 text-purple-700"
-                title={node.gpuModel || 'GPU'}
-              >
-                {(() => {
-                  const memKnown = (node.gpuMemTotalMiB || 0) > 0;
-                  const hami = !!node.hamiDetected;
-                  if (hami && memKnown) {
-                    const pct = Math.min(Math.round((node.gpuMemAllocatedMiB / node.gpuMemTotalMiB) * 100), 100);
-                    return (
-                      <>
-                        🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} · {pct}% GPU mem · {node.gpuPods || 0} GPU pods
-                      </>
-                    );
-                  }
-                  return (
-                    <>
-                      🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated ?? 0}/{node.gpuCapacity ?? 0})
-                      {memKnown && (
-                        <span className="ml-1">
-                          · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
-              </Badge>
-            )}
-          </div>
+          <GpuSummaryBadge node={node} />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              onToggleExpand()
-            }
-          >
+        <MetaLine
+          items={[
+            node.instanceType,
+            node.capacityType,
+            node.zone,
+            formatNodeAge(node.creationTime),
+            `${nodePods.length} pods`,
+          ]}
+        />
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button size="sm" variant="outline" onClick={onToggleExpand}>
             {expanded ? 'Hide node details' : 'Drill into node'}
           </Button>
-          <span className="text-xs text-muted-foreground">
-            Full node pods: {nodePods.length}
-          </span>
         </div>
       </CardHeader>
       <CardContent>

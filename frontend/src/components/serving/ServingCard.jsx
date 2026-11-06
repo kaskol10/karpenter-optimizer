@@ -8,8 +8,8 @@ import { getServingStatus } from '../../lib/servingStatus';
 import { neighbourPods } from '../../lib/servingPlacement';
 import { ServingTrends } from './ServingTrends';
 import { MetricTip, STATUS_TONE_CLASSES, CopyableNode } from './shared';
+import { MetaLine } from '../NodeBits';
 
-// ServingCard renders inference health for a single LLM serving pod.
 // DiagnosisPanel puts the status verdict on the card instead of hiding it in
 // a hover tooltip: what's wrong, why, the first thing to try, and a jump to
 // the pod's GPU on the Topology tab.
@@ -64,6 +64,9 @@ function DiagnosisPanel({ status, onShowInTopology }) {
   );
 }
 
+// ServingCard renders inference health for a single LLM serving pod. The
+// header carries one status badge; secondary facts (backend, instance type,
+// GPU model) sit in a quiet metadata line.
 export function ServingCard({ pod, peers, history, placement, onOpenTopology }) {
   const kv = pod.kvCachePercent;
   const status = useMemo(
@@ -127,16 +130,6 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
                     <Network className="h-3.5 w-3.5" />
                   </button>
                 )}
-                {pod.nodeInstanceType && (
-                  <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
-                    {pod.nodeInstanceType}
-                  </Badge>
-                )}
-                {pod.gpuModel && (
-                  <Badge variant="outline" className="text-[10px] border-purple-500 text-purple-700 shrink-0">
-                    {pod.gpuModel}{pod.gpuCapacity ? ` x${pod.gpuCapacity}` : ''}
-                  </Badge>
-                )}
                 {(pod.gpuDevices || []).map((d) => {
                   const label = shortGpuUuid(d.uuid) || `GPU ${d.index}`;
                   const mem = d.memoryMiB > 0 ? ` · ${formatGPUMem(d.memoryMiB)}` : '';
@@ -153,22 +146,22 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
                 })}
               </div>
             )}
+            <MetaLine
+              className="mt-1"
+              items={[
+                pod.backend,
+                pod.nodeInstanceType,
+                pod.gpuModel && `${pod.gpuModel}${pod.gpuCapacity ? ` x${pod.gpuCapacity}` : ''}`,
+              ]}
+            />
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <Badge variant="outline" className="text-[10px]">{pod.backend}</Badge>
-            <Badge variant={pod.online ? 'default' : 'destructive'} className="text-[10px]">
-              {pod.online ? 'online' : 'offline'}
-            </Badge>
-            {pod.online && (
-              <Badge
-                variant="outline"
-                className={cn('text-[10px] font-semibold', STATUS_TONE_CLASSES[status.tone])}
-                title={statusTitle}
-              >
-                {status.label}
-              </Badge>
-            )}
-          </div>
+          <Badge
+            variant="outline"
+            className={cn('shrink-0 text-[10px] font-semibold', STATUS_TONE_CLASSES[status.tone])}
+            title={statusTitle}
+          >
+            {status.label}
+          </Badge>
         </div>
       </CardHeader>
       <CardContent>

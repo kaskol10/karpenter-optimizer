@@ -5,7 +5,6 @@ import { Button } from './components/ui/button';
 import { Alert, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
 import { Loader2, Settings, Info, X, Sun, Moon, LayoutDashboard, Server, Network, Cpu, Boxes, AlertTriangle, Sparkles, FileText } from 'lucide-react';
-import './App.css';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';

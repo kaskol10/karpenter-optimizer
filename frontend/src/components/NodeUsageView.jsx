@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { Separator } from './ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { ChevronDown, RefreshCw, Loader2, Package, Search, X, Regex, Server } from 'lucide-react';
+import { ChevronDown, RefreshCw, Loader2, Package, Search, X, Regex, Server, BarChart3, Check } from 'lucide-react';
+import { GpuSummaryBadge, MetaLine, PricingSourceLabel } from './NodeBits';
 import { cn, formatGPUMem } from '../lib/utils';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -574,8 +575,9 @@ function NodeUsageView() {
                       <Card className="mb-4 bg-gradient-to-br from-purple-500 to-purple-700 border-0">
                         <CardHeader>
                           <div className="flex justify-between items-center">
-                            <CardTitle className="text-white text-sm uppercase tracking-wide">
-                              📊 NodePool Overall Usage
+                            <CardTitle className="flex items-center gap-1.5 text-white text-sm uppercase tracking-wide">
+                              <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                              NodePool Overall Usage
                             </CardTitle>
                             <div className="flex items-center gap-2">
                               {estimatedCost > 0 && (
@@ -592,7 +594,9 @@ function NodeUsageView() {
                                     : `Using ${nodePoolInfo?.pricingSource || "estimated"} pricing`}
                                 >
                                   {currency(estimatedCost)}/hr
-                                  {nodePoolInfo?.pricingSource === "aws-pricing-api" && " ✓"}
+                                  {nodePoolInfo?.pricingSource === "aws-pricing-api" && (
+                                    <Check className="ml-1 h-3.5 w-3.5" aria-label="AWS Pricing API" />
+                                  )}
                                 </Badge>
                               )}
                               <Badge variant="secondary" className="bg-white/25 text-white">
@@ -639,17 +643,7 @@ function NodeUsageView() {
                                   </p>
                                   {nodePoolInfo?.pricingSource && (
                                     <p className="text-xs mt-1">
-                                      <span className={cn(
-                                        "font-semibold",
-                                        nodePoolInfo.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
-                                      )}>
-                                        {nodePoolInfo.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
-                                         nodePoolInfo.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
-                                         nodePoolInfo.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
-                                         nodePoolInfo.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
-                                         nodePoolInfo.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
-                                         "⚠ Estimated"}
-                                      </span>
+                                      <PricingSourceLabel source={nodePoolInfo.pricingSource} />
                                     </p>
                                   )}
                                 </CardContent>
@@ -746,62 +740,22 @@ function NodeUsageView() {
                               </Popover>
                             )}
                           </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {node.nodePool && (
-                              <Badge variant="outline">📦 {node.nodePool}</Badge>
-                            )}
-                            {node.instanceType && (
-                              <Badge variant="secondary" className="font-mono text-xs">
-                                {node.instanceType}
-                              </Badge>
-                            )}
-                            {node.zone && (
-                              <Badge variant="outline" className="border-blue-500 text-blue-700">
-                                🌍 {node.zone}
-                              </Badge>
-                            )}
-                            {node.capacityType && (
-                              <Badge variant={node.capacityType === 'spot' ? 'default' : 'secondary'}>
-                                {node.capacityType}
-                              </Badge>
-                            )}
-                            {node.architecture && (
-                              <Badge variant="outline" className={node.architecture === 'arm64' ? 'border-green-500 text-green-700' : 'border-indigo-500 text-indigo-700'}>
-                                {node.architecture.toUpperCase()}
-                              </Badge>
-                            )}
-                            {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
-                              <Badge
-                                variant="outline"
-                                className="border-purple-500 text-purple-700"
-                              >
-                                {(() => {
-                                  const memKnown = (node.gpuMemTotalMiB || 0) > 0;
-                                  if (node.hamiDetected && memKnown) {
-                                    const pct = Math.min(Math.round((node.gpuMemAllocatedMiB / node.gpuMemTotalMiB) * 100), 100);
-                                    return (
-                                      <>
-                                        🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} · {pct}% GPU mem · {node.gpuPods || 0} GPU pods
-                                      </>
-                                    );
-                                  }
-                                  return (
-                                    <>
-                                      🎮 {node.gpuCapacity || 0}x{node.gpuModel ? ` ${node.gpuModel}` : ' GPU'} ({node.gpuAllocated || 0}/{node.gpuCapacity || 0})
-                                      {memKnown && (
-                                        <span className="ml-1">
-                                          · {(node.gpuMemAllocatedMiB / 1024).toFixed(0)}/{(node.gpuMemTotalMiB / 1024).toFixed(0)} GiB
-                                        </span>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </Badge>
-                            )}
-                            {node.creationTime && (
-                              <Badge variant="outline">Age: {getNodeAge(node.creationTime)}</Badge>
-                            )}
-                          </div>
+                          {(node.gpuCapacity > 0 || node.gpuAllocated > 0) && (
+                            <div className="mt-2">
+                              <GpuSummaryBadge node={node} />
+                            </div>
+                          )}
+                          <MetaLine
+                            className="mt-1"
+                            items={[
+                              node.instanceType,
+                              node.capacityType,
+                              node.zone,
+                              node.architecture && node.architecture.toUpperCase(),
+                              node.nodePool && `NodePool ${node.nodePool}`,
+                              node.creationTime && `age ${getNodeAge(node.creationTime)}`,
+                            ]}
+                          />
                         </CardHeader>
                         <CardContent className="pt-4 space-y-4">
                           {node.cpuUsage && (
