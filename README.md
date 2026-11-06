@@ -386,18 +386,18 @@ The tool fetches existing Karpenter NodePool configurations:
 ├── frontend/           # React frontend
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── AgentRecommendations.js
-│   │   │   ├── DisruptionTracker.js
-│   │   │   ├── GlobalClusterSummary.js
-│   │   │   ├── LogExplorer.js
-│   │   │   ├── NodePoolCard.js
-│   │   │   ├── NodeUsageView.js
-│   │   │   ├── WorkloadUsageView.js
+│   │   │   ├── AgentRecommendations.jsx
+│   │   │   ├── DisruptionTracker.jsx
+│   │   │   ├── GlobalClusterSummary.jsx
+│   │   │   ├── LogExplorer.jsx
+│   │   │   ├── NodePoolCard.jsx
+│   │   │   ├── NodeUsageView.jsx
+│   │   │   ├── WorkloadUsageView.jsx
 │   │   │   ├── serving/        # Serving tab (ServingHealth, ServingCard, GatewayCard, ...)
 │   │   │   └── topology/       # Topology tab (TopologyView, NodeCard, GPULaneBar, ...)
 │   │   ├── hooks/              # usePolling, useUrlParam
 │   │   ├── lib/                # api, pollingClock, servingStatus, servingPlacement, ...
-│   │   └── App.js
+│   │   └── App.jsx
 │   └── package.json
 ├── examples/           # Example files
 │   └── workloads.json

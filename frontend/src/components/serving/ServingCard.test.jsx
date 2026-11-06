@@ -22,6 +22,12 @@ describe('ServingCard', () => {
     expect(screen.queryByText(/^Shares /)).not.toBeInTheDocument();
   });
 
+  test('the header carries one status badge and a quiet metadata line', () => {
+    renderCard(servingPods.r1);
+    expect(screen.queryByText('online')).not.toBeInTheDocument();
+    expect(screen.getByText(/^vllm/).textContent).toBe('vllm · g6e.12xlarge · L40S x4');
+  });
+
   test('a slow replica names its GPU neighbour, leads with moving it, and links to topology', async () => {
     const { onOpenTopology } = renderCard(servingPods.r2);
 

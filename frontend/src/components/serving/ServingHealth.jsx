@@ -141,7 +141,7 @@ function ServingHealth({ onOpenTopology }) {
           </div>
           <div className="flex items-center gap-2">
             <Select value={trendWindow} onValueChange={setTrendWindow}>
-              <SelectTrigger className="w-[130px]" title="Trend history window">
+              <SelectTrigger className="w-[130px]" title="Trend history window" aria-label="Trend history window">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -152,7 +152,7 @@ function ServingHealth({ onOpenTopology }) {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-[180px]" aria-label="Sort servers">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

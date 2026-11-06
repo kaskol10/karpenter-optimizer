@@ -13,6 +13,7 @@ import Sparkline from './Sparkline';
 import { RefreshCw, Zap, Loader2, LayoutDashboard } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getCacheStats } from '../lib/pricingCache';
+import { PricingSourceLabel } from './NodeBits';
 import { useCurrencyFormatter } from '../lib/currency';
 import { API_URL } from '../lib/api';
 import { usePolling, usePollingTick } from '../hooks/usePolling';
@@ -453,17 +454,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
                   </p>
                   {summary.pricingSource && (
                     <p className="text-xs mt-1">
-                      <span className={cn(
-                        "font-semibold",
-                        summary.pricingSource === "aws-pricing-api" ? "text-green-700" : "text-yellow-700"
-                      )}>
-                        {summary.pricingSource === "aws-pricing-api" ? "✓ AWS Pricing API" :
-                         summary.pricingSource === "hardcoded" ? "⚠ Estimated (hardcoded)" :
-                         summary.pricingSource === "family-estimate" ? "⚠ Estimated (family-based)" :
-                         summary.pricingSource === "ollama-cache" ? "⚠ Estimated (cached)" :
-                         summary.pricingSource === "ollama" ? "⚠ Estimated (LLM)" :
-                         "⚠ Estimated"}
-                      </span>
+                      <PricingSourceLabel source={summary.pricingSource} />
                     </p>
                   )}
                   {cacheStats && cacheStats.valid > 0 && (

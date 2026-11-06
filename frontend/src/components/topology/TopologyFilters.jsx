@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { cn } from '../../lib/utils';
+import { SimpleSelect } from '../ui/simple-select';
 
 // TopologyFilters is the Filters card: metric, overview toggles, and the
 // NodePool / zone / node / pod filters (all URL-backed in TopologyView).
@@ -67,37 +67,23 @@ export function TopologyFilters({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="text-xs text-muted-foreground">NodePool</label>
-            <select
-              className={cn(
-                'mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm',
-              )}
+            <SimpleSelect
+              className="mt-1 h-9"
+              ariaLabel="NodePool"
               value={nodePoolFilter}
-              onChange={(e) => setNodePoolFilter(e.target.value)}
-            >
-              <option value="">All</option>
-              {nodePools.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+              onValueChange={setNodePoolFilter}
+              options={[{ value: '', label: 'All' }, ...nodePools.map((p) => ({ value: p, label: p }))]}
+            />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">Zone</label>
-            <select
-              className={cn(
-                'mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm',
-              )}
+            <SimpleSelect
+              className="mt-1 h-9"
+              ariaLabel="Zone"
               value={zoneFilter}
-              onChange={(e) => setZoneFilter(e.target.value)}
-            >
-              <option value="">All</option>
-              {zones.map((z) => (
-                <option key={z} value={z}>
-                  {z}
-                </option>
-              ))}
-            </select>
+              onValueChange={setZoneFilter}
+              options={[{ value: '', label: 'All' }, ...zones.map((z) => ({ value: z, label: z }))]}
+            />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">Node name contains</label>

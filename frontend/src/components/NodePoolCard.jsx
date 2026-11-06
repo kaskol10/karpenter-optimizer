@@ -4,7 +4,7 @@ import { Badge } from './ui/badge';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Separator } from './ui/separator';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { Check, AlertTriangle } from 'lucide-react';
+import { Check, AlertTriangle, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useCurrencyFormatter } from '../lib/currency';
 
@@ -254,10 +254,13 @@ function NodePoolCard({ recommendation }) {
         {/* Reasoning/Explanation */}
         {(recommendation.reasoning || recommendation.aiReasoning) && (
           <Alert className="mt-4">
-            <AlertTitle>
-              {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== ''
-                ? '✨ AI-Enhanced Explanation'
-                : (isNewFormat ? 'Explanation' : 'Why these changes?')}
+            <AlertTitle className="flex items-center gap-1.5">
+              {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== '' ? (
+                <>
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  AI-Enhanced Explanation
+                </>
+              ) : (isNewFormat ? 'Explanation' : 'Why these changes?')}
             </AlertTitle>
             <AlertDescription>
               {recommendation.aiReasoning && recommendation.aiReasoning.trim() !== '' ? (

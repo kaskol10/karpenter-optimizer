@@ -10,6 +10,7 @@ import { Alert, AlertTitle } from './ui/alert';
 import { BellRing, Check, Plus, Trash2, Loader2, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { API_URL } from '../lib/api';
+import { SimpleSelect } from './ui/simple-select';
 
 // Condition rows: key in the config object, label, threshold field + unit.
 const CONDITIONS = [
@@ -197,13 +198,13 @@ function AlertsSettings() {
         {/* Reminders */}
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <span className="text-sm">Remind while firing</span>
-          <select
-            className="h-7 rounded border bg-transparent px-2 text-xs"
+          <SimpleSelect
+            className="h-8 w-36 text-xs"
+            ariaLabel="Remind while firing"
             value={cfg.remindWhileFiring || ''}
-            onChange={(e) => save({ ...cfg, remindWhileFiring: e.target.value })}
-          >
-            {REMIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+            onValueChange={(v) => save({ ...cfg, remindWhileFiring: v })}
+            options={REMIND_OPTIONS}
+          />
         </div>
 
         {/* Channels */}
@@ -247,13 +248,13 @@ function AlertsSettings() {
 
           {/* Add channel */}
           <div className="flex items-center gap-2">
-            <select
-              className="h-8 w-28 rounded border bg-transparent px-2 text-xs"
+            <SimpleSelect
+              className="h-8 w-28 text-xs"
+              ariaLabel="Channel type"
               value={newChannel.type}
-              onChange={(e) => setNewChannel({ ...newChannel, type: e.target.value })}
-            >
-              {CHANNEL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+              onValueChange={(v) => setNewChannel({ ...newChannel, type: v })}
+              options={CHANNEL_TYPES.map((t) => ({ value: t, label: t }))}
+            />
             <Input
               type="url"
               className="h-8 flex-1 text-xs"

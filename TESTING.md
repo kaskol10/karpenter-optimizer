@@ -56,13 +56,14 @@ Location: `internal/testutil/` (to be created)
 ### Frontend Testing
 
 #### Component Tests
-Location: `frontend/src/components/__tests__/`
+Location: next to the component (`ServingCard.test.jsx` beside `ServingCard.jsx`).
 
-**Components to Test:**
+**Covered:** `ServingCard`, `TopologyView` (focus flow, URL filters), `NodeBits`, `SimpleSelect`.
+
+**Next to cover:**
 1. **`NodePoolCard`** - Display logic, format detection
 2. **`GlobalClusterSummary`** - State management, API calls
 3. **`NodeUsageView`** - Chart rendering, data formatting
-4. **`WorkloadSelector`** - Form handling, validation
 
 #### API Mocking
 - Use `axios-mock-adapter` or `msw` (Mock Service Worker)
