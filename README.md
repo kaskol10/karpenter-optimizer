@@ -392,8 +392,11 @@ The tool fetches existing Karpenter NodePool configurations:
 │   │   │   ├── LogExplorer.js
 │   │   │   ├── NodePoolCard.js
 │   │   │   ├── NodeUsageView.js
-│   │   │   ├── TopologyView.js
-│   │   │   └── WorkloadUsageView.js
+│   │   │   ├── WorkloadUsageView.js
+│   │   │   ├── serving/        # Serving tab (ServingHealth, ServingCard, GatewayCard, ...)
+│   │   │   └── topology/       # Topology tab (TopologyView, NodeCard, GPULaneBar, ...)
+│   │   ├── hooks/              # usePolling, useUrlParam
+│   │   ├── lib/                # api, pollingClock, servingStatus, servingPlacement, ...
 │   │   └── App.js
 │   └── package.json
 ├── examples/           # Example files

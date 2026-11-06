@@ -41,6 +41,27 @@ describe('getServingStatus', () => {
     expect(s.neighbours.count).toBe(1);
   });
 
+  test('preemptions alone mean pressure, even with KV cache below the threshold', () => {
+    const s = getServingStatus({ ...base, preemptions: 2, kvCachePercent: 40, e2eP95Seconds: 1 }, []);
+    expect(s.label).toBe('Under pressure');
+    expect(s.reasons[0]).toMatch(/2 preemption\(s\)/);
+  });
+
+  test('with no peers, a slow first token is the fallback signal', () => {
+    const alone = { ...base, e2eP95Seconds: 9, ttftP95Seconds: 4.2 };
+    const s = getServingStatus(alone, [alone]);
+    expect(s.label).toBe('Slow');
+    expect(s.reasons[0]).toMatch(/first token takes 4\.2s/);
+    expect(getServingStatus({ ...alone, ttftP95Seconds: 1 }, [alone]).label).toBe('OK');
+  });
+
+  test('a server with no latency data yet is OK with limited data', () => {
+    const s = getServingStatus({ ...base }, []);
+    expect(s.label).toBe('OK');
+    expect(s.limited).toBe(true);
+    expect(s.reasons).toEqual(['limited data (first sample)']);
+  });
+
   test('a healthy server sharing a GPU is not flagged', () => {
     const s = getServingStatus({ ...base, e2eP95Seconds: 1 }, [], noisy);
     expect(s.label).toBe('OK');
