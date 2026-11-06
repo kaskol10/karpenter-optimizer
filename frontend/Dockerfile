@@ -15,10 +15,10 @@ RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000
 
-# Install dependencies with cache mount for faster builds
-# Using npm install for better compatibility with lockfileVersion 3
+# Install exactly what package-lock.json pins (npm ci fails if it is out of
+# sync with package.json), with a cache mount for faster builds
 RUN --mount=type=cache,target=/root/.npm \
-    npm install --prefer-offline --no-audit
+    npm ci --prefer-offline --no-audit
 
 # Copy source code
 COPY . .

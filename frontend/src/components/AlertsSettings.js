@@ -9,10 +9,7 @@ import { Badge } from './ui/badge';
 import { Alert, AlertTitle } from './ui/alert';
 import { BellRing, Check, Plus, Trash2, Loader2, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
-
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
-  ? window.ENV.REACT_APP_API_URL
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
 
 // Condition rows: key in the config object, label, threshold field + unit.
 const CONDITIONS = [

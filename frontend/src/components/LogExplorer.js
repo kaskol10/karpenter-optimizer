@@ -15,10 +15,7 @@ import {
 import { cn } from '../lib/utils';
 import { EmptyState } from './ui/empty-state';
 import { SkeletonRows } from './ui/skeleton';
-
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
-  ? window.ENV.REACT_APP_API_URL
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
 
 const TAIL_OPTIONS = ['100', '500', '1000', '5000'];
 // "any" is a non-empty sentinel for "no time window" (Radix Select.Item

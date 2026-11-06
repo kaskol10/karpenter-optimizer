@@ -4,9 +4,7 @@
  * Fetches prices from backend API and caches them locally
  */
 
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from './api';
 
 const CACHE_KEY_PREFIX = 'aws_pricing_';
 const CACHE_VERSION = '1.0';

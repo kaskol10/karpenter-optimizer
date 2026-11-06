@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -14,11 +14,8 @@ import { RefreshCw, Zap, Loader2, LayoutDashboard } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getCacheStats } from '../lib/pricingCache';
 import { useCurrencyFormatter } from '../lib/currency';
-
-// Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
+import { usePolling, usePollingTick } from '../hooks/usePolling';
 
 // ClusterTrends renders sparklines for CPU %, memory %, GPU memory % and
 // estimated cost over the selected window (1h / 6h / 24h).
@@ -27,28 +24,22 @@ function ClusterTrends({ API_URL }) {
   const [window, setWindow] = useState('6h');
   const [points, setPoints] = useState([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await axios.get(`${API_URL}/api/v1/history`, {
-          params: { window },
-        });
-        if (!cancelled) {
-          setPoints(response.data.points || []);
-        }
-      } catch (err) {
-        if (!cancelled) setPoints([]);
-        console.error('History error:', err);
-      }
-    };
-    load();
-    const interval = setInterval(load, 60000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+  // Only the newest request may set points, so a slow response for the old
+  // window cannot overwrite the new window's series.
+  const latestLoad = useRef(0);
+  const load = useCallback(async () => {
+    const seq = ++latestLoad.current;
+    try {
+      const response = await axios.get(`${API_URL}/api/v1/history`, {
+        params: { window },
+      });
+      if (seq === latestLoad.current) setPoints(response.data.points || []);
+    } catch (err) {
+      if (seq === latestLoad.current) setPoints([]);
+      console.error('History error:', err);
+    }
   }, [window, API_URL]);
+  usePolling(load, 60000);
 
   const series = useMemo(() => {
     const toPoints = (fn) => points.map((p) => ({ t: p.t, value: fn(p) }));
@@ -130,17 +121,7 @@ function GlobalClusterSummary({ onRecommendationsGenerated, onClusterCostUpdate 
     setCacheStats(getCacheStats());
   }, []);
 
-  useEffect(() => {
-    let interval;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        fetchSummary();
-      }, refreshInterval * 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh, refreshInterval]);
+  usePollingTick(() => fetchSummary(), refreshInterval * 1000, autoRefresh);
 
   const fetchSummary = async () => {
     setLoading(true);

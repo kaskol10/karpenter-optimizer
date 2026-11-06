@@ -14,10 +14,8 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
 import { SkeletonRows } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
-
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
+import { usePollingTick } from '../hooks/usePolling';
 
 const ITEMS_PER_PAGE = 50; // Increased from 20 to reduce pagination
 
@@ -64,17 +62,7 @@ function WorkloadUsageView() {
     fetchWorkloads();
   }, []);
 
-  useEffect(() => {
-    let interval;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        fetchWorkloads();
-      }, refreshInterval * 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh, refreshInterval]);
+  usePollingTick(() => fetchWorkloads(), refreshInterval * 1000, autoRefresh);
 
   useEffect(() => {
     setCurrentPage(1); // Reset to first page when filters change

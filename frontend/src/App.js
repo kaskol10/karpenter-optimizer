@@ -18,11 +18,8 @@ import AlertsSettings from './components/AlertsSettings';
 import ServingHealth from './components/ServingHealth';
 import { cn } from './lib/utils';
 import { CurrencyRegionContext, formatCurrency } from './lib/currency';
-
-// Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from './lib/api';
+import { usePolling, useLastRefresh } from './hooks/usePolling';
 
 // Tab definitions: id, label, and icon. Order is the nav order.
 const TABS = [
@@ -51,7 +48,12 @@ function readLocation() {
   return { tab, focus };
 }
 
-function buildSearch(tab, focus) {
+const FOCUS_PARAMS = ['node', 'pod', 'gpu'];
+
+// buildSearch builds the query string for a tab and optional Topology focus.
+// keep carries the current tab's own params (its filters, see useUrlParam)
+// when staying on the same tab; a different tab starts with a clean URL.
+function buildSearch(tab, focus, keep = '') {
   const q = new URLSearchParams();
   if (tab !== 'overview') q.set('tab', tab);
   if (focus) {
@@ -59,8 +61,24 @@ function buildSearch(tab, focus) {
     if (focus.pod) q.set('pod', focus.pod);
     if (focus.gpu) q.set('gpu', focus.gpu);
   }
+  new URLSearchParams(keep).forEach((value, key) => {
+    if (key !== 'tab' && !FOCUS_PARAMS.includes(key)) q.set(key, value);
+  });
   const str = q.toString();
   return str ? `?${str}` : window.location.pathname;
+}
+
+// LastUpdated shows when the polled panels last refreshed on the shared
+// polling clock, so everyone reading the screen knows how fresh it is.
+function LastUpdated() {
+  const at = useLastRefresh();
+  if (!at) return null;
+  const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return (
+    <span className="mr-2 text-xs text-muted-foreground tabular-nums" title="Polling pauses while this browser tab is hidden">
+      Updated {time}
+    </span>
+  );
 }
 
 function NavItem({ id, label, Icon, active, badge, onClick }) {
@@ -102,7 +120,8 @@ function App() {
   const navigate = useCallback((tab, focus = null) => {
     setActiveTab(tab);
     setTopologyFocus(focus);
-    const next = buildSearch(tab, focus);
+    const sameTab = readLocation().tab === tab;
+    const next = buildSearch(tab, focus, sameTab ? window.location.search : '');
     const current = window.location.search || window.location.pathname;
     if (next !== current) {
       window.history.pushState({ tab, from: readLocation().tab }, '', next);
@@ -152,20 +171,15 @@ function App() {
   // Poll the disruption summary so the Disruptions tab can show a live
   // count badge (blocked + active). Non-fatal: a failed poll just leaves the
   // badge at 0.
-  useEffect(() => {
-    if (!kubernetesConnected) return undefined;
-    const fetchCount = () => {
-      axios.get(`${API_URL}/api/v1/disruptions`, { params: { hours: 24 } })
-        .then((res) => {
-          const s = res.data.summary || {};
-          setDisruptionCount((s.blockedCount || 0) + (s.activeCount || 0));
-        })
-        .catch(() => setDisruptionCount(0));
-    };
-    fetchCount();
-    const interval = setInterval(fetchCount, 60000);
-    return () => clearInterval(interval);
-  }, [kubernetesConnected]);
+  const fetchDisruptionCount = useCallback(() => {
+    axios.get(`${API_URL}/api/v1/disruptions`, { params: { hours: 24 } })
+      .then((res) => {
+        const s = res.data.summary || {};
+        setDisruptionCount((s.blockedCount || 0) + (s.activeCount || 0));
+      })
+      .catch(() => setDisruptionCount(0));
+  }, []);
+  usePolling(fetchDisruptionCount, 60000, kubernetesConnected);
 
   const fetchConfig = async () => {
     setConfigLoading(true);
@@ -198,7 +212,8 @@ function App() {
               <h1 className="text-2xl font-bold text-primary m-0">Karpenter Optimizer</h1>
               <p className="text-sm text-muted-foreground m-0">Cluster-level cost optimization</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              <LastUpdated />
               <Button
                 onClick={toggleTheme}
                 variant="outline"
