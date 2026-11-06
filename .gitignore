@@ -46,3 +46,4 @@ charts/*.tgz
 .DS_Store
 Thumbs.db
 
+frontend/coverage/

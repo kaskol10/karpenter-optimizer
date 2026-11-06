@@ -1,0 +1,87 @@
+import React, { useState } from 'react';
+import { Server } from 'lucide-react';
+
+// MetricTip is a metric label with a hover tooltip explaining it in
+// plain English (for end users unfamiliar with LLM serving metrics).
+export function MetricTip({ label, tip, children }) {
+  return (
+    <span className="inline-flex items-center gap-1" title={tip}>
+      <span className="cursor-help border-b border-dotted border-muted-foreground/40">{label}</span>
+      {children}
+    </span>
+  );
+}
+
+// --- Per-server health verdict ---
+//
+// Overload signals (waiting, KV cache %, preemptions) are objective and
+// workload-independent, so they use absolute thresholds. "Slow" is
+// workload-dependent (a 2s first token is fine for batch, bad for chat), so
+// it's judged *relative to the other servers in the fleet*, with a loose
+// TTFT fallback when no peer comparison is possible. The logic lives in
+// lib/servingStatus.js (pure, unit-tested).
+
+export const STATUS_TONE_CLASSES = {
+  green: 'bg-green-100 text-green-800 border-green-300 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/40',
+  amber: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40',
+  orange: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-500/20 dark:text-orange-300 dark:border-orange-500/40',
+  red: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/40',
+};
+
+// formatRelativeTime renders a Unix-seconds timestamp as "5m ago" / "3h ago".
+export function formatRelativeTime(unix) {
+  if (!unix) return '';
+  const secs = Math.max(0, Math.floor(Date.now() / 1000 - unix));
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// CopyableNode renders a node name; clicking copies it (for pasting into the
+// CLI). `copyValue` optionally overrides what gets copied (e.g. display the
+// hostname but copy the actual node name used by kubectl).
+export function CopyableNode({ name, copyValue }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const value = copyValue || name;
+    const done = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(done);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`${copyValue || name} — click to copy`}
+      className="inline-flex items-center gap-1 font-mono text-[11px] max-w-full cursor-pointer truncate text-left hover:underline"
+    >
+      <Server className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate">{copied ? 'Copied' : name}</span>
+    </button>
+  );
+}
+
+// formatTokens renders a token count compactly (e.g. 12345 -> "12.3k") so the
+// per-app table stays readable when callers consume millions of tokens.
+export function formatTokens(n) {
+  if (n == null) return '—';
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 2 : 1)}M`;
+  return `${(n / 1_000_000_000).toFixed(2)}B`;
+}

@@ -30,5 +30,6 @@ export function usePollingTick(fn, intervalMs, enabled = true) {
 // useLastRefresh returns the epoch ms of the most recent refresh on the
 // shared clock (null before the first), for the header's "Updated" label.
 export function useLastRefresh() {
-  return useSyncExternalStore(onRefresh, getLastRefresh, () => null);
+  // The app is client-rendered only; the server snapshot is the same getter.
+  return useSyncExternalStore(onRefresh, getLastRefresh, getLastRefresh);
 }
