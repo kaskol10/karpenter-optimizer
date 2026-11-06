@@ -9,10 +9,12 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './
 import { Alert, AlertTitle } from './ui/alert';
 import { SkeletonRows } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
-import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle, History, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Loader2, Server, Cpu, Clock, AlertTriangle, BarChart3, HelpCircle, History, ChevronDown, ChevronRight, Network, ArrowRight } from 'lucide-react';
 import { Area, Bar, Line, ComposedChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { cn, shortGpuUuid, formatGPUMem } from '../lib/utils';
 import Sparkline from './Sparkline';
+import { getServingStatus } from '../lib/servingStatus';
+import { findGpuNeighbours, neighbourPods } from '../lib/servingPlacement';
 
 const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
   ? window.ENV.REACT_APP_API_URL
@@ -35,135 +37,8 @@ function MetricTip({ label, tip, children }) {
 // workload-independent, so they use absolute thresholds. "Slow" is
 // workload-dependent (a 2s first token is fine for batch, bad for chat), so
 // it's judged *relative to the other servers in the fleet*, with a loose
-// TTFT fallback when no peer comparison is possible.
-const KV_PRESSURE_PCT = 85;
-const SLOW_PEER_RATIO = 2; // my p95 E2E > 2x the fastest peer
-const SLOW_PEER_FLOOR_SEC = 1; // ...and actually takes more than 1s
-const SLOW_TTFT_FLOOR_SEC = 3; // no-peer fallback: first token > 3s
-
-// getServingStatus derives { label, tone, reasons, meaning, fixes } for one
-// serving pod. `peers` is the full pod list; only online pods are comparable.
-// `meaning` is a plain-English "what does this state mean", and `fixes` is a
-// short list of concrete things to try.
-const STATUS_FIXES = {
-  pressure: [
-    'Add GPU capacity (more/bigger nodes for this model)',
-    'Give vLLM more KV cache: raise --gpu-memory-utilization, or lower --max-num-seqs / --max-model-len',
-    'Reduce the load this server takes (scale out replicas or cap queue depth)',
-  ],
-  busy: [
-    'Add more replicas of this model',
-    'Raise concurrency (--max-num-seqs) if GPU memory has headroom',
-    'Check for unusually long inputs/outputs or bursty traffic',
-  ],
-  slow: [
-    'Compare placement: this pod may sit on a slower or contended node (check GPU sharing / co-located pods)',
-    'Check for long inputs/outputs on this server vs its peers',
-    'If one server is a clear outlier, delete the pod to force a reschedule — a cheap first step',
-  ],
-  ok: [],
-};
-
-function getServingStatus(pod, peers) {
-  if (!pod.online) {
-    return {
-      label: 'offline',
-      tone: 'red',
-      reasons: [pod.error || 'unreachable'],
-      meaning: 'The server did not answer its /v1/models or /metrics endpoint.',
-      fixes: ['Check the pod is running and the serving port is exposed', 'Verify the app can reach pod IPs (in-cluster network access)'],
-    };
-  }
-
-  const reasons = [];
-  let limited = false;
-  let pressure = false;
-  let busy = false;
-
-  // Objective pressure signals
-  if (pod.preemptions > 0) {
-    pressure = true;
-    reasons.push(`${pod.preemptions} preemption(s) — requests re-run due to KV cache pressure`);
-  }
-  if (pod.kvCachePercent != null) {
-    if (pod.kvCachePercent >= KV_PRESSURE_PCT) {
-      pressure = true;
-      reasons.push(`KV cache ${pod.kvCachePercent.toFixed(0)}% — near memory capacity`);
-    }
-  }
-
-  // Objective overload signal
-  if (pod.waiting > 0) {
-    busy = true;
-    reasons.push(`${pod.waiting} request(s) queued`);
-  }
-
-  // Peer-relative "slow" signal (p95 E2E preferred, mean fallback). Peers are
-  // the *other* servers serving the same model — comparing across models is
-  // apples-to-oranges (a 7B and a 70B have very different latency profiles).
-  const myE2E = pod.e2eP95Seconds ?? pod.e2eSeconds;
-  if (myE2E != null && pod.model) {
-    const me = `${pod.namespace}/${pod.name}`;
-    const peerE2E = peers
-      .filter((p) => p.online && p.model === pod.model && `${p.namespace}/${p.name}` !== me)
-      .map((p) => p.e2eP95Seconds ?? p.e2eSeconds)
-      .filter((v) => v != null);
-    if (peerE2E.length > 0) {
-      const best = Math.min(...peerE2E);
-      if (myE2E > SLOW_PEER_RATIO * best && myE2E > SLOW_PEER_FLOOR_SEC) {
-        reasons.push(
-          `p95 E2E ${myE2E.toFixed(1)}s is >${SLOW_PEER_RATIO}x the fastest server (${best.toFixed(1)}s)`,
-        );
-      }
-    } else if (pod.ttftP95Seconds != null && pod.ttftP95Seconds > SLOW_TTFT_FLOOR_SEC) {
-      // No peers to compare against: loose absolute fallback on first token.
-      reasons.push(`first token takes ${pod.ttftP95Seconds.toFixed(1)}s (p95) — high for interactive use`);
-    }
-  } else if (pod.ttftSeconds == null) {
-    limited = true; // no latency data at all yet
-  }
-
-  if (pressure) {
-    return {
-      label: 'Under pressure',
-      tone: 'red',
-      reasons,
-      limited,
-      meaning: 'The GPU memory for in-flight requests is nearly full: requests are being re-run (preemptions) and new work will queue or be interrupted.',
-      fixes: STATUS_FIXES.pressure,
-    };
-  }
-  if (busy) {
-    return {
-      label: 'Busy',
-      tone: 'amber',
-      reasons,
-      limited,
-      meaning: 'More requests are arriving than this server can run right now — they are waiting in the queue, so users feel extra latency.',
-      fixes: STATUS_FIXES.busy,
-    };
-  }
-  if (reasons.length > 0) {
-    return {
-      label: 'Slow',
-      tone: 'orange',
-      reasons,
-      limited,
-      meaning: 'This server is responding much more slowly than the others serving the same model (or slower than expected when it runs alone).',
-      fixes: STATUS_FIXES.slow,
-    };
-  }
-  return {
-    label: 'OK',
-    tone: 'green',
-    reasons: limited ? ['limited data (first sample)'] : [],
-    limited,
-    meaning: limited
-      ? 'No problems detected yet, but only one sample has been collected — rates and latency compare against previous probes.'
-      : 'No problems detected from the current metrics: no queue, no preemptions, headroom in GPU memory, and latency in line with its peers.',
-    fixes: STATUS_FIXES.ok,
-  };
-}
+// TTFT fallback when no peer comparison is possible. The logic lives in
+// lib/servingStatus.js (pure, unit-tested).
 
 const STATUS_TONE_CLASSES = {
   green: 'bg-green-100 text-green-800 border-green-300 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/40',
@@ -339,9 +214,76 @@ function ServingTrends({ history }) {
 }
 
 // ServingCard renders inference health for a single LLM serving pod.
-function ServingCard({ pod, peers, history }) {
+// DiagnosisPanel puts the status verdict on the card instead of hiding it in
+// a hover tooltip: what's wrong, why, the first thing to try, and a jump to
+// the pod's GPU on the Topology tab.
+const DIAGNOSIS_TONE_CLASSES = {
+  amber: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200',
+  orange: 'border-orange-300 bg-orange-50 text-orange-900 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-200',
+  red: 'border-red-300 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200',
+};
+
+function DiagnosisPanel({ status, onShowInTopology }) {
+  if (status.tone === 'green') return null;
+  const [firstFix, ...otherFixes] = status.fixes;
+  return (
+    <div className={cn('rounded-md border px-3 py-2 text-xs space-y-1.5', DIAGNOSIS_TONE_CLASSES[status.tone])}>
+      <ul className="space-y-0.5">
+        {status.reasons.map((r) => (
+          <li key={r} className="flex gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden="true" />
+            <span>{r}</span>
+          </li>
+        ))}
+      </ul>
+      {firstFix && (
+        <p>
+          <span className="font-semibold">Try first: </span>
+          {firstFix}
+        </p>
+      )}
+      {otherFixes.length > 0 && (
+        <details>
+          <summary className="cursor-pointer select-none opacity-80">
+            {otherFixes.length} more thing{otherFixes.length > 1 ? 's' : ''} to try
+          </summary>
+          <ol className="mt-1 ml-4 list-decimal space-y-0.5" start={2}>
+            {otherFixes.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ol>
+        </details>
+      )}
+      {onShowInTopology && (
+        <button
+          type="button"
+          onClick={onShowInTopology}
+          className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
+        >
+          {status.neighbours ? 'See who shares this GPU' : 'Show placement in topology'}
+          <ArrowRight className="h-3 w-3" aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ServingCard({ pod, peers, history, placement, onOpenTopology }) {
   const kv = pod.kvCachePercent;
-  const status = useMemo(() => getServingStatus(pod, peers || [pod]), [pod, peers]);
+  const status = useMemo(
+    () => getServingStatus(pod, peers || [pod], placement),
+    [pod, peers, placement],
+  );
+  const neighbourCount = useMemo(() => neighbourPods(placement).length, [placement]);
+  const showInTopology =
+    pod.node && onOpenTopology
+      ? () =>
+          onOpenTopology({
+            node: pod.node,
+            pod: `${pod.namespace}/${pod.name}`,
+            gpu: placement?.shared?.[0]?.gpu?.key || (pod.gpuDevices?.[0]?.uuid ?? ''),
+          })
+      : null;
   // Multi-line tooltip: what triggered it, what the state means, and what to do.
   const statusTitle = useMemo(() => {
     const lines = [`${status.label} — ${status.meaning}`];
@@ -377,6 +319,17 @@ function ServingCard({ pod, peers, history }) {
                         Clicking still copies the real node name for kubectl. */}
                     <CopyableNode name={pod.nodeHostname || pod.node} copyValue={pod.node} />
                   </div>
+                )}
+                {showInTopology && (
+                  <button
+                    type="button"
+                    onClick={showInTopology}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                    title="Show this pod's node and GPU in Topology"
+                    aria-label="Show in topology"
+                  >
+                    <Network className="h-3.5 w-3.5" />
+                  </button>
                 )}
                 {pod.nodeInstanceType && (
                   <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
@@ -430,6 +383,18 @@ function ServingCard({ pod, peers, history }) {
           </div>
         ) : (
           <div className="space-y-3">
+            <DiagnosisPanel status={status} onShowInTopology={showInTopology} />
+            {status.tone === 'green' && neighbourCount > 0 && (
+              <button
+                type="button"
+                onClick={showInTopology || undefined}
+                className="inline-flex items-center gap-1 rounded-md border border-indigo-300 px-2 py-0.5 text-[11px] text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                title="Sharing a GPU is fine while this server is healthy; it is the first suspect if it slows down."
+              >
+                Shares {placement.shared.map((s) => s.gpu.label).join(', ')} with {neighbourCount} pod{neighbourCount > 1 ? 's' : ''}
+                {showInTopology && <ArrowRight className="h-3 w-3" aria-hidden="true" />}
+              </button>
+            )}
             {/* KV cache usage */}
             {kv !== undefined && kv !== null ? (
               <div>
@@ -1390,8 +1355,9 @@ function GatewayCostHistory({ split = 'app' }) {
 }
 
 // ServingHealth lists LLM serving pods (vLLM/sglang) and their inference health.
-function ServingHealth() {
+function ServingHealth({ onOpenTopology }) {
   const [pods, setPods] = useState(null);
+  const [topologyNodes, setTopologyNodes] = useState(null); // for GPU co-location
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sortBy, setSortBy] = useState('throughput');
@@ -1441,6 +1407,32 @@ function ServingHealth() {
       setGateway(null);
     }
   }, []);
+
+  // Topology tells us who else sits on each serving pod's GPU (noisy
+  // neighbours). Non-fatal and slower-paced: placement changes rarely.
+  const fetchTopology = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/v1/topology`);
+      setTopologyNodes(response.data.nodes || []);
+    } catch (err) {
+      setTopologyNodes(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTopology();
+    const interval = setInterval(fetchTopology, 60000);
+    return () => clearInterval(interval);
+  }, [fetchTopology]);
+
+  const placements = useMemo(() => {
+    const byKey = {};
+    if (!pods || !topologyNodes) return byKey;
+    pods.forEach((p) => {
+      byKey[`${p.namespace}/${p.name}`] = findGpuNeighbours(p, topologyNodes);
+    });
+    return byKey;
+  }, [pods, topologyNodes]);
 
   useEffect(() => {
     fetchServing();
@@ -1568,6 +1560,8 @@ function ServingHealth() {
                       pod={pod}
                       peers={pods}
                       history={servingHistory[`${pod.namespace}/${pod.name}`]}
+                      placement={placements[`${pod.namespace}/${pod.name}`]}
+                      onOpenTopology={onOpenTopology}
                     />
                   ))}
                 </div>

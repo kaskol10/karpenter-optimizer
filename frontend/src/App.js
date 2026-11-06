@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
@@ -36,6 +36,33 @@ const TABS = [
   { id: 'logs', label: 'Log Analyzer', Icon: FileText },
 ];
 
+const TAB_IDS = new Set(TABS.map((t) => t.id));
+
+// The active tab (and a Topology focus target) live in the URL so views can be
+// shared, survive a refresh, and the browser back button returns from a
+// Serving → Topology jump: ?tab=topology&node=<node>&pod=<ns/name>&gpu=<uuid>
+function readLocation() {
+  const q = new URLSearchParams(window.location.search);
+  const tab = TAB_IDS.has(q.get('tab')) ? q.get('tab') : 'overview';
+  const focus =
+    tab === 'topology' && q.get('node')
+      ? { node: q.get('node'), pod: q.get('pod') || '', gpu: q.get('gpu') || '' }
+      : null;
+  return { tab, focus };
+}
+
+function buildSearch(tab, focus) {
+  const q = new URLSearchParams();
+  if (tab !== 'overview') q.set('tab', tab);
+  if (focus) {
+    q.set('node', focus.node);
+    if (focus.pod) q.set('pod', focus.pod);
+    if (focus.gpu) q.set('gpu', focus.gpu);
+  }
+  const str = q.toString();
+  return str ? `?${str}` : window.location.pathname;
+}
+
 function NavItem({ id, label, Icon, active, badge, onClick }) {
   return (
     <button
@@ -64,12 +91,44 @@ function App() {
   const [clusterCost, setClusterCost] = useState(null);
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => readLocation().tab);
+  const [topologyFocus, setTopologyFocus] = useState(() => readLocation().focus);
   const [showKarpenterBanner, setShowKarpenterBanner] = useState(true);
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
   );
   const [disruptionCount, setDisruptionCount] = useState(0);
+
+  const navigate = useCallback((tab, focus = null) => {
+    setActiveTab(tab);
+    setTopologyFocus(focus);
+    const next = buildSearch(tab, focus);
+    const current = window.location.search || window.location.pathname;
+    if (next !== current) {
+      window.history.pushState({ tab, from: readLocation().tab }, '', next);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => {
+      const { tab, focus } = readLocation();
+      setActiveTab(tab);
+      setTopologyFocus(focus);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // "Back to Serving" from a focused Topology view: pop the history entry when
+  // we came from Serving (so Back/Forward don't pile up a Serving↔Topology
+  // loop); otherwise, e.g. after opening a shared link, navigate there.
+  const backToServing = useCallback(() => {
+    if (window.history.state && window.history.state.from === 'serving') {
+      window.history.back();
+    } else {
+      navigate('serving');
+    }
+  }, [navigate]);
 
   const toggleTheme = () => {
     setDark((d) => {
@@ -195,7 +254,7 @@ function App() {
                 Icon={Icon}
                 active={activeTab === id}
                 badge={id === 'disruptions' ? disruptionCount : 0}
-                onClick={() => setActiveTab(id)}
+                onClick={() => navigate(id)}
               />
             ))}
           </nav>
@@ -443,10 +502,18 @@ function App() {
           {activeTab === 'nodes' && <NodeUsageView />}
 
           {/* Topology Tab */}
-          {activeTab === 'topology' && <TopologyView />}
+          {activeTab === 'topology' && (
+            <TopologyView
+              focus={topologyFocus}
+              onClearFocus={() => navigate('topology')}
+              onBackToServing={backToServing}
+            />
+          )}
 
           {/* Serving Tab */}
-          {activeTab === 'serving' && <ServingHealth />}
+          {activeTab === 'serving' && (
+            <ServingHealth onOpenTopology={(focus) => navigate('topology', focus)} />
+          )}
 
           {/* Workloads Tab */}
           {activeTab === 'workloads' && <WorkloadUsageView />}

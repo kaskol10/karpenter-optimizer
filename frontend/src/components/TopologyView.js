@@ -8,8 +8,9 @@ import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { SkeletonRows } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
-import { Check, Loader2, RefreshCw, Network } from 'lucide-react';
+import { ArrowLeft, Check, Crosshair, Loader2, RefreshCw, Network, X } from 'lucide-react';
 import { cn, formatGPUMem, shortGpuUuid } from '../lib/utils';
+import { findGpuNeighbours, neighbourPods, podKey as placementPodKey } from '../lib/servingPlacement';
 
 const API_URL =
   window.ENV && Object.prototype.hasOwnProperty.call(window.ENV, 'REACT_APP_API_URL')
@@ -154,7 +155,7 @@ function CopyablePodName({ pod, onCopy, copiedKey, className }) {
   );
 }
 
-function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPod, copyPod, copiedKey }) {
+function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, isFocused, onHoverPod, copyPod, copiedKey }) {
   const { format, label, weight } = getMetricFields(metric, node);
   const w = weight(pod);
   const hue = hashToHue(getPodKey(pod));
@@ -183,8 +184,12 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
         flexBasis: 0,
         minWidth: 0,
         background: `hsl(${hue} 70% 50% / 0.18)`,
-        outline: isActive ? '2px solid hsl(190 90% 60% / 0.6)' : undefined,
-        outlineOffset: isActive ? '-2px' : undefined,
+        outline: isFocused
+          ? '2px solid hsl(var(--primary))'
+          : isActive
+            ? '2px solid hsl(190 90% 60% / 0.6)'
+            : undefined,
+        outlineOffset: isFocused || isActive ? '-2px' : undefined,
       }}
       title={titleLines.join('\n')}
       onMouseEnter={() => onHoverPod?.(pod)}
@@ -207,7 +212,7 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, onHoverPo
 // index 0), plus an "Unassigned" lane for GPU pods without placement info.
 // Segment width is the pod's memory on that device (MiB), against the node's
 // per-GPU memory.
-function GPULaneBar({ node, pods, copyPod, copiedKey }) {
+function GPULaneBar({ node, pods, copyPod, copiedKey, focusPodKey, focusGpu }) {
   const gpuCount = Math.max(Math.round(node.gpuCapacity || 0), 1);
   const perGpuMiB = (node.gpuMemTotalMiB || 0) / gpuCount;
 
@@ -230,6 +235,7 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
       const key = device.uuid || `idx-${device.index}`;
       if (!laneMap.has(key)) {
         laneMap.set(key, {
+          key,
           label: shortGpuUuid(device.uuid) || `GPU ${device.index}`,
           uuid: device.uuid || '',
           sortIndex: device.index || 0,
@@ -244,8 +250,25 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
     (a, b) => a.sortIndex - b.sortIndex || a.label.localeCompare(b.label),
   );
 
+  // Lanes (physical GPUs) holding the focused pod, plus the GPU named in the
+  // deep link (it may no longer hold the pod after a reschedule).
+  const focusedLaneKeys = new Set(
+    lanes
+      .filter(
+        (lane) =>
+          (focusGpu && lane.key === focusGpu) ||
+          (focusPodKey && lane.segments.some((seg) => getPodKey(seg.pod) === focusPodKey)),
+      )
+      .map((lane) => lane.key),
+  );
+
   const renderSegment = ({ pod, device, memMiB }) => {
     const hue = hashToHue(getPodKey(pod));
+    // Focused pod: solid primary. Other pods on a focused GPU (its
+    // neighbours): dashed amber, so "who shares this GPU" reads at a glance.
+    const isFocusPod = !!focusPodKey && focusPodKey === getPodKey(pod);
+    const isNeighbour =
+      !isFocusPod && !!device && focusedLaneKeys.has(device.uuid || `idx-${device.index}`);
     const titleLines = device
       ? [
           `${pod.namespace}/${pod.name}`,
@@ -267,6 +290,12 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
           flexBasis: 0,
           minWidth: 0,
           background: `hsl(${hue} 70% 50% / 0.18)`,
+          outline: isFocusPod
+            ? '2px solid hsl(var(--primary))'
+            : isNeighbour
+              ? '2px dashed hsl(38 92% 50%)'
+              : undefined,
+          outlineOffset: isFocusPod || isNeighbour ? '-2px' : undefined,
         }}
         title={titleLines.join('\n')}
       >
@@ -280,12 +309,15 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
     );
   };
 
-  const laneRow = (label, segments, usedMiB, labelTitle) => {
+  const laneRow = (label, segments, usedMiB, labelTitle, focused = false) => {
     const freeMiB = Math.max(perGpuMiB - usedMiB, 0);
     return (
-    <div className="flex items-center gap-2">
+    <div className={cn('flex items-center gap-2', focused && 'rounded bg-primary/5 ring-1 ring-primary/40 -mx-1 px-1')}>
       <span
-        className="text-[10px] font-mono text-muted-foreground w-16 shrink-0 truncate"
+        className={cn(
+          'text-[10px] font-mono w-16 shrink-0 truncate',
+          focused ? 'text-primary font-semibold' : 'text-muted-foreground',
+        )}
         title={labelTitle || undefined}
       >
         {label}
@@ -324,7 +356,7 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
       </p>
       {lanes.map((lane) => {
         const usedMiB = lane.segments.reduce((sum, s) => sum + s.memMiB, 0);
-        return laneRow(lane.label, lane.segments, usedMiB, lane.uuid);
+        return laneRow(lane.label, lane.segments, usedMiB, lane.uuid, focusedLaneKeys.has(lane.key));
       })}
       {otherGpusMiB > 0 && (
         <div className="flex items-center gap-2">
@@ -348,7 +380,7 @@ function GPULaneBar({ node, pods, copyPod, copiedKey }) {
   );
 }
 
-function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, copyPod, copiedKey }) {
+function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, copyPod, copiedKey, focusPodKey }) {
   const { weight: weightFn, format, label } = getMetricFields(metric, node);
   const [hoveredPod, setHoveredPod] = useState(null);
 
@@ -401,6 +433,7 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, cop
                   grow={grow}
                   showLabel={showLabel}
                   isActive={isActive}
+                  isFocused={focusPodKey === getPodKey(pod)}
                   onHoverPod={setHoveredPod}
                   copyPod={copyPod}
                   copiedKey={copiedKey}
@@ -445,12 +478,18 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, cop
         <div className="space-y-1">
           <p className="text-xs font-semibold">Pods (top by {label} request)</p>
           <div className="flex flex-col gap-1">
-            {(showAllPodsInList ? podsSorted : podsSorted.slice(0, 8)).map((pod) => {
+            {(showAllPodsInList
+              ? podsSorted
+              : podsSorted.filter((p, i) => i < 8 || getPodKey(p) === focusPodKey)
+            ).map((pod) => {
               const w = weightFn(pod);
               return (
                 <div
                   key={getPodKey(pod)}
-                  className="flex items-center gap-2 text-xs rounded-md border bg-card/60 px-2 py-1 min-w-0"
+                  className={cn(
+                    'flex items-center gap-2 text-xs rounded-md border bg-card/60 px-2 py-1 min-w-0',
+                    focusPodKey === getPodKey(pod) && 'border-primary ring-1 ring-primary/40',
+                  )}
                   title={`${pod.namespace}/${pod.name}`}
                 >
                   <span
@@ -493,8 +532,71 @@ function NodePodBar({ node, pods, metric, showAllPodsInList, title, hideBar, cop
   );
 }
 
-export default function TopologyView() {
+// FocusBanner explains why the view jumped to a node (a deep link from the
+// Serving tab or a shared URL) and who shares the focused pod's GPU.
+function FocusBanner({ focus, nodes, loading, onBack, onClear }) {
+  const [ns, name] = (focus.pod || '').split('/');
+  const node = nodes.find((n) => n.name === focus.node);
+  const placement =
+    node && name ? findGpuNeighbours({ namespace: ns, name, node: focus.node }, nodes) : null;
+  const neighbours = neighbourPods(placement);
+  const podMissing = node && name && !(node.pods || []).some((p) => getPodKey(p) === focus.pod);
+
+  return (
+    <Alert className="border-primary/40 bg-primary/5">
+      <Crosshair className="h-4 w-4" />
+      <AlertTitle className="flex flex-wrap items-center gap-x-2">
+        Focused on
+        {focus.pod && <span className="font-mono">{focus.pod}</span>}
+        <span className="text-muted-foreground font-normal">on</span>
+        <span className="font-mono">{focus.node}</span>
+      </AlertTitle>
+      <AlertDescription className="space-y-2">
+        {!loading && !node && (
+          <p>
+            This node is no longer in the cluster. Karpenter may have consolidated or replaced it,
+            so the pod has probably been rescheduled. Go back to Serving to see where it runs now.
+          </p>
+        )}
+        {podMissing && <p>The pod is no longer on this node; it may have been rescheduled.</p>}
+        {placement && neighbours.length > 0 && (
+          <p>
+            Shares {placement.shared.map((sh) => sh.gpu.label).join(', ')} with{' '}
+            {neighbours.map((p, i) => (
+              <span key={placementPodKey(p)}>
+                {i > 0 && ', '}
+                <span className="font-mono">{placementPodKey(p)}</span>
+              </span>
+            ))}
+            {placement.precise ? '' : ' (single-GPU node, time-sliced)'}.
+          </p>
+        )}
+        {placement && neighbours.length === 0 && !podMissing && (
+          <p>Nothing else is placed on this pod's GPU.</p>
+        )}
+        <div className="flex flex-wrap gap-2 pt-1">
+          {onBack && (
+            <Button size="sm" variant="outline" onClick={onBack}>
+              <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+              Back to Serving
+            </Button>
+          )}
+          {onClear && (
+            <Button size="sm" variant="ghost" onClick={onClear}>
+              <X className="h-3.5 w-3.5 mr-1.5" />
+              Clear focus
+            </Button>
+          )}
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+export default function TopologyView({ focus = null, onClearFocus, onBackToServing }) {
   const [nodes, setNodes] = useState([]);
+  const nodeRefs = useRef({});
+  const handledFocus = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fallbackMode, setFallbackMode] = useState(false);
@@ -588,6 +690,29 @@ export default function TopologyView() {
   useEffect(() => {
     fetchTopology();
   }, [fetchTopology]);
+
+  // Deep-link focus: once per focus target, clear any filter that could hide
+  // the node or pod, then scroll the node card into view.
+  const focusKey = focus ? `${focus.node}|${focus.pod}|${focus.gpu}` : null;
+  useEffect(() => {
+    if (!focusKey) {
+      handledFocus.current = null;
+      return;
+    }
+    if (handledFocus.current === focusKey || nodes.length === 0) return;
+    handledFocus.current = focusKey;
+    setNodePoolFilter('');
+    setZoneFilter('');
+    setNodeNameFilter('');
+    setPodNsFilter('');
+    setPodNameFilter('');
+    setHideDaemonSets(false);
+    // Let the filter reset render before scrolling.
+    requestAnimationFrame(() => {
+      const el = nodeRefs.current[focus.node];
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, [focusKey, focus, nodes.length]);
 
   const nodePools = useMemo(() => {
     const s = new Set();
@@ -760,6 +885,16 @@ export default function TopologyView() {
         </CardContent>
       </Card>
 
+      {focus && (
+        <FocusBanner
+          focus={focus}
+          nodes={nodes}
+          loading={loading}
+          onBack={onBackToServing}
+          onClear={onClearFocus}
+        />
+      )}
+
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Error</AlertTitle>
@@ -812,8 +947,17 @@ export default function TopologyView() {
                   });
                   const showDrilldown = expandedNodeName === node.name;
 
+                  const isFocusNode = !!focus && focus.node === node.name;
+                  const focusPodKey = isFocusNode ? focus.pod : null;
+
                   return (
-                    <Card key={node.name}>
+                    <Card
+                      key={node.name}
+                      ref={(el) => {
+                        nodeRefs.current[node.name] = el;
+                      }}
+                      className={cn(isFocusNode && 'ring-2 ring-primary shadow-lg')}
+                    >
                       <CardHeader className="pb-2">
                         <div className="flex flex-wrap items-baseline justify-between gap-2">
                           <CardTitle className="text-sm font-mono">{node.name}</CardTitle>
@@ -884,6 +1028,7 @@ export default function TopologyView() {
                           showAllPodsInList={showAllPodsInOverview}
                           copyPod={copyPod}
                           copiedKey={copiedKey}
+                          focusPodKey={focusPodKey}
                         />
                         {(() => {
                           const gpuPods = pods.filter(
@@ -894,7 +1039,14 @@ export default function TopologyView() {
                           return (
                             <div className="mt-4 space-y-3 border-t pt-3">
                               {laneMode ? (
-                                <GPULaneBar node={node} pods={gpuPods} copyPod={copyPod} copiedKey={copiedKey} />
+                                <GPULaneBar
+                                  node={node}
+                                  pods={gpuPods}
+                                  copyPod={copyPod}
+                                  copiedKey={copiedKey}
+                                  focusPodKey={focusPodKey}
+                                  focusGpu={isFocusNode ? focus.gpu || null : null}
+                                />
                               ) : (
                                 <NodePodBar
                                   node={node}
@@ -904,6 +1056,7 @@ export default function TopologyView() {
                                   showAllPodsInList={showAllPodsInOverview}
                                   copyPod={copyPod}
                                   copiedKey={copiedKey}
+                                  focusPodKey={focusPodKey}
                                 />
                               )}
                               {laneMode && (
@@ -915,6 +1068,7 @@ export default function TopologyView() {
                                   showAllPodsInList={showAllPodsInOverview}
                                   copyPod={copyPod}
                                   copiedKey={copiedKey}
+                                  focusPodKey={focusPodKey}
                                 />
                               )}
                             </div>
