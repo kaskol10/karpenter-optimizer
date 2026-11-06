@@ -1,3 +1,4 @@
+import { describe, test, expect, vi } from 'vitest';
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -5,7 +6,7 @@ import { ServingCard } from './ServingCard';
 import { findGpuNeighbours } from '../../lib/servingPlacement';
 import { allServingPods, servingPods, topologyNodes, GPU } from '../../test/fixtures';
 
-function renderCard(pod, { onOpenTopology = jest.fn(), withPlacement = true } = {}) {
+function renderCard(pod, { onOpenTopology = vi.fn(), withPlacement = true } = {}) {
   const placement = withPlacement ? findGpuNeighbours(pod, topologyNodes) : undefined;
   render(
     <ServingCard pod={pod} peers={allServingPods} placement={placement} onOpenTopology={onOpenTopology} />,

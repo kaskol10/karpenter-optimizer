@@ -20,10 +20,10 @@ This document outlines the testing strategy for Karpenter Optimizer. Currently, 
 - ❌ No test files exist yet
 
 ### Frontend (React)
-- ✅ Testing libraries installed (`@testing-library/react`, `jest`)
-- ✅ Test script configured
-- ✅ CI workflow configured
-- ❌ No test files exist yet
+- ✅ Vitest + Testing Library (`@testing-library/react`, `@testing-library/user-event`, `jest-dom`)
+- ✅ Unit tests for the serving status, GPU placement, polling clock, URL state and API modules
+- ✅ Component tests for the Serving cards and the Topology focus flow (shared fixtures in `src/test/fixtures.js`)
+- ✅ CI runs `npm test -- --coverage`; a coverage gate in `vite.config.mjs` fails the build if the core modules drop below 90%
 
 ## Testing Structure
 
@@ -78,10 +78,10 @@ Location: `frontend/src/components/__tests__/`
 - **Kubernetes Testing**: `client-go/testing` (fake clients)
 
 ### Frontend
-- **Testing Framework**: Jest (via react-scripts)
-- **Component Testing**: `@testing-library/react`
+- **Testing Framework**: Vitest (jsdom environment, config in `vite.config.mjs`)
+- **Component Testing**: `@testing-library/react` + `jest-dom` matchers (registered in `src/setupTests.js`)
 - **User Interaction**: `@testing-library/user-event`
-- **API Mocking**: `axios-mock-adapter` or `msw`
+- **API Mocking**: `vi.mock('axios', () => ({ default: { get: vi.fn() } }))`, as in `components/topology/TopologyView.test.jsx`
 
 ## Example Test Structure
 
@@ -132,7 +132,8 @@ func TestEstimateCost(t *testing.T) {
 ### Frontend Example
 
 ```javascript
-// frontend/src/components/__tests__/NodePoolCard.test.js
+// frontend/src/components/NodePoolCard.test.jsx
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import NodePoolCard from '../NodePoolCard';
 
@@ -201,11 +202,11 @@ cd frontend
 # Run tests
 npm test
 
-# Run with coverage
+# Run with coverage (enforces the coverage gate)
 npm test -- --coverage
 
 # Run in watch mode
-npm test -- --watch
+npm run test:watch
 ```
 
 ## CI/CD Integration

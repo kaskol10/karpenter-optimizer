@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'vitest';
 import { findGpuNeighbours, describeNeighbours, neighbourPods, gpuKey } from './servingPlacement';
 
 const gpuA = { uuid: 'GPU-aaaaaaaa-1111-2222-3333-444444444444', index: 0, memoryMiB: 20000 };

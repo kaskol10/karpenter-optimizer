@@ -1,7 +1,8 @@
 // Single source of truth for reaching the backend API.
 //
 // The base URL comes from the runtime config (window.ENV, written by the
-// container's config.js) and falls back to the build-time env var, then to
+// container's config.js) and falls back to the build-time env var
+// (REACT_APP_API_URL, exposed by Vite's envPrefix), then to
 // same-origin. An explicit empty string in window.ENV means same-origin too.
 import axios from 'axios';
 
@@ -10,7 +11,7 @@ function resolveApiUrl() {
   if (env && Object.prototype.hasOwnProperty.call(env, 'REACT_APP_API_URL')) {
     return env.REACT_APP_API_URL || '';
   }
-  return process.env.REACT_APP_API_URL || '';
+  return import.meta.env.REACT_APP_API_URL || '';
 }
 
 export const API_URL = resolveApiUrl();
