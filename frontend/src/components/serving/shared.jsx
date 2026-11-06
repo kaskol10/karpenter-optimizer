@@ -1,12 +1,31 @@
 import React, { useState } from 'react';
-import { Server } from 'lucide-react';
+import { HelpCircle, Server } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
-// MetricTip is a metric label with a hover tooltip explaining it in
-// plain English (for end users unfamiliar with LLM serving metrics).
+// MetricTip is a metric label with a small help button that opens a
+// plain-English definition (for people new to LLM serving metrics). It
+// replaces both hover-only title tooltips and the old always-present
+// "What do these metrics mean?" accordion: the definition sits next to the
+// number it explains, opens on click or keyboard, and works on touch.
 export function MetricTip({ label, tip, children }) {
   return (
-    <span className="inline-flex items-center gap-1" title={tip}>
-      <span className="cursor-help border-b border-dotted border-muted-foreground/40">{label}</span>
+    <span className="inline-flex items-center gap-1">
+      <span>{label}</span>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`What is ${label}?`}
+            className="rounded-full text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <HelpCircle className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-72 p-3 text-xs leading-relaxed">
+          <p className="font-semibold text-foreground">{label}</p>
+          <p className="mt-1 text-muted-foreground">{tip}</p>
+        </PopoverContent>
+      </Popover>
       {children}
     </span>
   );

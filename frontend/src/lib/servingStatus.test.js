@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { getServingStatus } from './servingStatus';
+import { getServingStatus, sortByAttention, SEVERITY } from './servingStatus';
+import { allServingPods, servingPods } from '../test/fixtures';
 
 const base = { namespace: 'llm', name: 'r1', model: 'llama', online: true, waiting: 0, preemptions: 0 };
 const noisy = {
@@ -67,5 +68,40 @@ describe('getServingStatus', () => {
     const s = getServingStatus({ ...base, e2eP95Seconds: 1 }, [], noisy);
     expect(s.label).toBe('OK');
     expect(s.reasons).toEqual([]);
+  });
+});
+
+describe('sortByAttention', () => {
+  test('puts the worst server first: offline, pressure, busy, slow, then healthy', () => {
+    const pressured = { ...servingPods.r3, name: 'llama-70b-r4', kvCachePercent: 95 };
+    const busy = { ...servingPods.r3, name: 'llama-70b-r5', waiting: 4 };
+    const pods = [...allServingPods, servingPods.offline, pressured, busy];
+    expect(sortByAttention(pods).map((p) => p.name)).toEqual([
+      'mistral-0',
+      'llama-70b-r4',
+      'llama-70b-r5',
+      'llama-70b-r2',
+      'qwen3-8b-0',
+      'llama-70b-r1',
+      'llama-70b-r3',
+    ]);
+  });
+
+  test('healthy servers are ordered by throughput, then name', () => {
+    const a = { ...servingPods.r1, name: 'b' };
+    const b = { ...servingPods.r1, name: 'a' };
+    expect(sortByAttention([a, b]).map((p) => p.name)).toEqual(['a', 'b']);
+  });
+
+  test('does not mutate its input', () => {
+    const pods = [servingPods.r1, servingPods.r2];
+    sortByAttention(pods);
+    expect(pods.map((p) => p.name)).toEqual(['llama-70b-r1', 'llama-70b-r2']);
+  });
+
+  test('every status carries its severity', () => {
+    expect(getServingStatus(servingPods.offline, []).severity).toBe(SEVERITY.offline);
+    expect(getServingStatus(servingPods.r1, allServingPods).severity).toBe(SEVERITY.ok);
+    expect(getServingStatus(servingPods.r2, allServingPods).severity).toBe(SEVERITY.slow);
   });
 });
