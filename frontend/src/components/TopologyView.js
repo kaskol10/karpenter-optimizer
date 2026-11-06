@@ -11,11 +11,10 @@ import { EmptyState } from './ui/empty-state';
 import { ArrowLeft, Check, Crosshair, Loader2, RefreshCw, Network, X } from 'lucide-react';
 import { cn, formatGPUMem, shortGpuUuid } from '../lib/utils';
 import { findGpuNeighbours, neighbourPods, podKey as placementPodKey } from '../lib/servingPlacement';
+import { API_URL } from '../lib/api';
+import { useUrlParam } from '../hooks/useUrlParam';
 
-const API_URL =
-  window.ENV && Object.prototype.hasOwnProperty.call(window.ENV, 'REACT_APP_API_URL')
-    ? window.ENV.REACT_APP_API_URL
-    : process.env.REACT_APP_API_URL || '';
+const TOPOLOGY_METRICS = ['cpu', 'memory'];
 
 function getPodKey(pod) {
   return `${pod.namespace}/${pod.name}`;
@@ -600,14 +599,25 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fallbackMode, setFallbackMode] = useState(false);
-  const [metric, setMetric] = useState('cpu');
-  const [nodePoolFilter, setNodePoolFilter] = useState('');
-  const [zoneFilter, setZoneFilter] = useState('');
-  const [nodeNameFilter, setNodeNameFilter] = useState('');
-  const [podNsFilter, setPodNsFilter] = useState('');
-  const [podNameFilter, setPodNameFilter] = useState('');
+  // Filters live in the URL so a filtered view survives a refresh and can be
+  // shared (?metric=memory&pool=gpu&ns=llm ...).
+  const [metric, setMetric] = useUrlParam('metric', 'cpu', TOPOLOGY_METRICS);
+  const [nodePoolFilter, setNodePoolFilter] = useUrlParam('pool');
+  const [zoneFilter, setZoneFilter] = useUrlParam('zone');
+  const [nodeNameFilter, setNodeNameFilter] = useUrlParam('nodeq');
+  const [podNsFilter, setPodNsFilter] = useUrlParam('ns');
+  const [podNameFilter, setPodNameFilter] = useUrlParam('podq');
   const [showAllPodsInOverview, setShowAllPodsInOverview] = useState(false);
-  const [hideDaemonSets, setHideDaemonSets] = useState(false);
+  const [daemonSetsParam, setDaemonSetsParam] = useUrlParam('ds', 'show', ['show', 'hide']);
+  const hideDaemonSets = daemonSetsParam === 'hide';
+  const setHideDaemonSets = useCallback(
+    (next) =>
+      setDaemonSetsParam((prev) => {
+        const hidden = typeof next === 'function' ? next(prev === 'hide') : next;
+        return hidden ? 'hide' : 'show';
+      }),
+    [setDaemonSetsParam],
+  );
   const [expandedNodeName, setExpandedNodeName] = useState(null);
   const [nodeDetailFilters, setNodeDetailFilters] = useState({});
   const { copy: copyPod, copiedKey } = useCopyPodName();
@@ -712,7 +722,17 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
       const el = nodeRefs.current[focus.node];
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-  }, [focusKey, focus, nodes.length]);
+  }, [
+    focusKey,
+    focus,
+    nodes.length,
+    setNodePoolFilter,
+    setZoneFilter,
+    setNodeNameFilter,
+    setPodNsFilter,
+    setPodNameFilter,
+    setHideDaemonSets,
+  ]);
 
   const nodePools = useMemo(() => {
     const s = new Set();

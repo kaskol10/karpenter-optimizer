@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import React, { useState, useCallback, useMemo, Fragment } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -15,10 +15,12 @@ import { cn, shortGpuUuid, formatGPUMem } from '../lib/utils';
 import Sparkline from './Sparkline';
 import { getServingStatus } from '../lib/servingStatus';
 import { findGpuNeighbours, neighbourPods } from '../lib/servingPlacement';
+import { API_URL } from '../lib/api';
+import { usePolling } from '../hooks/usePolling';
+import { useUrlParam } from '../hooks/useUrlParam';
 
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
-  ? window.ENV.REACT_APP_API_URL
-  : (process.env.REACT_APP_API_URL || '');
+const SERVING_SORTS = ['throughput', 'requests', 'queue', 'name'];
+const TREND_WINDOWS = ['1h', '6h', '24h', '7d'];
 
 // MetricTip is a metric label with a hover tooltip explaining it in
 // plain English (for end users unfamiliar with LLM serving metrics).
@@ -980,11 +982,7 @@ function GatewayCostHistory({ split = 'app' }) {
     }
   }, [split, windowDays]);
 
-  useEffect(() => {
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 60000);
-    return () => clearInterval(interval);
-  }, [fetchHistory]);
+  usePolling(fetchHistory, 60000);
 
   // Per-day rollup: one row per UTC day (00:00–23:59). `cell` holds both
   // spend and tokens per split value (so the table can show both columns while
@@ -1360,8 +1358,8 @@ function ServingHealth({ onOpenTopology }) {
   const [topologyNodes, setTopologyNodes] = useState(null); // for GPU co-location
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [sortBy, setSortBy] = useState('throughput');
-  const [trendWindow, setTrendWindow] = useState('6h');
+  const [sortBy, setSortBy] = useUrlParam('sort', 'throughput', SERVING_SORTS);
+  const [trendWindow, setTrendWindow] = useUrlParam('trend', '6h', TREND_WINDOWS);
   const [servingHistory, setServingHistory] = useState({}); // key: ns/name -> {points, lastIssue}
   const [gateway, setGateway] = useState(null);
   const [gatewayView, setGatewayView] = useState('apps'); // 'apps' | 'models'
@@ -1419,11 +1417,7 @@ function ServingHealth({ onOpenTopology }) {
     }
   }, []);
 
-  useEffect(() => {
-    fetchTopology();
-    const interval = setInterval(fetchTopology, 60000);
-    return () => clearInterval(interval);
-  }, [fetchTopology]);
+  usePolling(fetchTopology, 60000);
 
   const placements = useMemo(() => {
     const byKey = {};
@@ -1434,25 +1428,13 @@ function ServingHealth({ onOpenTopology }) {
     return byKey;
   }, [pods, topologyNodes]);
 
-  useEffect(() => {
-    fetchServing();
-    const interval = setInterval(fetchServing, 30000);
-    return () => clearInterval(interval);
-  }, [fetchServing]);
+  usePolling(fetchServing, 30000);
 
-  useEffect(() => {
-    fetchGateway();
-    const interval = setInterval(fetchGateway, 30000);
-    return () => clearInterval(interval);
-  }, [fetchGateway]);
+  usePolling(fetchGateway, 30000);
 
   // Trend history is sampled server-side on the 60s cluster interval, so a
   // slower refresh (60s) keeps sparklines current without hammering the API.
-  useEffect(() => {
-    fetchServingHistory();
-    const interval = setInterval(fetchServingHistory, 60000);
-    return () => clearInterval(interval);
-  }, [fetchServingHistory]);
+  usePolling(fetchServingHistory, 60000);
 
   const sortedPods = useMemo(() => {
     if (!pods) return pods;

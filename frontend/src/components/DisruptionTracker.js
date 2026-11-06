@@ -12,11 +12,8 @@ import { cn } from '../lib/utils';
 import { SkeletonRows } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
 import { useCurrencyFormatter } from '../lib/currency';
-
-// Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL'))
-  ? window.ENV.REACT_APP_API_URL
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
+import { usePollingTick } from '../hooks/usePolling';
 
 // useCopyText copies a value to the clipboard and tracks the last-copied key
 // for brief "Copied" feedback.
@@ -394,14 +391,14 @@ function DisruptionTracker() {
     fetchRecentDeletions();
   }, [fetchDisruptions, fetchRecentDeletions]);
 
-  useEffect(() => {
-    if (!autoRefresh) return undefined;
-    const interval = setInterval(() => {
+  usePollingTick(
+    () => {
       fetchDisruptions();
       fetchRecentDeletions();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, fetchDisruptions, fetchRecentDeletions]);
+    },
+    60000,
+    autoRefresh,
+  );
 
   const toggleTypeFilter = (type) => {
     const newSelected = new Set(selectedTypes);

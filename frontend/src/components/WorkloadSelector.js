@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-
-// Use runtime configuration from window.ENV (set via config.js) or build-time env var
-const API_URL = (window.ENV && window.ENV.hasOwnProperty('REACT_APP_API_URL')) 
-  ? window.ENV.REACT_APP_API_URL 
-  : (process.env.REACT_APP_API_URL || '');
+import { API_URL } from '../lib/api';
 
 function WorkloadSelector({ onWorkloadsSelected, selectedWorkloads }) {
   const [namespaces, setNamespaces] = useState([]);
