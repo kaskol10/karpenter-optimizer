@@ -36,6 +36,7 @@ This document provides context and guidelines for AI coding assistants working o
 
 ### Frontend (React)
 - **Location**: `frontend/src/`
+- **Tooling**: Vite (`npm start` on :3000 with `/api` proxied to :8080, `npm run build` into `build/`), Vitest, ESLint (`eslint-config-react-app`); Node 22.12+. Files containing JSX use the `.jsx` extension (Vite parses by extension). Build-time env vars keep the `REACT_APP_` prefix (`import.meta.env.REACT_APP_*`, via `envPrefix`); production images configure the API URL at runtime through `public/config.js`
 - **Key Components**:
   - `App.js` - Main application component. Active tab + Topology focus live in the URL (`?tab=topology&node=…&pod=ns/name&gpu=<uuid>`, `pushState` + `popstate`), so views are shareable, survive refresh, and the browser back button returns from a Serving → Topology jump. A tab's own filters are URL params too (`hooks/useUrlParam.js`, written with `replaceState`); `navigate()` keeps them when staying on the same tab and drops them when switching tabs. The header's `LastUpdated` label reads the shared polling clock.
   - `lib/api.js` - The only place that resolves the API base URL (`API_URL`: runtime `window.ENV.REACT_APP_API_URL`, else build-time env, else same-origin) and installs the optional `API_AUTH_TOKEN` bearer header (`installApiAuth`, called from `index.js`). Import `API_URL` from here; never redefine it in a component
@@ -373,8 +374,8 @@ type NodeInfo struct {
 
 ### 3. Testing (MANDATORY)
 - **Frontend**: `npm run test` must pass (or document pre-existing failures)
-- **Frontend component tests** use Testing Library with the shared fixtures in `frontend/src/test/fixtures.js` (a two-node GPU cluster with a noisy neighbour). Mock axios with `jest.mock('axios', ...)`: CRA's Jest does not transform axios's ES module build
-- **Coverage gate**: `package.json` `jest.coverageThreshold` requires 90% statements/lines/functions and 75% branches on `lib/{api,pollingClock,servingPlacement,servingStatus}.js` and `hooks/{usePolling,useUrlParam}.js`; CI runs tests with `--coverage`, so dropping below fails the build
+- **Frontend tests** run on Vitest (`npm test`, config in `frontend/vite.config.mjs`, jsdom). Component tests use Testing Library with the shared fixtures in `frontend/src/test/fixtures.js` (a two-node GPU cluster with a noisy neighbour); import `describe`/`test`/`expect`/`vi` from `vitest` explicitly. Mock axios as `vi.mock('axios', () => ({ default: { get: vi.fn() } }))`
+- **Coverage gate**: `test.coverage.thresholds` in `frontend/vite.config.mjs` (`perFile: true`) requires 90% statements/lines/functions and 75% branches on each of `lib/{api,pollingClock,servingPlacement,servingStatus}.js` and `hooks/{usePolling,useUrlParam}.js`; CI runs `npm test -- --coverage`, so dropping below fails the build
 - **Backend**: `make test` or `go test ./...` must pass (or document pre-existing failures)
 - Do NOT skip or delete tests to make them pass
 - Add tests for new features when appropriate

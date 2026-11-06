@@ -1,3 +1,4 @@
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -5,8 +6,8 @@ import axios from 'axios';
 import TopologyView from './TopologyView';
 import { topologyNodes, GPU } from '../../test/fixtures';
 
-// axios ships as an ES module that CRA's Jest does not transform.
-jest.mock('axios', () => ({ get: jest.fn() }));
+// Serve the topology fixture instead of calling the API.
+vi.mock('axios', () => ({ default: { get: vi.fn() } }));
 
 function setUrl(search) {
   window.history.replaceState(null, '', `/${search}`);
@@ -18,7 +19,7 @@ describe('TopologyView', () => {
     setUrl('?tab=topology');
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   test('groups nodes by NodePool and shows each node card', async () => {
     render(<TopologyView />);
@@ -29,8 +30,8 @@ describe('TopologyView', () => {
   });
 
   test('a focus link names the GPU neighbours and offers a way back', async () => {
-    const onBack = jest.fn();
-    const onClear = jest.fn();
+    const onBack = vi.fn();
+    const onClear = vi.fn();
     render(
       <TopologyView
         focus={{ node: 'ip-10-0-7-88', pod: 'llm/llama-70b-r2', gpu: GPU.c.uuid }}

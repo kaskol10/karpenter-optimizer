@@ -55,7 +55,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 ### Prerequisites
 
 - Go 1.25 or later
-- Node.js 16+ and npm
+- Node.js 22.12+ and npm
 - Docker and docker-compose (optional)
 - Kubernetes cluster with Karpenter (for testing)
 - kubectl configured
@@ -209,10 +209,10 @@ npm test
 npm test -- --coverage
 
 # Run tests in watch mode
-npm test -- --watch
+npm run test:watch
 ```
 
-**Note:** Frontend tests are configured but test files need to be created.
+Tests use Vitest and Testing Library; see [TESTING.md](TESTING.md).
 
 ### Integration Tests
 

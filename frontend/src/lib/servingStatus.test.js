@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'vitest';
 import { getServingStatus } from './servingStatus';
 
 const base = { namespace: 'llm', name: 'r1', model: 'llama', online: true, waiting: 0, preemptions: 0 };

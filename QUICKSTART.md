@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Go 1.21+
-- Node.js 16+ and npm
+- Node.js 22.12+ and npm
 - (Optional) Docker and docker-compose
 
 ## Option 1: Local Development
