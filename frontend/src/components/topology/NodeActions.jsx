@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Check, FileText, MoreHorizontal, ShieldAlert, Terminal } from 'lucide-react';
+import { Check, FileText, FlaskConical, MoreHorizontal, ShieldAlert, Terminal } from 'lucide-react';
 import { copyText } from '../serving/shared';
 import { logTargets, nodeKubectlCommands } from '../../lib/nodeActions';
 
 // NodeActions is the one menu per node: copy-ready kubectl commands
 // (read-only or dry-run), the node's disruption status, and logs for any pod
 // on it. A native <details> keeps it keyboard-accessible without a portal.
-export function NodeActions({ node, onOpenLogs, onOpenDisruptions }) {
+export function NodeActions({ node, onOpenLogs, onOpenDisruptions, onToggleDrain, inDrain = false }) {
   const [copied, setCopied] = useState(null);
   const copy = (command) =>
     copyText(command, () => {
@@ -33,6 +33,12 @@ export function NodeActions({ node, onOpenLogs, onOpenDisruptions }) {
             <code className="truncate font-mono text-[11px]">{command}</code>
           </button>
         ))}
+        {onToggleDrain && (
+          <button type="button" onClick={() => onToggleDrain(node.name)} className={item}>
+            <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+            {inDrain ? 'Remove from drain simulation' : 'Simulate drain'}
+          </button>
+        )}
         {onOpenDisruptions && (
           <button type="button" onClick={() => onOpenDisruptions(node)} className={item}>
             <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" /> Disruption status

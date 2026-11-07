@@ -1,13 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import axios from 'axios';
 import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-import { Separator } from '../ui/separator';
 import { SkeletonRows } from '../ui/skeleton';
 import { EmptyState } from '../ui/empty-state';
 import { RefreshCw, Loader2, Network } from 'lucide-react';
-import { API_URL } from '../../lib/api';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { useCopyPodName } from './CopyablePodName';
 import { ClusterMap } from './ClusterMap';
@@ -18,13 +14,16 @@ import { Minimap } from './Minimap';
 import { PoolMap } from './PoolMap';
 import { ZoomBreadcrumb } from './ZoomBreadcrumb';
 import { BlastRadiusSummary } from './BlastRadius';
+import { DrainPanel } from './DrainPanel';
 import { FocusBanner } from './FocusBanner';
-import { NodeCard } from './NodeCard';
+import { NodeList } from './NodeList';
 import { TopologyFilters } from './TopologyFilters';
 import { isDaemonSetPod } from './podUtils';
-import { parseSize, shortLabelFor } from '../../lib/gpuFit';
+import { shortLabelFor } from '../../lib/gpuFit';
 import { LENSES, LENS_IDS, lensContext } from '../../lib/topologyLenses';
 import { useTopologyZoom } from '../../hooks/useTopologyZoom';
+import { useTopologyData } from '../../hooks/useTopologyData';
+import { useDrainPlan } from '../../hooks/useDrainPlan';
 import { risksOnNode, workloadSpread } from '../../lib/blastRadius';
 
 const TOPOLOGY_METRICS = ['cpu', 'memory'];
@@ -38,22 +37,11 @@ export default function TopologyView({
   onOpenLogs,
   onOpenDisruptions,
 }) {
-  const [nodes, setNodes] = useState([]);
-  const [currency, setCurrency] = useState('USD');
-  // Usage source reported by /topology ({source, window} or null) and DCGM
-  // GPU memory in use per card UUID.
-  const [usageMeta, setUsageMeta] = useState(null);
-  const [gpuUsage, setGpuUsage] = useState(null);
-  const [servingPods, setServingPods] = useState(null);
-  const [disruptions, setDisruptions] = useState(null);
   // Semantic zoom (one history entry per level) and the tile colour lens.
   const [zoomLoc, goZoom] = useTopologyZoom();
   const [lens, setLens] = useUrlParam('lens', 'requests', LENS_IDS);
   const nodeRefs = useRef({});
   const handledFocus = useRef(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [fallbackMode, setFallbackMode] = useState(false);
   // Filters live in the URL so a filtered view survives a refresh and can be
   // shared (?metric=memory&pool=gpu&ns=llm ...).
   const [metric, setMetric] = useUrlParam('metric', 'cpu', TOPOLOGY_METRICS);
@@ -62,9 +50,6 @@ export default function TopologyView({
   const [nodeNameFilter, setNodeNameFilter] = useUrlParam('nodeq');
   const [podNsFilter, setPodNsFilter] = useUrlParam('ns');
   const [podNameFilter, setPodNameFilter] = useUrlParam('podq');
-  // "Will it fit?" size, as typed (?fit=40GiB), so a check can be shared.
-  const [fitText, setFitText] = useUrlParam('fit');
-  const fitMiB = parseSize(fitText);
   const [showAllPodsInOverview, setShowAllPodsInOverview] = useState(false);
   const [daemonSetsParam, setDaemonSetsParam] = useUrlParam('ds', 'show', ['show', 'hide']);
   const hideDaemonSets = daemonSetsParam === 'hide';
@@ -76,117 +61,44 @@ export default function TopologyView({
       }),
     [setDaemonSetsParam],
   );
-  const [expandedNodeName, setExpandedNodeName] = useState(null);
-  const [nodeDetailFilters, setNodeDetailFilters] = useState({});
   const { copy: copyPod, copiedKey } = useCopyPodName();
-
-  const getNodeDetailFilters = useCallback(
-    (nodeName) =>
-      nodeDetailFilters[nodeName] || {
-        daemonSetsOnly: false,
-        search: '',
-      },
-    [nodeDetailFilters],
-  );
-
-  const setNodeDetailFilter = useCallback((nodeName, partial) => {
-    setNodeDetailFilters((prev) => ({
-      ...prev,
-      [nodeName]: {
-        daemonSetsOnly: false,
-        search: '',
-        ...(prev[nodeName] || {}),
-        ...partial,
-      },
-    }));
-  }, []);
-
-  const mapNodesFallback = (nodeItems) =>
-    nodeItems.map((node) => ({
-      ...node,
-      // Older backends don't provide /topology; synthesize minimal pod objects from podNames.
-      pods: (node.podNames || []).map((qualifiedName) => {
-        const slashIdx = qualifiedName.indexOf('/');
-        const namespace = slashIdx > 0 ? qualifiedName.slice(0, slashIdx) : 'default';
-        const name = slashIdx > 0 ? qualifiedName.slice(slashIdx + 1) : qualifiedName;
-        return {
-          name,
-          namespace,
-          nodeName: node.name,
-          workloadName: '',
-          workloadType: '',
-          qosClass: '',
-          // Equal weights in fallback mode; accurate requests require /topology support.
-          requests: {
-            cpuCores: 1,
-            memoryGiB: 1,
-            gpu: 0,
-          },
-        };
-      }),
-    }));
-
-  const fetchTopology = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setFallbackMode(false);
-    try {
-      const response = await axios.get(`${API_URL}/api/v1/topology`);
-      setNodes(response.data.nodes || []);
-      setCurrency(response.data.currency || 'USD');
-      setUsageMeta(response.data.usage || null);
-      setGpuUsage(response.data.gpuUsage || null);
-    } catch (err) {
-      if (err.response?.status === 404) {
-        try {
-          const nodesResponse = await axios.get(`${API_URL}/api/v1/nodes`);
-          setNodes(mapNodesFallback(nodesResponse.data.nodes || []));
-          setFallbackMode(true);
-          return;
-        } catch (fallbackErr) {
-          setError(
-            fallbackErr.response?.data?.error ||
-              fallbackErr.message ||
-              'Failed to load topology',
-          );
-          return;
-        }
-      }
-      setError(err.response?.data?.error || err.message || 'Failed to load topology');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTopology();
-  }, [fetchTopology]);
 
   // A deep link from Serving shows the node level until the user zooms
   // elsewhere (an explicit ?zoom= wins over the focus).
   const level = focus && !zoomLoc.explicit ? 'node' : zoomLoc.zoom;
-  // The Usage lens needs a usage source; without one it falls back to Requests.
+  // Lens data (serving pods, disruptions) is fetched only when a lens or
+  // level needs it. The Usage lens needs a usage source; without one it
+  // falls back to Requests, so its own "needs" never triggers a fetch.
+  const lensNeeds = LENSES.find((l) => l.id === lens)?.needs;
+  const {
+    nodes,
+    currency,
+    usageMeta,
+    gpuUsage,
+    servingPods,
+    disruptions,
+    loading,
+    error,
+    fallbackMode,
+    refresh: fetchTopology,
+  } = useTopologyData({
+    needServing: lensNeeds === 'serving' || level === 'gpu',
+    needDisruptions: lensNeeds === 'disruptions',
+  });
   const activeLens = lens === 'usage' && !usageMeta ? 'requests' : lens;
-  const lensNeeds = LENSES.find((l) => l.id === activeLens)?.needs;
-  const needServing = lensNeeds === 'serving' || level === 'gpu';
-  const needDisruptions = lensNeeds === 'disruptions';
-
-  // Lens data is fetched only when a lens or level needs it; a failure just
-  // leaves those tiles grey ("no data").
-  useEffect(() => {
-    if (!needServing || servingPods) return;
-    axios
-      .get(`${API_URL}/api/v1/serving`)
-      .then((res) => setServingPods(res.data.pods || []))
-      .catch(() => setServingPods([]));
-  }, [needServing, servingPods]);
-  useEffect(() => {
-    if (!needDisruptions || disruptions) return;
-    axios
-      .get(`${API_URL}/api/v1/disruptions`, { params: { hours: 24 } })
-      .then((res) => setDisruptions(res.data.disruptions || []))
-      .catch(() => setDisruptions([]));
-  }, [needDisruptions, disruptions]);
+  const {
+    fitText,
+    setFitText,
+    fitMiB,
+    replicasText,
+    setReplicasText,
+    plan,
+    plannedByNode,
+    drainSet,
+    drainResult,
+    toggleDrain,
+    clearDrain,
+  } = useDrainPlan(nodes, currency);
 
   const zoomTo = useCallback(
     (next) => {
@@ -348,7 +260,14 @@ export default function TopologyView({
       />
 
       {nodes.some((n) => (n.gpuCapacity || 0) > 0) && (
-        <FitCheck value={fitText} onChange={setFitText} nodes={filteredNodes} />
+        <FitCheck
+          value={fitText}
+          onChange={setFitText}
+          nodes={filteredNodes}
+          replicas={replicasText}
+          onReplicasChange={setReplicasText}
+          plan={plan}
+        />
       )}
 
       {nodes.length > 0 && (
@@ -363,6 +282,10 @@ export default function TopologyView({
               : 'Usage: no metrics-server or Prometheus found, so bars show requests only.'}
           </p>
         </div>
+      )}
+
+      {drainResult && drainResult.drained.length > 0 && (
+        <DrainPanel result={drainResult} onRemove={toggleDrain} onClear={clearDrain} onSelectNode={selectNode} />
       )}
 
       {focus && level === 'node' && (
@@ -418,11 +341,12 @@ export default function TopologyView({
             ctx={ctx}
             onSelectNode={selectNode}
             onSelectPool={(pool) => zoomTo({ zoom: 'pool', at: pool })}
+            drained={drainSet}
           />
         </div>
       ) : level === 'pool' ? (
         zoomPoolNodes.length > 0 ? (
-          <PoolMap nodes={zoomPoolNodes} lens={activeLens} ctx={ctx} onSelectNode={selectNode} />
+          <PoolMap nodes={zoomPoolNodes} lens={activeLens} ctx={ctx} onSelectNode={selectNode} drained={drainSet} />
         ) : (
           <EmptyState icon={Network} title={`No nodes in ${zoomLoc.at}`} hint="The NodePool has no nodes, or the filters hide them all." />
         )
@@ -446,46 +370,29 @@ export default function TopologyView({
           onRetry={() => zoomTo({ zoom: 'cluster' })}
         />
       ) : (
-        <div className="space-y-8">
-          {shownGroups.map(([poolName, poolNodes], idx) => (
-            <div key={poolName}>
-              <div className="flex items-center gap-2 mb-3">
-                <h3 className="text-base font-semibold">{poolName}</h3>
-                <Badge variant="secondary">{poolNodes.length} node{poolNodes.length === 1 ? "" : "s"}</Badge>
-              </div>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {poolNodes.map((node) => (
-                  <NodeCard
-                    key={node.name}
-                    node={node}
-                    pods={visiblePods(node)}
-                    metric={metric}
-                    focus={focus}
-                    expanded={expandedNodeName === node.name}
-                    onToggleExpand={() =>
-                      setExpandedNodeName((prev) => (prev === node.name ? null : node.name))
-                    }
-                    detailFilter={getNodeDetailFilters(node.name)}
-                    onDetailFilterChange={(partial) => setNodeDetailFilter(node.name, partial)}
-                    showAllPodsInList={showAllPodsInOverview}
-                    copyPod={copyPod}
-                    copiedKey={copiedKey}
-                    fitMiB={fitMiB}
-                    onSelectGpu={(card) => zoomTo({ zoom: 'gpu', at: node.name, card })}
-                    gpuUsage={gpuUsage}
-                    risks={risksOnNode(risks, node.name)}
-                    onOpenLogs={onOpenLogs}
-                    onOpenDisruptions={onOpenDisruptions}
-                    cardRef={(el) => {
-                      nodeRefs.current[node.name] = el;
-                    }}
-                  />
-                ))}
-              </div>
-              {idx < shownGroups.length - 1 && <Separator className="mt-8" />}
-            </div>
-          ))}
-        </div>
+        <NodeList
+          groups={shownGroups}
+          cardProps={(node) => ({
+            pods: visiblePods(node),
+            metric,
+            focus,
+            showAllPodsInList: showAllPodsInOverview,
+            copyPod,
+            copiedKey,
+            fitMiB,
+            onSelectGpu: (card) => zoomTo({ zoom: 'gpu', at: node.name, card }),
+            gpuUsage,
+            risks: risksOnNode(risks, node.name),
+            onOpenLogs,
+            onOpenDisruptions,
+            onToggleDrain: toggleDrain,
+            drained: drainSet.has(node.name),
+            planned: plannedByNode.get(node.name),
+            cardRef: (el) => {
+              nodeRefs.current[node.name] = el;
+            },
+          })}
+        />
       )}
 
       {level !== 'cluster' && nodes.length > 0 && (

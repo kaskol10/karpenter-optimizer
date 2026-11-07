@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { cn } from '../../lib/utils';
 import { groupNodes, lensColor, tileSize } from '../../lib/topologyLenses';
 
 // tileRange is the smallest and largest tile side (px) for a cluster size.
@@ -13,7 +14,7 @@ export function tileRange(count) {
 // by NodePool and zone, sized by allocatable CPU and coloured by the lens.
 // Plain DOM tiles: a 1,000-node cluster is 1,000 small buttons, which the
 // browser lays out in a few milliseconds.
-export function ClusterMap({ nodes, lens, ctx, onSelectNode, onSelectPool }) {
+export function ClusterMap({ nodes, lens, ctx, onSelectNode, onSelectPool, drained = new Set() }) {
   const groups = useMemo(() => groupNodes(nodes), [nodes]);
   const maxCpu = useMemo(() => Math.max(0, ...nodes.map((n) => n.cpuUsage?.allocatable || 0)), [nodes]);
   // Smaller tiles as the cluster grows, so a few hundred nodes fit on one screen.
@@ -47,9 +48,12 @@ export function ClusterMap({ nodes, lens, ctx, onSelectNode, onSelectPool }) {
                         <button
                           type="button"
                           onClick={() => onSelectNode(node.name)}
-                          aria-label={`${node.name}: ${c.value}`}
+                          aria-label={`${node.name}: ${c.value}${drained.has(node.name) ? ' (simulated drain)' : ''}`}
                           title={`${node.name}\n${node.instanceType || ''}\n${c.title}`}
-                          className="block rounded-sm ring-offset-background transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                          className={cn(
+                            'block rounded-sm ring-offset-background transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                            drained.has(node.name) && 'opacity-30 outline outline-2 outline-dashed outline-sky-500',
+                          )}
                           style={{ width: size, height: size, background: c.fill }}
                         />
                       </li>
