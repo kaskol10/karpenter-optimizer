@@ -40,23 +40,26 @@ const TAB_IDS = new Set(TABS.map((t) => t.id));
 function readLocation() {
   const q = new URLSearchParams(window.location.search);
   const tab = TAB_IDS.has(q.get('tab')) ? q.get('tab') : 'overview';
-  const focus =
-    tab === 'topology' && q.get('node')
-      ? { node: q.get('node'), pod: q.get('pod') || '', gpu: q.get('gpu') || '' }
-      : null;
+  let focus = null;
+  if (tab === 'topology' && q.get('node')) {
+    focus = { node: q.get('node'), pod: q.get('pod') || '', gpu: q.get('gpu') || '' };
+  } else if (tab === 'logs' && q.get('pod')) {
+    focus = { pod: q.get('pod') }; // "namespace/name" or "namespace"
+  }
   return { tab, focus };
 }
 
 const FOCUS_PARAMS = ['node', 'pod', 'gpu'];
 
-// buildSearch builds the query string for a tab and optional Topology focus.
+// buildSearch builds the query string for a tab and its optional focus
+// (Topology: node/pod/gpu; Logs: pod).
 // keep carries the current tab's own params (its filters, see useUrlParam)
 // when staying on the same tab; a different tab starts with a clean URL.
 function buildSearch(tab, focus, keep = '') {
   const q = new URLSearchParams();
   if (tab !== 'overview') q.set('tab', tab);
   if (focus) {
-    q.set('node', focus.node);
+    if (focus.node) q.set('node', focus.node);
     if (focus.pod) q.set('pod', focus.pod);
     if (focus.gpu) q.set('gpu', focus.gpu);
   }
@@ -109,7 +112,7 @@ function App() {
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(() => readLocation().tab);
-  const [topologyFocus, setTopologyFocus] = useState(() => readLocation().focus);
+  const [tabFocus, setTabFocus] = useState(() => readLocation().focus);
   const [showKarpenterBanner, setShowKarpenterBanner] = useState(true);
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
@@ -118,7 +121,7 @@ function App() {
 
   const navigate = useCallback((tab, focus = null) => {
     setActiveTab(tab);
-    setTopologyFocus(focus);
+    setTabFocus(focus);
     const sameTab = readLocation().tab === tab;
     const next = buildSearch(tab, focus, sameTab ? window.location.search : '');
     const current = window.location.search || window.location.pathname;
@@ -131,7 +134,7 @@ function App() {
     const onPop = () => {
       const { tab, focus } = readLocation();
       setActiveTab(tab);
-      setTopologyFocus(focus);
+      setTabFocus(focus);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -518,7 +521,7 @@ function App() {
           {/* Topology Tab */}
           {activeTab === 'topology' && (
             <TopologyView
-              focus={topologyFocus}
+              focus={tabFocus}
               onClearFocus={() => navigate('topology')}
               onBackToServing={backToServing}
             />
@@ -526,7 +529,10 @@ function App() {
 
           {/* Serving Tab */}
           {activeTab === 'serving' && (
-            <ServingHealth onOpenTopology={(focus) => navigate('topology', focus)} />
+            <ServingHealth
+              onOpenTopology={(focus) => navigate('topology', focus)}
+              onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
+            />
           )}
 
           {/* Workloads Tab */}
@@ -536,7 +542,7 @@ function App() {
           {activeTab === 'disruptions' && <DisruptionTracker />}
 
           {/* Log Analyzer Tab */}
-          {activeTab === 'logs' && <LogExplorer />}
+          {activeTab === 'logs' && <LogExplorer seedPod={tabFocus?.pod} />}
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (

@@ -5,7 +5,7 @@ import { Progress } from '../ui/progress';
 import { Cpu, Clock, AlertTriangle, Network, ArrowRight } from 'lucide-react';
 import { cn, shortGpuUuid, formatGPUMem } from '../../lib/utils';
 import { getServingStatus } from '../../lib/servingStatus';
-import { neighbourPods } from '../../lib/servingPlacement';
+import { neighbourPods, topologyFocusFor } from '../../lib/servingPlacement';
 import { latencySplit, formatSeconds } from '../../lib/servingLatency';
 import { ServingTrends } from './ServingTrends';
 import { MetricTip, STATUS_TONE_CLASSES, CopyableNode } from './shared';
@@ -109,7 +109,13 @@ function LatencySplit({ pod, peers }) {
 // ServingCard renders inference health for a single LLM serving pod. The
 // header carries one status badge; secondary facts (backend, instance type,
 // GPU model) sit in a quiet metadata line.
-export function ServingCard({ pod, peers, history, placement, onOpenTopology }) {
+// servingCardId is the DOM id of a replica's card, so the model rows and the
+// triage list can scroll to it.
+export function servingCardId(pod) {
+  return `serving-card-${pod.namespace}-${pod.name}`;
+}
+
+export function ServingCard({ pod, peers, history, placement, onOpenTopology, highlighted = false }) {
   const kv = pod.kvCachePercent;
   const status = useMemo(
     () => getServingStatus(pod, peers || [pod], placement),
@@ -117,14 +123,7 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
   );
   const neighbourCount = useMemo(() => neighbourPods(placement).length, [placement]);
   const showInTopology =
-    pod.node && onOpenTopology
-      ? () =>
-          onOpenTopology({
-            node: pod.node,
-            pod: `${pod.namespace}/${pod.name}`,
-            gpu: placement?.shared?.[0]?.gpu?.key || (pod.gpuDevices?.[0]?.uuid ?? ''),
-          })
-      : null;
+    pod.node && onOpenTopology ? () => onOpenTopology(topologyFocusFor(pod, placement)) : null;
   // Multi-line tooltip: what triggered it, what the state means, and what to do.
   const statusTitle = useMemo(() => {
     const lines = [`${status.label} — ${status.meaning}`];
@@ -141,7 +140,14 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
   }, [status]);
 
   return (
-    <Card className={cn(!pod.online && 'border-dashed border-red-300')}>
+    <Card
+      id={servingCardId(pod)}
+      className={cn(
+        'scroll-mt-24 transition-shadow',
+        !pod.online && 'border-dashed border-red-300',
+        highlighted && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+      )}
+    >
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start gap-2">
           <div className="min-w-0">

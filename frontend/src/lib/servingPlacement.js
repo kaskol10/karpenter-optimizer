@@ -147,3 +147,15 @@ export function describeNeighbours(placement, maxNames = 2) {
     count: pods.length,
   };
 }
+
+// topologyFocusFor builds the Topology deep link for a serving pod: its node,
+// itself, and the GPU worth looking at (the first shared one, else its first
+// card). null when the pod has no node (offline / not scheduled).
+export function topologyFocusFor(pod, placement) {
+  if (!pod.node) return null;
+  return {
+    node: pod.node,
+    pod: podKey(pod),
+    gpu: placement?.shared?.[0]?.gpu?.key || (pod.gpuDevices?.[0]?.uuid ?? ''),
+  };
+}
