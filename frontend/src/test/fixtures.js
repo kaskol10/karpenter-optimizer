@@ -82,8 +82,18 @@ function servingPod(name, model, node, gpuDevices, metrics = {}) {
 
 const LLAMA = 'meta-llama/Llama-3.3-70B';
 
+// gpuNeighbours as /api/v1/serving returns them (computed server-side from the
+// same placement as topologyNodes above).
+const alone = { gpuNeighbours: [], gpuNeighboursPrecise: true };
+function sharing(device, pods) {
+  return {
+    gpuNeighbours: [{ uuid: device.uuid, index: device.index, pods }],
+    gpuNeighboursPrecise: true,
+  };
+}
+
 export const servingPods = {
-  r1: servingPod('llama-70b-r1', LLAMA, 'ip-10-0-4-12', [GPU.a]),
+  r1: servingPod('llama-70b-r1', LLAMA, 'ip-10-0-4-12', [GPU.a], alone),
   r2: servingPod('llama-70b-r2', LLAMA, 'ip-10-0-7-88', [GPU.c], {
     e2eSeconds: 5.1,
     e2eP95Seconds: 6.8,
@@ -91,16 +101,19 @@ export const servingPods = {
     kvCachePercent: 71,
     tokensPerSec: 260,
     requestsPerSec: 0.6,
+    ...sharing(GPU.c, [{ namespace: 'batch', name: 'embed-worker-7f9c', memoryMiB: 14000 }]),
   }),
-  r3: servingPod('llama-70b-r3', LLAMA, 'ip-10-0-4-12', [GPU.b], { e2eP95Seconds: 2.4 }),
+  r3: servingPod('llama-70b-r3', LLAMA, 'ip-10-0-4-12', [GPU.b], { e2eP95Seconds: 2.4, ...alone }),
   qwen: servingPod('qwen3-8b-0', 'Qwen/Qwen3-8B', 'ip-10-0-7-88', [GPU.d], {
     e2eP95Seconds: 0.9,
     tokensPerSec: 1980,
     kvCachePercent: 31,
+    ...sharing(GPU.d, [{ namespace: 'search', name: 'reranker-5d2a', memoryMiB: 12000 }]),
   }),
   offline: servingPod('mistral-0', 'mistralai/Mistral-7B', 'ip-10-0-4-12', [], {
     online: false,
     error: 'connection refused',
+    gpuNeighbours: null,
   }),
 };
 

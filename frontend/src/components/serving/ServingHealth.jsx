@@ -8,7 +8,7 @@ import { SkeletonRows } from '../ui/skeleton';
 import { EmptyState } from '../ui/empty-state';
 import { RefreshCw, Loader2, Server, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { findGpuNeighbours } from '../../lib/servingPlacement';
+import { placementFromServing } from '../../lib/servingPlacement';
 import { sortByAttention } from '../../lib/servingStatus';
 import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
@@ -24,7 +24,6 @@ const TREND_WINDOWS = ['1h', '6h', '24h', '7d'];
 // ServingHealth lists LLM serving pods (vLLM/sglang) and their inference health.
 function ServingHealth({ onOpenTopology }) {
   const [pods, setPods] = useState(null);
-  const [topologyNodes, setTopologyNodes] = useState(null); // for GPU co-location
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // Default: worst first, so a struggling replica is never at the bottom of
@@ -77,27 +76,15 @@ function ServingHealth({ onOpenTopology }) {
     }
   }, []);
 
-  // Topology tells us who else sits on each serving pod's GPU (noisy
-  // neighbours). Non-fatal and slower-paced: placement changes rarely.
-  const fetchTopology = useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/v1/topology`);
-      setTopologyNodes(response.data.nodes || []);
-    } catch (err) {
-      setTopologyNodes(null);
-    }
-  }, []);
-
-  usePolling(fetchTopology, 60000);
-
+  // GPU neighbours come with /api/v1/serving (computed server-side), so the
+  // tab no longer downloads the whole topology to find them.
   const placements = useMemo(() => {
     const byKey = {};
-    if (!pods || !topologyNodes) return byKey;
-    pods.forEach((p) => {
-      byKey[`${p.namespace}/${p.name}`] = findGpuNeighbours(p, topologyNodes);
+    (pods || []).forEach((p) => {
+      byKey[`${p.namespace}/${p.name}`] = placementFromServing(p);
     });
     return byKey;
-  }, [pods, topologyNodes]);
+  }, [pods]);
 
   usePolling(fetchServing, 30000);
 

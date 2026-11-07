@@ -451,3 +451,55 @@ func TestGetPodsOnNodesGPURequested(t *testing.T) {
 		t.Error("expected to find cpu-pod in results")
 	}
 }
+
+// GetPodsOnNodes must list pods once, however many nodes it is asked about:
+// field selectors take a single spec.nodeName, so a per-node call would list
+// the whole cluster once per node.
+func TestGetPodsOnNodesListsOnce(t *testing.T) {
+	t.Parallel()
+
+	objects := []runtime.Object{
+		gpuPod("a", "node-1", 1),
+		gpuPod("b", "node-2", 1),
+		gpuPod("c", "node-3", 1),
+		gpuPod("elsewhere", "node-9", 1),
+	}
+	clientset := fake.NewClientset(objects...)
+	c := &Client{clientset: clientset, debug: false}
+
+	pods, err := c.GetPodsOnNodes(context.Background(), map[string]bool{"node-1": true, "node-2": true, "node-3": true})
+	if err != nil {
+		t.Fatalf("GetPodsOnNodes() error = %v", err)
+	}
+	if len(pods) != 3 {
+		t.Fatalf("expected 3 pods on the requested nodes, got %d", len(pods))
+	}
+	for _, p := range pods {
+		if p.NodeName == "node-9" {
+			t.Errorf("pod %s on an unrequested node was returned", p.Name)
+		}
+	}
+
+	lists := 0
+	for _, a := range clientset.Actions() {
+		if a.GetVerb() == "list" && a.GetResource().Resource == "pods" {
+			lists++
+		}
+	}
+	if lists != 1 {
+		t.Errorf("expected 1 pod list call for 3 nodes, got %d", lists)
+	}
+}
+
+func TestGetPodsOnNodesEmpty(t *testing.T) {
+	t.Parallel()
+	clientset := fake.NewClientset()
+	c := &Client{clientset: clientset, debug: false}
+	pods, err := c.GetPodsOnNodes(context.Background(), map[string]bool{})
+	if err != nil || pods != nil {
+		t.Fatalf("GetPodsOnNodes(no nodes) = %v, %v; want nil, nil", pods, err)
+	}
+	if n := len(clientset.Actions()); n != 0 {
+		t.Errorf("expected no API calls for no nodes, got %d", n)
+	}
+}
