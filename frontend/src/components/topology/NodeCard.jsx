@@ -35,13 +35,20 @@ export function NodeCard({
   risks = [],
   onOpenLogs,
   onOpenDisruptions,
+  onToggleDrain,
+  drained = false,
+  planned = [],
 }) {
   const nodePods = node.pods || [];
   const isFocusNode = !!focus && focus.node === node.name;
   const focusPodKey = isFocusNode ? focus.pod : null;
 
   return (
-    <Card ref={cardRef} className={cn(isFocusNode && 'ring-2 ring-primary shadow-lg')}>
+    <Card
+      ref={cardRef}
+      className={cn(isFocusNode && 'ring-2 ring-primary shadow-lg', drained && 'border-dashed border-sky-400 opacity-60')}
+      aria-label={drained ? `${node.name} (simulated drain)` : undefined}
+    >
       <CardHeader className="pb-2 space-y-1">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <CardTitle className="text-sm font-mono">{node.name}</CardTitle>
@@ -60,7 +67,14 @@ export function NodeCard({
           <Button size="sm" variant="outline" onClick={onToggleExpand}>
             {expanded ? 'Hide node details' : 'Drill into node'}
           </Button>
-          <NodeActions node={node} onOpenLogs={onOpenLogs} onOpenDisruptions={onOpenDisruptions} />
+          <NodeActions
+            node={node}
+            onOpenLogs={onOpenLogs}
+            onOpenDisruptions={onOpenDisruptions}
+            onToggleDrain={onToggleDrain}
+            inDrain={drained}
+          />
+          {drained && <span className="text-xs font-medium text-sky-700 dark:text-sky-300">Drained in the simulation</span>}
         </div>
         <BlastRadiusNote risks={risks} />
       </CardHeader>
@@ -95,6 +109,7 @@ export function NodeCard({
                   focusGpu={isFocusNode ? focus.gpu || null : null}
                   onSelectGpu={onSelectGpu}
                   gpuUsage={gpuUsage}
+                  planned={planned}
                 />
               ) : (
                 <NodePodBar

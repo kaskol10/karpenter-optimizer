@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseSize, formatMiB, nodeGpus, fragmentation, gpuFits, clusterFit, shortLabelFor } from './gpuFit';
+import { parseSize, formatMiB, nodeGpus, fragmentation, gpuFits, clusterFit, shortLabelFor, cardPhrase } from './gpuFit';
 import { topologyNodes, GPU } from '../test/fixtures';
 
 const [node412, node788] = topologyNodes;
@@ -130,4 +130,10 @@ test('shortLabelFor names card keys like the tanks do', () => {
   expect(shortLabelFor('idx-2')).toBe('GPU 2');
   expect(shortLabelFor('unknown-3')).toBe('GPU (no uuid)');
   expect(shortLabelFor('')).toBe('GPU');
+});
+
+test('cardPhrase', () => {
+  expect(cardPhrase('c3c3c3c3')).toBe('GPU c3c3c3c3');
+  expect(cardPhrase('no uuid')).toBe('an unlabelled GPU');
+  expect(cardPhrase('')).toBe('an unlabelled GPU');
 });

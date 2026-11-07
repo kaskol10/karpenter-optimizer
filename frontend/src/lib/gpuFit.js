@@ -40,6 +40,12 @@ export function formatMiB(mib) {
 const isGpuPod = (pod) => (pod.requests?.gpu || 0) > 0 || (pod.requests?.gpuMemMiB || 0) > 0;
 const shortUuid = (uuid) => (uuid || '').replace(/^GPU-/, '').slice(0, 8);
 
+// cardPhrase names a card in a sentence: "GPU c3c3c3c3", or "an unlabelled
+// GPU" for one no pod references (no HAMi UUID to show).
+export function cardPhrase(label) {
+  return !label || label === 'no uuid' ? 'an unlabelled GPU' : `GPU ${label}`;
+}
+
 // shortLabelFor names a card key the way the tanks label it: the first 8
 // characters of a HAMi UUID, "GPU <n>" for an index-only key, "GPU" otherwise.
 export function shortLabelFor(key) {
