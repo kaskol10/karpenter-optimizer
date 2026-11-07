@@ -60,14 +60,14 @@ describe('Topology time travel', () => {
 
     // Clicking a marker replays that moment.
     await userEvent.click(marker);
-    expect(params().at).toBe(String(NOW - 1800));
+    expect(params().time).toBe(String(NOW - 1800));
     expect(await screen.findByRole('button', { name: /ip-10-0-9-9: / })).toBeInTheDocument();
     expect(screen.getByText(/Replaying the cluster at/)).toBeInTheDocument();
     // No usage in the past: the Usage lens and caption fall back.
     expect(screen.getByText(/bars show requests only/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Back to live/ }));
-    expect(params().at).toBeUndefined();
+    expect(params().time).toBeUndefined();
     expect(screen.queryByRole('button', { name: /ip-10-0-9-9: / })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Close time travel' }));
@@ -94,7 +94,7 @@ describe('Topology time travel', () => {
     fireEvent.change(within(panel).getByRole('slider', { name: 'Compare with' }), { target: { value: String(FROM + 120) } });
     expect(params().compare).toBe(String(FROM + 120));
     await userEvent.click(within(panel).getByRole('button', { name: 'Replay' }));
-    expect(params()).toEqual(expect.objectContaining({ at: String(FROM + 120) }));
+    expect(params()).toEqual(expect.objectContaining({ time: String(FROM + 120) }));
     expect(screen.getByRole('slider', { name: 'Replay time' })).toBeInTheDocument();
   });
 
@@ -132,5 +132,18 @@ describe('Topology time travel', () => {
     render(<TopologyView />);
     await userEvent.click(await screen.findByRole('button', { name: 'History' }));
     expect(await screen.findByText('kaput')).toBeInTheDocument();
+  });
+});
+
+describe('time travel and zoom share the URL', () => {
+  beforeEach(() => route());
+  afterEach(() => vi.clearAllMocks());
+
+  test('a replay of a zoomed node keeps both in the URL', async () => {
+    setUrl(`cluster/topology?zoom=node&at=ip-10-0-4-12&time=${NOW - 1800}`);
+    render(<TopologyView />);
+    expect(await screen.findByText(/Replaying the cluster at/)).toBeInTheDocument();
+    expect(params()).toEqual(expect.objectContaining({ zoom: 'node', at: 'ip-10-0-4-12', time: String(NOW - 1800) }));
+    expect(await screen.findByRole('region', { name: 'Time travel' })).toBeInTheDocument();
   });
 });

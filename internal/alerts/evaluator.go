@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"sort"
 	"time"
 )
 
@@ -215,4 +216,28 @@ func remindDuration(s string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// FiringAlert is a condition that has fired and not yet cleared, for the
+// UI's status strip.
+type FiringAlert struct {
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	Severity Severity  `json:"severity"`
+	Since    time.Time `json:"since"`
+}
+
+// Firing lists conditions that are firing (including those waiting out their
+// held-clear window, which still count until they clear), oldest first.
+func (e *Evaluator) Firing() []FiringAlert {
+	out := []FiringAlert{}
+	for _, def := range e.conds {
+		cs, ok := e.states[def.id]
+		if !ok || (cs.state != stateFiring && cs.state != stateClearing) {
+			continue
+		}
+		out = append(out, FiringAlert{ID: def.id, Title: def.title, Severity: def.severity, Since: cs.firedAt})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
+	return out
 }

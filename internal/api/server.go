@@ -471,6 +471,7 @@ func (s *Server) setupRoutes() {
 
 		// Alerting
 		protected.GET("/alerts/config", s.getAlertsConfig)
+		protected.GET("/alerts/status", s.getAlertsStatus)
 		protected.PUT("/alerts/config", s.putAlertsConfig)
 		protected.POST("/alerts/test", s.testAlerts)
 	}

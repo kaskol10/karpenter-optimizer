@@ -137,6 +137,18 @@ func (m *Manager) Tick(ctx context.Context, snap Snapshot) []Transition {
 	return transitions
 }
 
+// Status reports whether alerting is on and which conditions are firing.
+// Disabled alerting reports nothing firing, whatever state was persisted.
+func (m *Manager) Status() (enabled bool, firing []FiringAlert) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	enabled = m.cfg.Enabled && len(m.cfg.Channels) > 0
+	if !enabled {
+		return false, []FiringAlert{}
+	}
+	return true, m.eval.Firing()
+}
+
 // SendTest sends a test message to a single channel (used by the test endpoint
 // and to validate a channel before saving). It does not touch the machine.
 func (m *Manager) SendTest(ctx context.Context, ch ChannelConfig) error {

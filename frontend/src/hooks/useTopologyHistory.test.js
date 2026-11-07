@@ -33,7 +33,7 @@ describe('useTopologyHistory', () => {
     expect(axios.get).not.toHaveBeenCalled();
   });
 
-  test('opening loads the timeline once; replay fetches the snapshot for ?at=', async () => {
+  test('opening loads the timeline once; replay fetches the snapshot for ?time=', async () => {
     route({ snapshot: (at) => ({ at: at - 30, nodes: [{ name: 'old' }] }) });
     const { result } = renderHook(() => useTopologyHistory());
     act(() => result.current.setOpen(true));
@@ -42,16 +42,16 @@ describe('useTopologyHistory', () => {
     expect(result.current.events).toHaveLength(1);
 
     act(() => result.current.setAt(2000));
-    expect(params().at).toBe('2000');
+    expect(params().time).toBe('2000');
     expect(result.current.replay.loading).toBe(true);
     await waitFor(() => expect(result.current.replay.nodes).toEqual([{ name: 'old' }]));
     expect(result.current.replay.at).toBe(1970);
     expect(axios.get).toHaveBeenCalledTimes(2);
 
-    // Switching to compare clears ?at= and loads the baseline instead.
+    // Switching to compare clears ?time= and loads the baseline instead.
     act(() => result.current.setCompare(3000));
     expect(params()).toEqual(expect.objectContaining({ compare: '3000' }));
-    expect(params().at).toBeUndefined();
+    expect(params().time).toBeUndefined();
     await waitFor(() => expect(result.current.baseline.nodes).toEqual([{ name: 'old' }]));
     expect(result.current.replay.nodes).toBeNull();
 
@@ -61,7 +61,7 @@ describe('useTopologyHistory', () => {
     expect(result.current.open).toBe(false);
   });
 
-  test('a URL with ?compare= opens time travel; ?at= wins over ?compare=', async () => {
+  test('a URL with ?compare= opens time travel; ?time= wins over ?compare=', async () => {
     window.history.replaceState(null, '', '/?compare=1500');
     route({ snapshot: { at: 1500, nodes: [] } });
     const { result } = renderHook(() => useTopologyHistory());
@@ -69,7 +69,7 @@ describe('useTopologyHistory', () => {
     expect(result.current.compare).toBe(1500);
     await waitFor(() => expect(result.current.baseline.nodes).toEqual([]));
 
-    window.history.replaceState(null, '', '/?at=1200&compare=1500');
+    window.history.replaceState(null, '', '/?time=1200&compare=1500');
     const second = renderHook(() => useTopologyHistory());
     expect(second.result.current.at).toBe(1200);
     expect(second.result.current.compare).toBeNull();
@@ -94,7 +94,7 @@ describe('useTopologyHistory', () => {
 
   test('defaults missing fields; a failed snapshot reports its error', async () => {
     route({ events: {}, snapshot: httpError(404, 'no placement sample at or before that time') });
-    window.history.replaceState(null, '', '/?at=5');
+    window.history.replaceState(null, '', '/?time=5');
     const { result } = renderHook(() => useTopologyHistory());
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.range).toBeNull();

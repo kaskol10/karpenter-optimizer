@@ -83,13 +83,12 @@ export default function TopologyView({
     disruptions,
     loading: liveLoading,
     error: liveError,
-    fallbackMode,
     refresh: fetchTopology,
   } = useTopologyData({
     needServing: lensNeeds === 'serving' || level === 'gpu',
     needDisruptions: lensNeeds === 'disruptions',
   });
-  // Time travel: ?at= replays a past snapshot everywhere below (no usage
+  // Time travel: ?time= replays a past snapshot everywhere below (no usage
   // then, it is "now" data); ?compare= keeps the live view and diffs it.
   const history = useTopologyHistory();
   const replaying = Boolean(history.at);
@@ -255,7 +254,7 @@ export default function TopologyView({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!history.open && !fallbackMode && (
+          {!history.open && (
             <Button variant="outline" size="sm" onClick={() => history.setOpen(true)}>
               <History className="h-4 w-4 mr-2" />
               History
@@ -358,16 +357,6 @@ export default function TopologyView({
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
             Retry
           </Button>
-        </Alert>
-      )}
-      {fallbackMode && (
-        <Alert>
-          <AlertTitle>Compatibility mode</AlertTitle>
-          <AlertDescription>
-            Backend endpoint <code>/api/v1/topology</code> is not available. Showing pod placement
-            using <code>/api/v1/nodes</code> data with equal pod sizing. Upgrade backend image to a
-            version that includes topology support for accurate request-based sizing.
-          </AlertDescription>
         </Alert>
       )}
 

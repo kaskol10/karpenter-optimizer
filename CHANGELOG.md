@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Command palette (⌘K / Ctrl+K, or the header Search button)**:
+  - **Jump** to any page, node, pod, GPU (by model or part of its UUID) or model by typing part of its name. Words can match in any order, and "ip1012" finds `ip-10-0-10-12`.
+  - **Act** with a verb: `drain <node>` simulates the drain in Topology, `logs <pod>` opens the logs drawer, and `fit 40GiB 3` asks the placement planner where three 40 GiB replicas would fit. It can also open logs or switch dark mode.
+  - **Names:** nodes, pods and GPUs come from `/topology`, and models from `/serving`. Both are fetched when the palette opens and reused for a minute; pages and actions work before they arrive.
+- **Header status strip**: cluster connection, whether Karpenter was found, when the panels last refreshed, and, when alerting is on, how many alerts are firing (hover for their names, click for the settings). Backed by a new `GET /api/v1/alerts/status`.
+
+### Removed
+- **Topology compatibility mode**: Topology no longer falls back to `/api/v1/nodes` with equal-sized pods when `/api/v1/topology` is missing. The Helm chart ships the frontend and backend from one release, so an older backend is not a supported pairing; a 404 now says to run both from the same release.
+
+### Fixed
+- **Topology time travel and zoom fought over `?at=`**: replaying while zoomed into a node or NodePool replaced the zoom's `?at=` with a timestamp, and zooming ended the replay. Time travel now uses `?time=` (replay) and `?compare=`.
+
 ### Changed
 - **Navigation: three areas instead of eight tabs**:
   - **Areas:** **Cluster** (Overview, Nodes, Topology, Disruptions), **Inference** (Serving, Gateway) and **Optimize** (Recommendations, Workloads), with the active area's pages as a second row. The Disruptions count shows on both the Cluster area and its page, and an area reopens the page you last had open in it.
@@ -19,11 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Topology: time travel**: a **History** button opens a timeline of the last day under the header.
-  - **Replay** (`?at=`, shareable): every zoom level shows the cluster as it was at that moment, from where each pod ran to each GPU's tenants. Cost uses today's prices and there is no usage, which is "now" data.
+  - **Replay** (`?time=`, shareable): every zoom level shows the cluster as it was at that moment, from where each pod ran to each GPU's tenants. Cost uses today's prices and there is no usage, which is "now" data.
   - **Compare with now** (`?compare=`): the live view stays and a panel lists what changed since then: launched nodes (green ring on the map), removed nodes (dashed red ghosts, grouped by Karpenter's reason such as Underutilized, Drifted or SpotInterrupted), pods that moved, and GPUs whose largest free slice shrank.
   - **Timeline markers:** node launches (green), terminations (red) and pod moves (amber) sit along the slider; hovering lists them, clicking replays that moment.
   - **How:** a sampler records nodes and pods every 2 minutes (`PLACEMENT_HISTORY_INTERVAL_SECS`) and keeps 24 hours (`PLACEMENT_HISTORY_HOURS`, max 72, 0 = off). It stores a full snapshot every 60 samples and only the changes in between (`internal/placementhistory`). The termination reason comes from Karpenter's Node events, read once per sample. History lives in memory and restarts with the pod; a durable store is a follow-up.
-  - **API:** `GET /api/v1/topology/history?at=` and `GET /api/v1/topology/events?since=`.
+  - **API:** `GET /api/v1/topology/history?at=` and `GET /api/v1/topology/events?since=` (the UI keeps the replay time in `?time=`).
 - **Topology: drain simulator**: pick **Simulate drain** in any node's Actions menu, for one node or several (`?drain=a,b`, shareable). A panel answers "what happens if I drain these?":
   - **Moves:** where each pod would land, re-placed largest first on the remaining nodes, preferring the same NodePool and fitting CPU, memory and per-GPU memory (a fractional HAMi pod needs room on one card, a whole-GPU pod needs empty cards).
   - **Leftovers:** pods that would not fit anywhere are listed in red with the reason; DaemonSet pods go with the node.
