@@ -59,29 +59,32 @@ export function formatRelativeTime(unix) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// copyText writes value to the clipboard (with a textarea fallback for
+// non-secure origins) and calls done afterwards, whether or not it worked.
+export function copyText(value, done = () => {}) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value).then(done).catch(done);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = value;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  done();
+}
+
 // CopyableNode renders a node name; clicking copies it (for pasting into the
 // CLI). `copyValue` optionally overrides what gets copied (e.g. display the
 // hostname but copy the actual node name used by kubectl).
 export function CopyableNode({ name, copyValue }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    const value = copyValue || name;
-    const done = () => {
+  const copy = () =>
+    copyText(copyValue || name, () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(value).then(done).catch(done);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = value;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      done();
-    }
-  };
+    });
   return (
     <button
       type="button"

@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import axios from 'axios';
 import ServingHealth from './ServingHealth';
 import { allServingPods } from '../../test/fixtures';
@@ -18,9 +18,12 @@ function setUrl(search) {
   window.history.replaceState(null, '', `/${search}`);
 }
 
+// Waits for the replica cards (the triage list repeats some names).
+const cardsLoaded = () => screen.findAllByText('llm/llama-70b-r1');
+
 // Card titles in render order.
 async function cardOrder() {
-  await screen.findByText('llm/llama-70b-r2');
+  await cardsLoaded();
   return screen
     .getAllByText(/^llm\//)
     .filter((el) => el.closest('[class*="rounded"]') && el.tagName !== 'BUTTON')
@@ -40,8 +43,8 @@ describe('ServingHealth', () => {
     vi.clearAllMocks();
   });
 
-  test('by default the replica that needs attention comes first', async () => {
-    setUrl('?tab=serving');
+  test('in the replica view the replica that needs attention comes first', async () => {
+    setUrl('?tab=serving&view=replicas');
     render(<ServingHealth />);
     const order = await cardOrder();
     expect(order[0]).toBe('llm/llama-70b-r2');
@@ -56,7 +59,7 @@ describe('ServingHealth', () => {
   });
 
   test('?sort=throughput keeps the throughput order', async () => {
-    setUrl('?tab=serving&sort=throughput');
+    setUrl('?tab=serving&view=replicas&sort=throughput');
     render(<ServingHealth />);
     const order = await cardOrder();
     expect(order[0]).toBe('llm/qwen3-8b-0');
@@ -64,11 +67,46 @@ describe('ServingHealth', () => {
   });
 
   test('the metrics glossary accordion is gone; definitions live next to each metric', async () => {
-    setUrl('?tab=serving');
+    setUrl('?tab=serving&view=replicas');
     render(<ServingHealth />);
-    await screen.findByText('llm/llama-70b-r2');
+    await cardsLoaded();
     expect(screen.queryByText('What do these metrics mean?')).not.toBeInTheDocument();
     const card = screen.getByText('llm/llama-70b-r1').closest('[class*="rounded"]');
     expect(within(card).getByRole('button', { name: 'What is KV cache?' })).toBeInTheDocument();
+  });
+
+  test('by default servers are grouped by model, the troubled model first and open', async () => {
+    setUrl('?tab=serving');
+    render(<ServingHealth />);
+    const llama = await screen.findByRole('button', { name: /meta-llama/, expanded: true });
+    const qwen = screen.getByRole('button', { name: /Qwen\/Qwen3-8B/, expanded: false });
+    expect(llama.compareDocumentPosition(qwen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Healthy models stay folded: their cards are not rendered until opened.
+    expect(screen.queryByText('llm/qwen3-8b-0')).not.toBeInTheDocument();
+    fireEvent.click(qwen);
+    expect(screen.getByText('llm/qwen3-8b-0')).toBeInTheDocument();
+    // The user's choice wins over "open when troubled".
+    fireEvent.click(llama);
+    expect(llama).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a replica dot opens its model row and rings its card', async () => {
+    setUrl('?tab=serving');
+    render(<ServingHealth />);
+    fireEvent.click(await screen.findByRole('button', { name: 'llm/qwen3-8b-0: OK' }));
+    const card = document.getElementById('serving-card-llm-qwen3-8b-0');
+    expect(card).not.toBeNull();
+    expect(card.className).toMatch(/ring-primary/);
+  });
+
+  test('the triage list names the slow replica and links to its logs', async () => {
+    setUrl('?tab=serving');
+    const onOpenLogs = vi.fn();
+    render(<ServingHealth onOpenLogs={onOpenLogs} />);
+    const triage = await screen.findByRole('region', { name: 'Needs attention' });
+    expect(within(triage).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(triage).getByText('llm/llama-70b-r2')).toBeInTheDocument();
+    fireEvent.click(within(triage).getByRole('button', { name: 'Open logs for llm/llama-70b-r2' }));
+    expect(onOpenLogs).toHaveBeenCalledWith(expect.objectContaining({ name: 'llama-70b-r2' }));
   });
 });

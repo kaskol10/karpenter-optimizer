@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -6,23 +6,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Alert, AlertTitle } from '../ui/alert';
 import { SkeletonRows } from '../ui/skeleton';
 import { EmptyState } from '../ui/empty-state';
-import { RefreshCw, Loader2, Server, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Loader2, Server, AlertTriangle, Rows3, LayoutGrid } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { placementFromServing } from '../../lib/servingPlacement';
 import { sortByAttention } from '../../lib/servingStatus';
+import { groupByModel, hasProblem, sortModels } from '../../lib/servingModels';
+import { buildTriage } from '../../lib/servingTriage';
 import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { GatewayCard } from './GatewayCard';
-import { ModelUsageChart } from './ModelUsageChart';
-import { ServingCard } from './ServingCard';
+import { ModelRow } from './ModelRow';
+import { ServingCard, servingCardId } from './ServingCard';
+import { TriageList } from './TriageList';
 
 const SERVING_SORTS = ['attention', 'throughput', 'requests', 'queue', 'name'];
 
 const TREND_WINDOWS = ['1h', '6h', '24h', '7d'];
 
-// ServingHealth lists LLM serving pods (vLLM/sglang) and their inference health.
-function ServingHealth({ onOpenTopology }) {
+const SERVING_VIEWS = ['model', 'replicas'];
+
+const podKeyOf = (p) => `${p.namespace}/${p.name}`;
+
+// ServingHealth lists LLM serving pods (vLLM/sglang) and their inference
+// health: a triage list of what needs a human, then one row per model
+// (expanding into its replica cards), or the flat replica grid (?view=replicas).
+function ServingHealth({ onOpenTopology, onOpenLogs }) {
   const [pods, setPods] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -30,6 +39,11 @@ function ServingHealth({ onOpenTopology }) {
   // the grid. ?sort=throughput etc. still selects the other orders.
   const [sortBy, setSortBy] = useUrlParam('sort', 'attention', SERVING_SORTS);
   const [trendWindow, setTrendWindow] = useUrlParam('trend', '6h', TREND_WINDOWS);
+  const [view, setView] = useUrlParam('view', 'model', SERVING_VIEWS);
+  // Rows with a problem start expanded; a click on the chevron overrides that
+  // per model until the page is reloaded.
+  const [expandedOverrides, setExpandedOverrides] = useState({});
+  const [highlightKey, setHighlightKey] = useState(null);
   const [servingHistory, setServingHistory] = useState({}); // key: ns/name -> {points, lastIssue}
   const [gateway, setGateway] = useState(null);
   const [gatewayView, setGatewayView] = useState('apps'); // 'apps' | 'models'
@@ -116,10 +130,56 @@ function ServingHealth({ onOpenTopology }) {
     });
   }, [pods, sortBy]);
 
+  const modelGroups = useMemo(
+    () => (pods ? sortModels(groupByModel(pods, placements), sortBy) : []),
+    [pods, placements, sortBy],
+  );
+
+  const triage = useMemo(
+    () => (pods ? buildTriage(pods, placements, servingHistory) : []),
+    [pods, placements, servingHistory],
+  );
+
+  const isExpanded = (group) => expandedOverrides[group.model] ?? hasProblem(group);
+  const toggleModel = (group) =>
+    setExpandedOverrides((prev) => ({ ...prev, [group.model]: !isExpanded(group) }));
+
+  // focusCard opens the replica's model row (in model view), then scrolls to
+  // and briefly rings its card once it has rendered.
+  const focusCard = useCallback(
+    (pod) => {
+      const group = modelGroups.find((g) => g.replicas.includes(pod));
+      if (group) setExpandedOverrides((prev) => ({ ...prev, [group.model]: true }));
+      setHighlightKey(podKeyOf(pod));
+    },
+    [modelGroups],
+  );
+
+  useEffect(() => {
+    if (!highlightKey) return undefined;
+    const [namespace, name] = highlightKey.split('/');
+    const el = document.getElementById(servingCardId({ namespace, name }));
+    el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightKey(null), 2400);
+    return () => clearTimeout(t);
+  }, [highlightKey]);
+
+  const renderCard = (pod) => (
+    <ServingCard
+      key={podKeyOf(pod)}
+      pod={pod}
+      peers={pods}
+      history={servingHistory[podKeyOf(pod)]}
+      placement={placements[podKeyOf(pod)]}
+      onOpenTopology={onOpenTopology}
+      highlighted={highlightKey === podKeyOf(pod)}
+    />
+  );
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex justify-between items-start">
+        <div className="flex flex-wrap justify-between items-start gap-3">
           <div>
             <CardTitle className="flex items-center gap-2">
               <Server className="h-5 w-5 text-purple-600" />
@@ -129,7 +189,28 @@ function ServingHealth({ onOpenTopology }) {
               Inference health for vLLM/sglang pods detected in the cluster
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md border p-0.5" role="group" aria-label="Group servers">
+              {[
+                { value: 'model', label: 'By model', Icon: Rows3 },
+                { value: 'replicas', label: 'All replicas', Icon: LayoutGrid },
+              ].map(({ value, label, Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setView(value)}
+                  aria-pressed={view === value}
+                  title={label}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded px-2 py-1 text-xs',
+                    view === value ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50',
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
             <Select value={trendWindow} onValueChange={setTrendWindow}>
               <SelectTrigger className="w-[130px]" title="Trend history window" aria-label="Trend history window">
                 <SelectValue />
@@ -193,19 +274,33 @@ function ServingHealth({ onOpenTopology }) {
               />
             ) : (
               <>
-                <ModelUsageChart pods={pods} />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {sortedPods.map((pod) => (
-                    <ServingCard
-                      key={`${pod.namespace}/${pod.name}`}
-                      pod={pod}
-                      peers={pods}
-                      history={servingHistory[`${pod.namespace}/${pod.name}`]}
-                      placement={placements[`${pod.namespace}/${pod.name}`]}
-                      onOpenTopology={onOpenTopology}
-                    />
-                  ))}
-                </div>
+                <TriageList
+                  items={triage}
+                  onOpenTopology={onOpenTopology}
+                  onOpenLogs={onOpenLogs}
+                  onFocusCard={focusCard}
+                />
+                {view === 'model' ? (
+                  <div className="space-y-3">
+                    {modelGroups.map((group) => (
+                      <ModelRow
+                        key={group.model}
+                        group={group}
+                        expanded={isExpanded(group)}
+                        onToggle={() => toggleModel(group)}
+                        onSelectReplica={focusCard}
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {sortedPods.filter((p) => group.replicas.includes(p)).map(renderCard)}
+                        </div>
+                      </ModelRow>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {sortedPods.map(renderCard)}
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { findGpuNeighbours, describeNeighbours, neighbourPods, gpuKey, placementFromServing } from './servingPlacement';
+import { findGpuNeighbours, describeNeighbours, neighbourPods, gpuKey, placementFromServing, topologyFocusFor } from './servingPlacement';
 import { allServingPods, servingPods, topologyNodes as fixtureTopology } from '../test/fixtures';
 
 const gpuA = { uuid: 'GPU-aaaaaaaa-1111-2222-3333-444444444444', index: 0, memoryMiB: 20000 };
@@ -138,5 +138,25 @@ describe('placementFromServing', () => {
     const fromTopology = findGpuNeighbours(pod, fixtureTopology);
     expect(describeNeighbours(fromServer)).toEqual(describeNeighbours(fromTopology));
     expect(fromServer.shared.map((sh) => sh.gpu.key)).toEqual(fromTopology.shared.map((sh) => sh.gpu.key));
+  });
+});
+
+describe('topologyFocusFor', () => {
+  test('points at the shared GPU when there is one', () => {
+    const p = servingPods.r2;
+    expect(topologyFocusFor(p, placementFromServing(p))).toEqual({
+      node: p.node,
+      pod: 'llm/llama-70b-r2',
+      gpu: p.gpuDevices[0].uuid,
+    });
+  });
+
+  test('falls back to the first card, then to no GPU', () => {
+    expect(topologyFocusFor(servingPods.r1, null).gpu).toBe(servingPods.r1.gpuDevices[0].uuid);
+    expect(topologyFocusFor({ namespace: 'a', name: 'b', node: 'n' }, null)).toEqual({ node: 'n', pod: 'a/b', gpu: '' });
+  });
+
+  test('null without a node', () => {
+    expect(topologyFocusFor({ namespace: 'a', name: 'b' }, null)).toBeNull();
   });
 });
