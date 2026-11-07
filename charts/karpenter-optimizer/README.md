@@ -197,6 +197,8 @@ The following table lists the configurable parameters and their default values:
 | `metrics.enabled` | Enable the Prometheus `/metrics` exporter (served from already-sampled data; zero extra cluster calls) | `false` |
 | `servingHistory.durable` | Enable durable serving-history storage in the shared CNPG instance (requires `database.enabled`; adds the 7d trend window). Without it, serving history is in-memory and capped at the 24h window | `false` |
 | `servingHistory.retentionHours` | Retention for raw serving samples (`SERVING_HISTORY_RETENTION_HOURS`) | `168` |
+| `placementHistory.hours` | Topology time-travel window (`PLACEMENT_HISTORY_HOURS`, max 72, `0` = off). Saved in the shared CNPG instance when `database.enabled`, so it survives restarts | `24` |
+| `placementHistory.intervalSeconds` | How often placement is sampled (`PLACEMENT_HISTORY_INTERVAL_SECS`, min 30) | `120` |
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` for `/metrics` (only rendered when `metrics.enabled`) | `false` |
 | `serviceMonitor.interval` | Scrape interval | `30s` |
 | `serviceMonitor.scrapeTimeout` | Scrape timeout | `10s` |

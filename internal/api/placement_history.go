@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/karpenter-optimizer/internal/awspricing"
+	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/kubernetes"
+	"github.com/karpenter-optimizer/internal/placementdurable"
 	"github.com/karpenter-optimizer/internal/placementhistory"
 )
 
@@ -105,7 +107,51 @@ func (s *Server) samplePlacement(parent context.Context) {
 			log.Printf("placement history: cannot read node events, terminations will have no reason: %v", err)
 		})
 	}
-	s.placementHistory.Add(snapshotFromTopology(time.Now(), nodes, reasons))
+	rec, ok := s.placementHistory.Add(snapshotFromTopology(time.Now(), nodes, reasons))
+	if ok && s.placementDurable != nil {
+		if err := s.placementDurable.Add(rec); err != nil {
+			// A lost delta would corrupt later rebuilds: start over from a
+			// full keyframe on the next sample.
+			s.placementHistory.ForceKeyframe()
+			s.placementWriteErr.Do(func() {
+				log.Printf("placement history: cannot write to Postgres, keeping it in memory until it recovers: %v", err)
+			})
+		}
+	}
+}
+
+// initPlacementDurable opens the durable placement store when a DSN
+// resolves and restores the saved history into mem, so a restart keeps
+// time travel. nil (memory only) when no DSN is set or the database is
+// unreachable.
+func initPlacementDurable(cfg *config.Config, mem *placementhistory.Store, retention time.Duration) placementdurable.Store {
+	if cfg.PlacementHistoryDSN == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ps, err := placementdurable.NewPostgres(ctx, cfg.PlacementHistoryDSN, retention)
+	if err != nil {
+		log.Printf("placement history: Postgres unavailable (%v); keeping it in memory only", err)
+		return nil
+	}
+	restorePlacement(ps, mem, retention, time.Now())
+	return ps
+}
+
+// restorePlacement loads the saved records into the in-memory store.
+func restorePlacement(store placementdurable.Store, mem *placementhistory.Store, retention time.Duration, now time.Time) int {
+	recs, err := store.Load(now, retention)
+	if err != nil {
+		log.Printf("placement history: cannot read saved history: %v", err)
+		return 0
+	}
+	n := mem.Load(recs, now)
+	if n > 0 {
+		first, last, _ := mem.Range()
+		log.Printf("placement history: restored %d samples (%s to %s)", n, first.Format(time.RFC3339), last.Format(time.RFC3339))
+	}
+	return n
 }
 
 // snapshotFromTopology converts topology nodes to a placement snapshot,
@@ -227,7 +273,7 @@ func (s *Server) placementRange() gin.H {
 
 // getTopologyHistory godoc
 // @Summary      Topology at a past moment
-// @Description  Nodes and pods as they were at the latest placement sample at or before `at` (Unix seconds or RFC3339). Same node shape as /topology; cost uses today's prices; no usage. In memory, so history starts at the last restart.
+// @Description  Nodes and pods as they were at the latest placement sample at or before `at` (Unix seconds or RFC3339). Same node shape as /topology; cost uses today's prices; no usage. Kept in memory, and restored from Postgres after a restart when a database is configured.
 // @Tags         nodes
 // @Produce      json
 // @Param        at  query  string  true  "Unix seconds or RFC3339"

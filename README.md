@@ -202,7 +202,8 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 - `GATEWAY_HISTORY_RETENTION_HOURS`: how long to keep gateway cost history (default: 720 = 30 days)
 - `SERVING_HISTORY_DSN`: Postgres DSN for durable serving-history samples (optional). Empty = in-memory only (trend windows capped at `HISTORY_WINDOW_HOURS`). When set, the Serving tab's trend selector gains a **7d** option and history survives restarts. Reuses the gateway's `GATEWAY_HISTORY_DB_*` parts when no explicit DSN is set, so both histories can share one CNPG instance
 - `SERVING_HISTORY_RETENTION_HOURS`: how long to keep durable serving samples (default: 168 = 7 days)
-- `PLACEMENT_HISTORY_HOURS`: how much placement history the Topology time travel keeps (default 24, max 72, `0` turns the sampler off). In memory, so it starts again after a restart
+- `PLACEMENT_HISTORY_HOURS`: how much placement history the Topology time travel keeps (default 24, max 72, `0` turns the sampler off). In memory, and also in Postgres when a database is configured, so it survives restarts
+- `PLACEMENT_HISTORY_DSN`: Postgres for the placement history. Optional: without it the serving-history DSN is used, then the gateway's (the chart's `database.enabled: true` covers all three)
 - `PLACEMENT_HISTORY_INTERVAL_SECS`: how often placement is sampled (default 120, minimum 30). Each sample lists every node and pod once, like opening the Topology tab
 - `PROMETHEUS_URL`: in-cluster Prometheus to read actual usage from (optional, display only). The Topology tab then shows each pod's p95 CPU and memory over 24h next to its request (idle requests hatched) and GPU memory in use from the DCGM exporter. Without it, live usage comes from metrics-server when installed. Chart value `usage.prometheusUrl`
 - `METRICS_ENABLED`: enable the Prometheus `/metrics` exporter (`true`/`1`, default off → `/metrics` 404s). Chart value: `metrics.enabled`

@@ -31,6 +31,11 @@ type Config struct {
 	// HISTORY_WINDOW_HOURS). SERVING_HISTORY_DSN wins; otherwise the gateway
 	// DSN is reused so both histories share one CNPG instance.
 	ServingHistoryDSN string
+	// Durable placement history (Topology time travel): Postgres DSN for the
+	// placement keyframes and deltas, read back on startup. Empty = in
+	// memory only. PLACEMENT_HISTORY_DSN wins; otherwise the serving (and so
+	// gateway) DSN is reused, one CNPG instance for every history.
+	PlacementHistoryDSN string
 	// PrometheusURL, when set, is read (display only) for p95 pod usage over
 	// 24h and DCGM GPU memory; metrics-server is tried otherwise. Never used
 	// for recommendations.
@@ -116,6 +121,7 @@ func Load() *Config {
 		LiteLLMMetricsAPIKey: getEnv("LITELLM_METRICS_API_KEY", ""),
 		GatewayHistoryDSN:    resolveGatewayHistoryDSN(),
 		ServingHistoryDSN:    resolveServingHistoryDSN(),
+		PlacementHistoryDSN:  resolvePlacementHistoryDSN(),
 		PrometheusURL:        getEnv("PROMETHEUS_URL", ""),
 		OllamaURL:            ollamaURL, // Keep for backward compatibility
 		OllamaModel:          ollamaModel,
@@ -196,6 +202,16 @@ func resolveServingHistoryDSN() string {
 		return dsn
 	}
 	return resolveGatewayHistoryDSN()
+}
+
+// resolvePlacementHistoryDSN returns the Postgres DSN for durable placement
+// history: PLACEMENT_HISTORY_DSN, else the serving-history DSN (which falls
+// back to the gateway's). "" keeps placement history in memory only.
+func resolvePlacementHistoryDSN() string {
+	if dsn := os.Getenv("PLACEMENT_HISTORY_DSN"); dsn != "" {
+		return dsn
+	}
+	return resolveServingHistoryDSN()
 }
 
 // netHost joins host and port, leaving a bare host when port is empty.

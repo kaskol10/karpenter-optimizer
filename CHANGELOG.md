@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Topology time travel survives restarts**: with a database configured, the placement history is also written to Postgres (table `placement_history`, one row per sample: a full keyframe or the changes since the last one, as JSONB) and read back on startup, so a pod restart or a rollout no longer empties the timeline.
+  - **Database:** it uses `PLACEMENT_HISTORY_DSN`, else the serving-history DSN, else the gateway's. With the chart's `database.enabled: true`, it shares the existing CNPG instance with no extra settings.
+  - **Write failures:** if a write fails, the next sample is stored as a full keyframe, so a lost row never corrupts a rebuilt moment, and the problem is logged once. Without a reachable database, history stays in memory as before.
+  - **Retention:** rows older than the window are purged on each write, keeping the keyframe that later rows are built from.
+  - **Downtime:** what changed while the pod was down shows up as events at the first sample after the restart.
+- **Chart**: `placementHistory.hours` and `placementHistory.intervalSeconds` set `PLACEMENT_HISTORY_HOURS` / `PLACEMENT_HISTORY_INTERVAL_SECS`.
+
 ### Security
 - **Frontend dependencies**: `npm audit --omit=dev` reported five advisories (axios, follow-redirects, form-data, picomatch, postcss-selector-parser; three high). The lockfile now resolves patched versions (axios 1.21.0, follow-redirects 1.16.2, form-data 4.0.6, picomatch 2.3.2), and `npm audit` reports none, dev dependencies included. The axios range is raised to `^1.21.0` so an install cannot resolve back.
 - **Build- and test-only packages are dev dependencies**: Testing Library and `tailwindcss-animate` (which pulled Tailwind, chokidar and picomatch into the production tree) move to `devDependencies`, so the production audit covers only what ships in the bundle.

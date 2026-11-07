@@ -162,3 +162,20 @@ func TestResolveServingHistoryDSN(t *testing.T) {
 		assert.Equal(t, "postgres://u:p@gw:5432/gdb", resolveServingHistoryDSN())
 	})
 }
+
+func TestResolvePlacementHistoryDSN(t *testing.T) {
+	t.Setenv("PLACEMENT_HISTORY_DSN", "")
+	t.Setenv("SERVING_HISTORY_DSN", "")
+	t.Setenv("GATEWAY_HISTORY_DSN", "")
+	t.Setenv("GATEWAY_HISTORY_DB_HOST", "")
+	assert.Empty(t, resolvePlacementHistoryDSN(), "memory only when nothing is configured")
+
+	t.Setenv("GATEWAY_HISTORY_DSN", "postgres://u:p@gw:5432/gdb")
+	assert.Equal(t, "postgres://u:p@gw:5432/gdb", resolvePlacementHistoryDSN(), "falls back to the gateway DSN")
+
+	t.Setenv("SERVING_HISTORY_DSN", "postgres://u:p@sh:5432/sdb")
+	assert.Equal(t, "postgres://u:p@sh:5432/sdb", resolvePlacementHistoryDSN(), "then the serving DSN")
+
+	t.Setenv("PLACEMENT_HISTORY_DSN", "postgres://u:p@ph:5432/pdb")
+	assert.Equal(t, "postgres://u:p@ph:5432/pdb", resolvePlacementHistoryDSN(), "its own DSN wins")
+}

@@ -52,7 +52,7 @@ export function TimeScrubber({ history, now = Date.now() }) {
   } else if (!range || range.samples < 2) {
     body = (
       <p className="text-xs text-muted-foreground">
-        History starts when the backend starts: one sample every {Math.round(step / 60) || 1} min. Check back in a few minutes.
+        Not enough history yet: one sample every {Math.round(step / 60) || 1} min. Check back in a few minutes.
       </p>
     );
   } else {
