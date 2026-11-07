@@ -5,10 +5,11 @@ import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { cn, formatGPUMem } from '../../lib/utils';
 import { CopyablePodName } from './CopyablePodName';
-import { GPULaneBar } from './GPULaneBar';
+import { GPUTanks } from './GPUTanks';
 import { NodePodBar } from './NodePodBar';
 import { GpuSummaryBadge, MetaLine } from '../NodeBits';
-import { getPodKey, formatNodeAge, hashToHue, isDaemonSetPod, hasDevicePlacement } from './podUtils';
+import { getPodKey, formatNodeAge, hashToHue, isDaemonSetPod } from './podUtils';
+import { nodeGpus } from '../../lib/gpuFit';
 
 // NodeCard renders one node: its badges, request bars, GPU lanes and the
 // optional drill-down list of every pod on the node. `pods` is the node's pods
@@ -26,6 +27,7 @@ export function NodeCard({
   copyPod,
   copiedKey,
   cardRef,
+  fitMiB = null,
 }) {
   const nodePods = node.pods || [];
   const isFocusNode = !!focus && focus.node === node.name;
@@ -68,13 +70,16 @@ export function NodeCard({
             (p) => (p.requests?.gpu || 0) > 0 || (p.requests?.gpuMemMiB || 0) > 0,
           );
           if ((node.gpuCapacity || 0) === 0 && (node.gpuPods || 0) === 0) return null;
-          const laneMode = hasDevicePlacement(node, gpuPods);
+          // Tanks whenever the node's GPU memory is known: they need a per-card
+          // size. Otherwise the count-based bar.
+          const layout = nodeGpus(node);
           return (
             <div className="mt-4 space-y-3 border-t pt-3">
-              {laneMode ? (
-                <GPULaneBar
-                  node={node}
-                  pods={gpuPods}
+              {layout ? (
+                <GPUTanks
+                  layout={layout}
+                  visibleKeys={new Set(gpuPods.map(getPodKey))}
+                  fitMiB={fitMiB}
                   copyPod={copyPod}
                   copiedKey={copiedKey}
                   focusPodKey={focusPodKey}
@@ -92,7 +97,7 @@ export function NodeCard({
                   focusPodKey={focusPodKey}
                 />
               )}
-              {laneMode && (
+              {layout && (
                 <NodePodBar
                   node={node}
                   pods={gpuPods}

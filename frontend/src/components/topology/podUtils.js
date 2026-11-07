@@ -60,15 +60,3 @@ export function getMetricFields(metric, node) {
 export function isDaemonSetPod(pod) {
   return (pod.workloadType || '').toLowerCase() === 'daemonset';
 }
-
-// hasDevicePlacement reports whether the node should render per-physical-GPU
-// lanes: HAMi-detected, per-GPU memory known, multi-GPU node, and at least one
-// of the given pods carries a hami.io/vgpu-devices-allocated annotation.
-export function hasDevicePlacement(node, pods) {
-  return (
-    !!node.hamiDetected &&
-    (node.gpuMemTotalMiB || 0) > 0 &&
-    (node.gpuCapacity || 0) > 1 &&
-    pods.some((p) => (p.gpuDevices || []).length > 0)
-  );
-}
