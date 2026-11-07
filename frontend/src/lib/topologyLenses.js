@@ -26,6 +26,9 @@ export const LENSES = [
   { id: 'cost', label: 'Cost', needs: null },
   { id: 'serving', label: 'Serving health', needs: 'serving' },
   { id: 'disruption', label: 'Disruption', needs: 'disruptions' },
+  // Shown only when /topology reports a usage source (metrics-server or
+  // Prometheus).
+  { id: 'usage', label: 'Usage', needs: 'usage' },
 ];
 export const LENS_IDS = LENSES.map((l) => l.id);
 
@@ -89,6 +92,25 @@ export function disruptionsByNode(disruptions = []) {
 
 const bucket = (value, steps) => steps.findIndex((limit) => value < limit);
 
+// nodeUsageRatio is used / requested for CPU and memory over the node's pods
+// that report usage; `min` is the lower of the two (how much of what was
+// asked for sits idle). null without usage data.
+export function nodeUsageRatio(node) {
+  const withUsage = (node.pods || []).filter((p) => p.usage);
+  if (withUsage.length === 0) return null;
+  const sum = (fn) => withUsage.reduce((s, p) => s + fn(p), 0);
+  const ratio = (used, req) => (req > 0 ? used / req : null);
+  const cpu = ratio(sum((p) => p.usage.cpuCores || 0), sum((p) => p.requests?.cpuCores || 0));
+  const memory = ratio(sum((p) => p.usage.memoryGiB || 0), sum((p) => p.requests?.memoryGiB || 0));
+  const known = [cpu, memory].filter((v) => v != null);
+  if (known.length === 0) return null;
+  return { cpu, memory, min: Math.min(...known), max: Math.max(...known) };
+}
+
+// Used / requested: violet = asked for far more than it uses (rightsizing
+// candidates), green = close to its request, red = using more than requested.
+const USAGE = ['hsl(262 55% 45%)', 'hsl(262 45% 65%)', 'hsl(84 55% 42%)', 'hsl(142 55% 42%)', 'hsl(0 72% 52%)'];
+
 // lensContext precomputes what the lenses need for a set of nodes.
 export function lensContext(nodes, { servingPods, disruptions, now = Date.now(), currency = 'USD' } = {}) {
   const costs = nodes.map((n) => n.costPerHour).filter((c) => c != null);
@@ -142,6 +164,16 @@ export function lensColor(lensId, node, ctx) {
       }
       return { fill: TONE_FILL.amber, value: d.reason, title: `Being disrupted: ${d.reason}` };
     }
+    case 'usage': {
+      const r = nodeUsageRatio(node);
+      if (!r) return { fill: NO_DATA, value: '?', title: 'No usage data for this node' };
+      // Over-use (any resource above its request) matters most; otherwise the
+      // most idle resource decides.
+      const v = r.max > 1 ? r.max : r.min;
+      const i = r.max > 1 ? 4 : bucket(v, [0.25, 0.5, 0.75, Infinity]);
+      const parts = [r.cpu != null && `CPU ${pct(r.cpu)}`, r.memory != null && `memory ${pct(r.memory)}`].filter(Boolean);
+      return { fill: USAGE[i], value: pct(v), title: `Used of requested: ${parts.join(', ')}` };
+    }
     case 'requests':
     default: {
       const f = nodeFullness(node);
@@ -193,6 +225,15 @@ export function lensLegend(lensId) {
         { fill: FULLNESS[0], label: 'none' },
         { fill: TONE_FILL.amber, label: 'being disrupted' },
         { fill: TONE_FILL.red, label: 'blocked' },
+      ];
+    case 'usage':
+      return [
+        { fill: USAGE[0], label: '< 25% used of requested' },
+        { fill: USAGE[1], label: '< 50%' },
+        { fill: USAGE[2], label: '< 75%' },
+        { fill: USAGE[3], label: '≤ 100%' },
+        { fill: USAGE[4], label: 'over request' },
+        { fill: NO_DATA, label: 'no data' },
       ];
     case 'requests':
     default:

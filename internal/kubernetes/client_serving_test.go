@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -325,5 +326,13 @@ func TestFindLiteLLMPods(t *testing.T) {
 	}
 	if _, ok := byName["litellm-pending"]; ok {
 		t.Error("non-running pod must be skipped")
+	}
+}
+
+func TestRawGetWithoutTransport(t *testing.T) {
+	t.Parallel()
+	c := &Client{clientset: fake.NewClientset()}
+	if _, err := c.RawGet(context.Background(), "/apis/metrics.k8s.io/v1beta1/pods"); !errors.Is(err, ErrNoRawAPI) {
+		t.Errorf("RawGet() on a fake clientset = %v, want ErrNoRawAPI", err)
 	}
 }

@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Topology: requested vs used**: when a usage source is available, the Topology tab shows what pods actually use next to what they request. This is display only; recommendations keep their no-Prometheus rule.
+  - **Sources:**
+    - **metrics-server** is read automatically, giving live CPU and memory per pod. It is read through the existing Kubernetes client, so there is no new dependency.
+    - **Prometheus**, when `PROMETHEUS_URL` (chart `usage.prometheusUrl`) is set, gives the p95 over 24h from cAdvisor, which is what rightsizing needs. It also gives GPU memory in use per card from the DCGM exporter (`DCGM_FI_DEV_FB_USED`).
+    - Prometheus wins when both answer, and results are cached for 60s (`internal/usage`).
+  - **In pod bars:** the requested-but-unused part of each pod's CPU or memory segment is hatched, and a pod using more than it requested gets a red edge.
+  - **In GPU tanks:** a dashed line marks the memory actually in use, with the reserved-but-idle part above it hatched.
+  - **Usage lens:** a new **Usage** lens colours nodes by used ÷ requested: violet for capacity asked for but idle, green for close to the request, red for over the request.
+  - **Without a source:** the lens is hidden, and a note says the bars show requests only.
+  - **API:** `/api/v1/topology` adds `usage` per pod plus top-level `usage` (`{source, window}` or `null`) and `gpuUsage` (UUID → MiB).
+  - **Chart:** the ClusterRole gains read access to `metrics.k8s.io` pods and nodes.
+- **Topology: blast-radius warnings**: workloads whose replicas all sit on one node, or all in one zone, are flagged, because a single drain, spot interruption or zone outage takes the whole workload down. The Cluster level shows the count (expandable, with links to the node), and the node card names the workloads that live only on it. DaemonSets, Jobs and single-replica workloads are left out, and spread is judged over all nodes, so a filter never fakes a risk.
+- **Topology: node actions menu**: each node card has one **Actions** menu:
+  - copy-ready `kubectl describe node`, pods-on-node, and `kubectl drain … --dry-run=client` (the app never changes the cluster);
+  - the node's disruption status;
+  - logs for any pod on the node (workloads first, DaemonSet agents last).
 - **Topology: semantic zoom and lenses**: the Topology tab now opens on a **Cluster** map instead of a long list of cards. Every node is a tile, grouped by NodePool and zone and sized by allocatable CPU. Tiles shrink as the cluster grows: 200 nodes fit in two columns, and recolouring 1,000 nodes takes under 100 ms in Chrome, so plain DOM tiles are used rather than canvas.
   - **Levels:** clicking goes one level deeper: **NodePool** (larger tiles with CPU, memory and GPU request bars), **Node** (the node cards), then **GPU** (one tank, every slice named with its share of the card). Serving pods on a GPU show their health and link to their Serving card; every slice links to its logs.
   - **URLs:** each level has its own URL (`?zoom=pool&at=<pool>`, `?zoom=node&at=<node>`, `?zoom=gpu&at=<node>&card=<uuid>`) and its own history entry, so Back zooms out. A breadcrumb shows the path, and a minimap of the whole cluster stays in the corner below the Cluster level.

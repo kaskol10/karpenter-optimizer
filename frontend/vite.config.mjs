@@ -32,7 +32,7 @@ export default defineConfig({
       // Serving and Topology logic; CI fails if any one of them drops.
       thresholds: {
         perFile: true,
-        'src/lib/{api,gpuFit,pollingClock,servingCost,servingHeadroom,servingLatency,servingModels,servingPlacement,servingStatus,servingTriage,topologyLenses}.js': {
+        'src/lib/{api,blastRadius,gpuFit,nodeActions,pollingClock,servingCost,servingHeadroom,servingLatency,servingModels,servingPlacement,servingStatus,servingTriage,topologyLenses}.js': {
           statements: 90,
           lines: 90,
           functions: 90,

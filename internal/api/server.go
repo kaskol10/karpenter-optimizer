@@ -62,6 +62,7 @@ import (
 	"github.com/karpenter-optimizer/internal/recommender"
 	"github.com/karpenter-optimizer/internal/servingdurable"
 	"github.com/karpenter-optimizer/internal/servinghistory"
+	"github.com/karpenter-optimizer/internal/usage"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
@@ -111,6 +112,10 @@ type Server struct {
 	// finds serving pods, so clusters without LLMs never call out.
 	hostedPrices     *hostedprices.Catalog
 	hostedPricesOnce sync.Once
+
+	// usage reads actual pod and GPU usage for the Topology tab (display
+	// only): Prometheus when PROMETHEUS_URL is set, then metrics-server.
+	usage *usage.Collector
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -214,6 +219,7 @@ func NewServer(cfg *config.Config) *Server {
 		gatewayHistoryStoreName: gwStoreName,
 		alertsManager:           newAlertsManager(cfg),
 		hostedPrices:            hostedprices.New(hostedprices.DefaultURL),
+		usage:                   newUsageCollector(cfg, k8sClient),
 	}
 
 	// Root cancellable context for all background samplers. Created here so
@@ -1485,6 +1491,9 @@ type TopologyPod struct {
 	// GPUDevices carries the HAMi placement (which physical GPU index, UUID,
 	// memory) when the pod has a hami.io/vgpu-devices-allocated annotation.
 	GPUDevices []kubernetes.GPUDevice `json:"gpuDevices,omitempty"`
+	// Usage is what the pod actually uses (Prometheus p95 over 24h, else
+	// live metrics-server), when a usage source is available. Display only.
+	Usage *usage.PodUsage `json:"usage,omitempty"`
 }
 
 // TopologyNode is a node with its pods for the topology view.
@@ -1703,12 +1712,18 @@ func (s *Server) getTopology(c *gin.Context) {
 	if price := s.instancePricer(ctx); price != nil {
 		attachTopologyCost(out, price)
 	}
+	usageCtx, cancelUsage := context.WithTimeout(ctx, 15*time.Second)
+	snap := s.usage.Get(usageCtx)
+	cancelUsage()
+	attachTopologyUsage(out, snap)
 	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
 
 	c.JSON(200, gin.H{
 		"currency": awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
 		"nodes":    out,
 		"count":    len(out),
+		"usage":    snap,
+		"gpuUsage": gpuUsageOf(snap),
 	})
 }
 

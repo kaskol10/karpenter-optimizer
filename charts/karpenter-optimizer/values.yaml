@@ -277,6 +277,13 @@ serviceMonitor:
 metrics:
   enabled: false
 
+# Actual usage for the Topology tab (display only; recommendations never use
+# it). metrics-server is read automatically when installed (live CPU and
+# memory per pod). Set prometheusUrl to an in-cluster Prometheus to show the
+# p95 over 24h instead, plus GPU memory per card from the DCGM exporter.
+usage:
+  prometheusUrl: ""
+
 # Frontend configuration (deployed as sidecar container)
 frontend:
   enabled: true
