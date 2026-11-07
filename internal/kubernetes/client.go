@@ -74,6 +74,21 @@ func NewClientWithClientset(cs kubernetes.Interface) *Client {
 	return &Client{clientset: cs}
 }
 
+// ErrNoRawAPI is returned by RawGet when the client has no REST transport
+// (the fake clientset used in tests).
+var ErrNoRawAPI = errors.New("raw API access is not available")
+
+// RawGet GETs an absolute API path, such as the aggregated metrics.k8s.io
+// API, through the clientset's REST client. It lets the app read
+// metrics-server without a metrics client dependency.
+func (c *Client) RawGet(ctx context.Context, absPath string) ([]byte, error) {
+	rc := c.clientset.CoreV1().RESTClient()
+	if r, ok := rc.(*rest.RESTClient); !ok || r == nil {
+		return nil, ErrNoRawAPI
+	}
+	return rc.Get().AbsPath(absPath).DoRaw(ctx)
+}
+
 func NewClientWithDebug(kubeconfigPath, kubeContext string, debug bool) (*Client, error) {
 	var config *rest.Config
 	var err error

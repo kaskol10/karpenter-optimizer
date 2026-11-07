@@ -11,7 +11,7 @@ import { getPodKey } from './podUtils';
 // GpuDetail is the GPU zoom level: one card as a large tank, then every slice
 // on it named, with its share of the card and, for serving pods, its health
 // and a link to its Serving card.
-export function GpuDetail({ node, cardKey, servingPods, copyPod, copiedKey, onOpenServing, onOpenLogs, onZoomOut }) {
+export function GpuDetail({ node, cardKey, servingPods, copyPod, copiedKey, onOpenServing, onOpenLogs, onZoomOut, gpuUsage }) {
   const layout = node ? nodeGpus(node) : null;
   const gpu = layout?.gpus.find((g) => g.key === cardKey);
   if (!gpu) {
@@ -29,7 +29,7 @@ export function GpuDetail({ node, cardKey, servingPods, copyPod, copiedKey, onOp
   return (
     <div className="grid gap-6 md:grid-cols-[14rem_1fr]">
       <div className="max-w-[14rem]">
-        <GPUTanks layout={{ ...layout, gpus: [gpu], unplaced: [] }} copyPod={copyPod} copiedKey={copiedKey} />
+        <GPUTanks layout={{ ...layout, gpus: [gpu], unplaced: [] }} copyPod={copyPod} copiedKey={copiedKey} gpuUsage={gpuUsage} />
         <p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">{gpu.uuid || 'UUID unknown (no placement annotation)'}</p>
       </div>
       <div>

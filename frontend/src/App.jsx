@@ -526,6 +526,7 @@ function App() {
               onBackToServing={backToServing}
               onFocusDone={() => setTabFocus(null)}
               onOpenServing={(pod) => navigate('serving', { pod: `${pod.namespace}/${pod.name}` })}
+              onOpenDisruptions={() => navigate('disruptions')}
               onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
             />
           )}

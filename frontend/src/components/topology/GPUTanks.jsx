@@ -3,6 +3,7 @@ import { cn } from '../../lib/utils';
 import { formatMiB, fragmentation, gpuFits } from '../../lib/gpuFit';
 import { CopyablePodName } from './CopyablePodName';
 import { getPodKey, hashToHue } from './podUtils';
+import { HATCH } from './NodePodBar';
 
 // A segment shows its pod's name when it is at least this share of the tank.
 const LABEL_MIN_SHARE = 0.14;
@@ -21,7 +22,7 @@ const FIT_RING = {
 // faded and unnamed. With a "Will it fit?" size, cards with room are ringed
 // green ("maybe", amber dashed, when an unplaced pod could be on that card)
 // and the rest fade.
-export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu, onSelectGpu }) {
+export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu, onSelectGpu, gpuUsage }) {
   const frag = fragmentation(layout);
   const focusedKeys = new Set(
     layout.gpus
@@ -42,10 +43,14 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
           const fit = fitMiB ? gpuFits(gpu, fitMiB) : null;
           const focused = focusedKeys.has(gpu.key);
           const usedShare = gpu.totalMiB > 0 ? gpu.usedMiB / gpu.totalMiB : 0;
+          // Framebuffer actually in use (DCGM), when Prometheus reports it.
+          const actualMiB = gpu.uuid && gpuUsage ? gpuUsage[gpu.uuid] : undefined;
+          const actualShare = actualMiB != null && gpu.totalMiB > 0 ? Math.min(actualMiB / gpu.totalMiB, 1) : null;
           const title = [
             gpu.uuid || 'GPU with no placement annotation (UUID unknown)',
             `${formatMiB(gpu.usedMiB)} of ${formatMiB(gpu.totalMiB)} requested, ${formatMiB(gpu.freeMiB)} free`,
             gpu.uncertain ? 'Includes a pod without HAMi placement: it may be on another card.' : null,
+            actualMiB != null ? `${formatMiB(actualMiB)} actually in use (DCGM)` : null,
           ]
             .filter(Boolean)
             .join('\n');
@@ -96,6 +101,20 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
                     </div>
                   );
                 })}
+                {actualShare != null && actualShare < usedShare && (
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0"
+                    style={{ bottom: `${actualShare * 100}%`, height: `${(usedShare - actualShare) * 100}%`, backgroundImage: HATCH }}
+                  />
+                )}
+                {actualShare != null && (
+                  <span
+                    className="pointer-events-none absolute inset-x-0 border-t-2 border-dashed border-foreground/60"
+                    style={{ bottom: `${actualShare * 100}%` }}
+                    data-testid="gpu-used-line"
+                  />
+                )}
                 {usedShare < 0.85 && (
                   <span className="absolute inset-x-0 top-1 text-center text-[10px] text-muted-foreground">
                     {formatMiB(gpu.freeMiB)} free

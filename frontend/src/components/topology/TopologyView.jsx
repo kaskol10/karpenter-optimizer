@@ -17,6 +17,7 @@ import { LensBar } from './LensBar';
 import { Minimap } from './Minimap';
 import { PoolMap } from './PoolMap';
 import { ZoomBreadcrumb } from './ZoomBreadcrumb';
+import { BlastRadiusSummary } from './BlastRadius';
 import { FocusBanner } from './FocusBanner';
 import { NodeCard } from './NodeCard';
 import { TopologyFilters } from './TopologyFilters';
@@ -24,6 +25,7 @@ import { isDaemonSetPod } from './podUtils';
 import { parseSize, shortLabelFor } from '../../lib/gpuFit';
 import { LENSES, LENS_IDS, lensContext } from '../../lib/topologyLenses';
 import { useTopologyZoom } from '../../hooks/useTopologyZoom';
+import { risksOnNode, workloadSpread } from '../../lib/blastRadius';
 
 const TOPOLOGY_METRICS = ['cpu', 'memory'];
 
@@ -34,9 +36,14 @@ export default function TopologyView({
   onFocusDone,
   onOpenServing,
   onOpenLogs,
+  onOpenDisruptions,
 }) {
   const [nodes, setNodes] = useState([]);
   const [currency, setCurrency] = useState('USD');
+  // Usage source reported by /topology ({source, window} or null) and DCGM
+  // GPU memory in use per card UUID.
+  const [usageMeta, setUsageMeta] = useState(null);
+  const [gpuUsage, setGpuUsage] = useState(null);
   const [servingPods, setServingPods] = useState(null);
   const [disruptions, setDisruptions] = useState(null);
   // Semantic zoom (one history entry per level) and the tile colour lens.
@@ -127,6 +134,8 @@ export default function TopologyView({
       const response = await axios.get(`${API_URL}/api/v1/topology`);
       setNodes(response.data.nodes || []);
       setCurrency(response.data.currency || 'USD');
+      setUsageMeta(response.data.usage || null);
+      setGpuUsage(response.data.gpuUsage || null);
     } catch (err) {
       if (err.response?.status === 404) {
         try {
@@ -156,7 +165,9 @@ export default function TopologyView({
   // A deep link from Serving shows the node level until the user zooms
   // elsewhere (an explicit ?zoom= wins over the focus).
   const level = focus && !zoomLoc.explicit ? 'node' : zoomLoc.zoom;
-  const lensNeeds = LENSES.find((l) => l.id === lens)?.needs;
+  // The Usage lens needs a usage source; without one it falls back to Requests.
+  const activeLens = lens === 'usage' && !usageMeta ? 'requests' : lens;
+  const lensNeeds = LENSES.find((l) => l.id === activeLens)?.needs;
   const needServing = lensNeeds === 'serving' || level === 'gpu';
   const needDisruptions = lensNeeds === 'disruptions';
 
@@ -259,6 +270,9 @@ export default function TopologyView({
     () => lensContext(filteredNodes, { servingPods, disruptions, currency }),
     [filteredNodes, servingPods, disruptions, currency],
   );
+  // Spread is judged over every node, not just those in view: a filter that
+  // hides a replica's node must not make the workload look concentrated.
+  const risks = useMemo(() => workloadSpread(nodes), [nodes]);
   const zoomPoolNodes = useMemo(
     () => filteredNodes.filter((n) => (n.nodePool || '(no NodePool)') === zoomLoc.at),
     [filteredNodes, zoomLoc.at],
@@ -340,7 +354,14 @@ export default function TopologyView({
       {nodes.length > 0 && (
         <div className="flex flex-col gap-3 rounded-lg border px-3 py-2.5">
           <ZoomBreadcrumb steps={breadcrumb} />
-          {(level === 'cluster' || level === 'pool') && <LensBar lens={lens} onChange={setLens} />}
+          {(level === 'cluster' || level === 'pool') && (
+            <LensBar lens={activeLens} onChange={setLens} usageAvailable={!!usageMeta} />
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            {usageMeta
+              ? `Usage: ${usageMeta.window} from ${usageMeta.source === 'prometheus' ? 'Prometheus' : 'metrics-server'}; requested but unused capacity is hatched.`
+              : 'Usage: no metrics-server or Prometheus found, so bars show requests only.'}
+          </p>
         </div>
       )}
 
@@ -389,16 +410,19 @@ export default function TopologyView({
           onRetry={fetchTopology}
         />
       ) : level === 'cluster' ? (
-        <ClusterMap
-          nodes={filteredNodes}
-          lens={lens}
-          ctx={ctx}
-          onSelectNode={selectNode}
-          onSelectPool={(pool) => zoomTo({ zoom: 'pool', at: pool })}
-        />
+        <div className="space-y-4">
+          <BlastRadiusSummary risks={risks} onSelectNode={selectNode} />
+          <ClusterMap
+            nodes={filteredNodes}
+            lens={activeLens}
+            ctx={ctx}
+            onSelectNode={selectNode}
+            onSelectPool={(pool) => zoomTo({ zoom: 'pool', at: pool })}
+          />
+        </div>
       ) : level === 'pool' ? (
         zoomPoolNodes.length > 0 ? (
-          <PoolMap nodes={zoomPoolNodes} lens={lens} ctx={ctx} onSelectNode={selectNode} />
+          <PoolMap nodes={zoomPoolNodes} lens={activeLens} ctx={ctx} onSelectNode={selectNode} />
         ) : (
           <EmptyState icon={Network} title={`No nodes in ${zoomLoc.at}`} hint="The NodePool has no nodes, or the filters hide them all." />
         )
@@ -407,6 +431,7 @@ export default function TopologyView({
           node={atNode}
           cardKey={zoomLoc.card}
           servingPods={servingPods}
+          gpuUsage={gpuUsage}
           copyPod={copyPod}
           copiedKey={copiedKey}
           onOpenServing={onOpenServing}
@@ -426,7 +451,7 @@ export default function TopologyView({
             <div key={poolName}>
               <div className="flex items-center gap-2 mb-3">
                 <h3 className="text-base font-semibold">{poolName}</h3>
-                <Badge variant="secondary">{poolNodes.length} nodes</Badge>
+                <Badge variant="secondary">{poolNodes.length} node{poolNodes.length === 1 ? "" : "s"}</Badge>
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {poolNodes.map((node) => (
@@ -447,6 +472,10 @@ export default function TopologyView({
                     copiedKey={copiedKey}
                     fitMiB={fitMiB}
                     onSelectGpu={(card) => zoomTo({ zoom: 'gpu', at: node.name, card })}
+                    gpuUsage={gpuUsage}
+                    risks={risksOnNode(risks, node.name)}
+                    onOpenLogs={onOpenLogs}
+                    onOpenDisruptions={onOpenDisruptions}
                     cardRef={(el) => {
                       nodeRefs.current[node.name] = el;
                     }}
@@ -462,7 +491,7 @@ export default function TopologyView({
       {level !== 'cluster' && nodes.length > 0 && (
         <Minimap
           nodes={filteredNodes}
-          lens={lens}
+          lens={activeLens}
           ctx={ctx}
           current={new Set(atNode ? [atNode.name] : level === 'pool' ? zoomPoolNodes.map((n) => n.name) : focus ? [focus.node] : [])}
           onSelectNode={selectNode}

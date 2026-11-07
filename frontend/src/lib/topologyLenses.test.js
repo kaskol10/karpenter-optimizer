@@ -8,6 +8,7 @@ import {
   servingByNode,
   disruptionsByNode,
   lensContext,
+  nodeUsageRatio,
   lensColor,
   lensLegend,
   tileSize,
@@ -145,4 +146,36 @@ test('groupNodes: NodePool, then zone, sorted', () => {
   ]);
   expect(g[1].count).toBe(3);
   expect(g[0].zones[0].zone).toBe('(no zone)');
+});
+
+describe('usage lens', () => {
+  const usedNode = (pods) => ({ name: 'n', pods });
+  const p = (cpuReq, cpuUsed, memReq, memUsed) => ({
+    requests: { cpuCores: cpuReq, memoryGiB: memReq },
+    usage: { cpuCores: cpuUsed, memoryGiB: memUsed },
+  });
+
+  test('nodeUsageRatio sums pods that report usage', () => {
+    const r = nodeUsageRatio(usedNode([p(2, 0.5, 4, 3), p(2, 0.5, 4, 1), { requests: { cpuCores: 10 } }]));
+    expect(r.cpu).toBeCloseTo(0.25);
+    expect(r.memory).toBeCloseTo(0.5);
+    expect(r.min).toBeCloseTo(0.25);
+    expect(nodeUsageRatio(usedNode([]))).toBeNull();
+    expect(nodeUsageRatio({})).toBeNull();
+    expect(nodeUsageRatio(usedNode([p(0, 1, 0, 1)]))).toBeNull();
+    expect(nodeUsageRatio(usedNode([{ requests: { cpuCores: 1 }, usage: {} }])).cpu).toBe(0);
+  });
+
+  test('colours: idle requests, close to request, over request, no data', () => {
+    const ctx = lensContext([]);
+    expect(lensColor('usage', usedNode([p(4, 0.4, 8, 1)]), ctx).value).toBe('10%');
+    const close = lensColor('usage', usedNode([p(1, 0.9, 1, 0.8)]), ctx);
+    expect(close.value).toBe('80%');
+    expect(close.title).toBe('Used of requested: CPU 90%, memory 80%');
+    const over = lensColor('usage', usedNode([p(1, 1.5, 1, 0.5)]), ctx);
+    expect(over.value).toBe('150%');
+    expect(over.fill).not.toBe(close.fill);
+    expect(lensColor('usage', usedNode([]), ctx).fill).toBe(NO_DATA);
+    expect(lensLegend('usage').at(-2).label).toBe('over request');
+  });
 });

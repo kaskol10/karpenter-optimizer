@@ -140,6 +140,11 @@ spec:
             - name: ALERTS_STATE_FILE
               value: {{ .Values.alerts.stateFile | quote }}
             {{- end }}
+            {{- with .Values.usage.prometheusUrl }}
+            # Prometheus to read actual usage from (display only).
+            - name: PROMETHEUS_URL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             # Prometheus /metrics exporter (opt-in).
             - name: METRICS_ENABLED

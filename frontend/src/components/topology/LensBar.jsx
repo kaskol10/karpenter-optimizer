@@ -4,11 +4,11 @@ import { LENSES, lensLegend } from '../../lib/topologyLenses';
 
 // LensBar picks how node tiles are coloured and always shows what the
 // colours mean.
-export function LensBar({ lens, onChange }) {
+export function LensBar({ lens, onChange, usageAvailable = false }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <div className="flex flex-wrap rounded-md border p-0.5" role="group" aria-label="Colour nodes by">
-        {LENSES.map((l) => (
+        {LENSES.filter((l) => l.needs !== 'usage' || usageAvailable).map((l) => (
           <button
             key={l.id}
             type="button"

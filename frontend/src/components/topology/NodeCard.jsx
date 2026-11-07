@@ -6,6 +6,8 @@ import { Input } from '../ui/input';
 import { cn, formatGPUMem } from '../../lib/utils';
 import { CopyablePodName } from './CopyablePodName';
 import { GPUTanks } from './GPUTanks';
+import { NodeActions } from './NodeActions';
+import { BlastRadiusNote } from './BlastRadius';
 import { NodePodBar } from './NodePodBar';
 import { GpuSummaryBadge, MetaLine } from '../NodeBits';
 import { getPodKey, formatNodeAge, hashToHue, isDaemonSetPod } from './podUtils';
@@ -29,6 +31,10 @@ export function NodeCard({
   cardRef,
   fitMiB = null,
   onSelectGpu,
+  gpuUsage,
+  risks = [],
+  onOpenLogs,
+  onOpenDisruptions,
 }) {
   const nodePods = node.pods || [];
   const isFocusNode = !!focus && focus.node === node.name;
@@ -54,7 +60,9 @@ export function NodeCard({
           <Button size="sm" variant="outline" onClick={onToggleExpand}>
             {expanded ? 'Hide node details' : 'Drill into node'}
           </Button>
+          <NodeActions node={node} onOpenLogs={onOpenLogs} onOpenDisruptions={onOpenDisruptions} />
         </div>
+        <BlastRadiusNote risks={risks} />
       </CardHeader>
       <CardContent>
         <NodePodBar
@@ -86,6 +94,7 @@ export function NodeCard({
                   focusPodKey={focusPodKey}
                   focusGpu={isFocusNode ? focus.gpu || null : null}
                   onSelectGpu={onSelectGpu}
+                  gpuUsage={gpuUsage}
                 />
               ) : (
                 <NodePodBar

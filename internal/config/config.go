@@ -31,6 +31,10 @@ type Config struct {
 	// HISTORY_WINDOW_HOURS). SERVING_HISTORY_DSN wins; otherwise the gateway
 	// DSN is reused so both histories share one CNPG instance.
 	ServingHistoryDSN string
+	// PrometheusURL, when set, is read (display only) for p95 pod usage over
+	// 24h and DCGM GPU memory; metrics-server is tried otherwise. Never used
+	// for recommendations.
+	PrometheusURL string
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -112,6 +116,7 @@ func Load() *Config {
 		LiteLLMMetricsAPIKey: getEnv("LITELLM_METRICS_API_KEY", ""),
 		GatewayHistoryDSN:    resolveGatewayHistoryDSN(),
 		ServingHistoryDSN:    resolveServingHistoryDSN(),
+		PrometheusURL:        getEnv("PROMETHEUS_URL", ""),
 		OllamaURL:            ollamaURL, // Keep for backward compatibility
 		OllamaModel:          ollamaModel,
 		AWSRegion:            getEnv("AWS_REGION", "eu-west-1"),

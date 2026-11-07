@@ -4,10 +4,27 @@ import { cn, shortGpuUuid, formatGPUMem } from '../../lib/utils';
 import { CopyablePodName } from './CopyablePodName';
 import { getPodKey, hashToHue, getMetricFields } from './podUtils';
 
+// HATCH is the "requested but not used" pattern drawn over the idle part of
+// a pod's request.
+export const HATCH = 'repeating-linear-gradient(135deg, hsl(var(--foreground) / 0.18) 0 2px, transparent 2px 6px)';
+
+// podUsedShare is the pod's use as a share of its request for the bar's
+// metric (cpu or memory), or null when there is no usage data.
+export function podUsedShare(pod, metric) {
+  if (!pod.usage) return null;
+  const pairs = { cpu: ['cpuCores', 'cpuCores'], memory: ['memoryGiB', 'memoryGiB'] };
+  const pair = pairs[metric];
+  if (!pair) return null;
+  const req = pod.requests?.[pair[0]] || 0;
+  if (!(req > 0)) return null;
+  return (pod.usage[pair[1]] || 0) / req;
+}
+
 function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, isFocused, onHoverPod, copyPod, copiedKey }) {
   const { format, label, weight } = getMetricFields(metric, node);
   const w = weight(pod);
   const hue = hashToHue(getPodKey(pod));
+  const used = podUsedShare(pod, metric);
 
   const titleLines = [
     `${pod.namespace}/${pod.name}`,
@@ -15,6 +32,9 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, isFocused
       ? `Workload: ${pod.workloadType}${pod.workloadName ? `/${pod.workloadName}` : ''}`
       : null,
     `${label} req: ${format(w)}`,
+    used != null
+      ? `${label} used: ${format(w * used)} (${Math.round(used * 100)}% of request${used > 1 ? ', over its request' : ''})`
+      : null,
     metric !== 'gpu' && (pod.requests?.gpu || 0) > 0
       ? `GPU req: ${pod.requests.gpu}${pod.requests.gpuMemMiB > 0 ? ` / ${formatGPUMem(pod.requests.gpuMemMiB)}` : ''}`
       : null,
@@ -26,7 +46,8 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, isFocused
 
   return (
     <div
-      className="flex items-center justify-center border-r border-foreground/10 bg-card/80 hover:bg-accent transition-colors overflow-hidden"
+      className="relative flex items-center justify-center border-r border-foreground/10 bg-card/80 hover:bg-accent transition-colors overflow-hidden"
+      data-used={used != null ? Math.round(used * 100) : undefined}
       style={{
         flexGrow: grow,
         flexShrink: 0,
@@ -44,6 +65,16 @@ function PodBarSegment({ pod, node, metric, grow, showLabel, isActive, isFocused
       onMouseEnter={() => onHoverPod?.(pod)}
       onMouseLeave={() => onHoverPod?.(null)}
     >
+      {used != null && used < 1 && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0"
+          style={{ left: `${Math.max(used, 0) * 100}%`, backgroundImage: HATCH }}
+        />
+      )}
+      {used != null && used > 1 && (
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-red-500/80" />
+      )}
       {showLabel && (
         <CopyablePodName
           pod={pod}
