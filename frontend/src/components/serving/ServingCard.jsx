@@ -258,9 +258,12 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
               </div>
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <MetricTip label="Preempt" tip="Requests evicted from GPU memory and re-run because the KV cache ran out. Should stay near 0; a rising count means memory pressure and silently repeated work, which adds latency."><Clock className="h-3 w-3" /></MetricTip>
+                  <MetricTip label="Preempt" tip="Requests evicted from GPU memory and re-run because the KV cache ran out, in the last 5 minutes (the total since the server started is below). Should stay at 0; preemptions now mean memory pressure and silently repeated work, which adds latency."><Clock className="h-3 w-3" /></MetricTip>
                 </p>
-                <p className="text-lg font-bold">{pod.preemptions ?? 0}</p>
+                <p className={cn('text-lg font-bold', pod.preemptionsRecent > 0 && 'text-red-600')}>
+                  {pod.preemptionsRecent ?? '–'}
+                </p>
+                <p className="text-[10px] text-muted-foreground">{pod.preemptions ?? 0} total</p>
               </div>
             </div>
 

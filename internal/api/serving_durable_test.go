@@ -71,8 +71,8 @@ func TestLastIssueFromSeries(t *testing.T) {
 		{Unix: 30, Online: true, KVCachePercent: floatPtr(90)},
 		{Unix: 40, Online: true},
 	}
-	assert.Equal(t, int64(30), lastIssueFromSeries(pts, 85))
-	assert.Equal(t, int64(0), lastIssueFromSeries([]servinghistory.Point{{Unix: 1, Online: true}}, 85))
+	assert.Equal(t, int64(30), servinghistory.LastIssueIn(pts, 85))
+	assert.Equal(t, int64(0), servinghistory.LastIssueIn([]servinghistory.Point{{Unix: 1, Online: true}}, 85))
 }
 
 func TestAppendServingDurableNoopWithoutStore(t *testing.T) {

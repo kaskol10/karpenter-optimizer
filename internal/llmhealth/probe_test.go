@@ -325,3 +325,105 @@ litellm_total_tokens_metric_total{model="m2"} 999
 		t.Errorf("series without app label leaked into a pair")
 	}
 }
+
+func TestRecentIncrease(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(10_000, 0)
+	at := func(minAgo int, v float64) counterSample {
+		return counterSample{ts: now.Add(-time.Duration(minAgo) * time.Minute), value: v}
+	}
+
+	tests := []struct {
+		name    string
+		hist    []counterSample
+		current float64
+		want    float64
+		wantOK  bool
+	}{
+		{name: "no earlier sample: unknown", hist: nil, current: 7, wantOK: false},
+		{name: "lifetime count but no new preemptions", hist: []counterSample{at(1, 42)}, current: 42, want: 0, wantOK: true},
+		{name: "new preemptions since a recent sample", hist: []counterSample{at(1, 40)}, current: 43, want: 3, wantOK: true},
+		{
+			name:    "baseline is the newest sample at or before the window start",
+			hist:    []counterSample{at(9, 10), at(6, 20), at(3, 25), at(1, 28)},
+			current: 30,
+			want:    10, // 30 - 20 (the 6-minute-old sample)
+			wantOK:  true,
+		},
+		{
+			name:    "history shorter than the window: oldest sample is the baseline",
+			hist:    []counterSample{at(2, 5), at(1, 6)},
+			current: 9,
+			want:    4,
+			wantOK:  true,
+		},
+		{name: "counter reset (server restart) counts from zero", hist: []counterSample{at(1, 50)}, current: 2, want: 2, wantOK: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := recentIncrease(tt.hist, now, tt.current, PreemptionWindow)
+			if ok != tt.wantOK || (ok && got != tt.want) {
+				t.Errorf("recentIncrease = %v, %v; want %v, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestTrimSamplesKeepsOneBaseline(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(10_000, 0)
+	hist := []counterSample{
+		{ts: now.Add(-20 * time.Minute), value: 1},
+		{ts: now.Add(-8 * time.Minute), value: 2},
+		{ts: now.Add(-2 * time.Minute), value: 3},
+	}
+	got := trimSamples(hist, now, PreemptionWindow)
+	if len(got) != 2 || got[0].value != 2 || got[1].value != 3 {
+		t.Errorf("trimSamples kept %+v; want the -8m baseline and the -2m sample", got)
+	}
+}
+
+// A pod with a large lifetime preemption count but no new preemptions must
+// report preemptionsRecent = 0 (not under pressure), and new preemptions
+// between probes must show up.
+func TestProbePreemptionsRecent(t *testing.T) {
+	t.Parallel()
+
+	var preemptions float64 = 120
+	var mu sync.Mutex
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"m","owned_by":"vllm"}]}`)
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		_, _ = fmt.Fprintf(w, "vllm:num_preemptions_total %v\n", preemptions)
+		mu.Unlock()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	host, port, ok := splitHostPort(t, srv.URL)
+	if !ok {
+		t.Fatal("could not parse test server URL")
+	}
+
+	p := NewProber()
+	first := p.Probe(context.Background(), "ns", "pod", host, port)
+	if first.Preemptions != 120 || first.PreemptionsRecent != nil {
+		t.Fatalf("first probe: preemptions=%d recent=%v; want 120, nil", first.Preemptions, first.PreemptionsRecent)
+	}
+
+	second := p.Probe(context.Background(), "ns", "pod", host, port)
+	if second.PreemptionsRecent == nil || *second.PreemptionsRecent != 0 {
+		t.Fatalf("idle pod: recent=%v; want 0 despite a lifetime count of 120", second.PreemptionsRecent)
+	}
+
+	mu.Lock()
+	preemptions += 4
+	mu.Unlock()
+	third := p.Probe(context.Background(), "ns", "pod", host, port)
+	if third.PreemptionsRecent == nil || *third.PreemptionsRecent != 4 {
+		t.Fatalf("after 4 new preemptions: recent=%v; want 4", third.PreemptionsRecent)
+	}
+}

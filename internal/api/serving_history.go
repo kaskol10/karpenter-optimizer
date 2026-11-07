@@ -114,7 +114,7 @@ func (s *Server) getServingHistory(c *gin.Context) {
 			Name:      name,
 			Window:    window.String(),
 			Points:    points,
-			LastIssue: lastIssueFromSeries(points, kvThreshold),
+			LastIssue: servinghistory.LastIssueIn(points, kvThreshold),
 		})
 	}
 
@@ -141,22 +141,6 @@ func (s *Server) durableServingSeries(window time.Duration) (map[string][]servin
 		pods[k] = true
 	}
 	return rows, pods
-}
-
-// lastIssueFromSeries is the merged-series equivalent of
-// servinghistory.Store.LastIssue (offline / waiting / preemptions / KV≥thr).
-func lastIssueFromSeries(pts []servinghistory.Point, kvThresholdPct float64) int64 {
-	var last int64
-	for _, p := range pts {
-		unhealthy := !p.Online || p.Waiting > 0 || p.Preemptions > 0
-		if !unhealthy && p.KVCachePercent != nil && *p.KVCachePercent >= kvThresholdPct {
-			unhealthy = true
-		}
-		if unhealthy && p.Unix > last {
-			last = p.Unix
-		}
-	}
-	return last
 }
 
 type servingHistoryEntry struct {

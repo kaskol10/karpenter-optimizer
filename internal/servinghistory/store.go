@@ -131,18 +131,37 @@ func (s *Store) Pods() []string {
 }
 
 // LastIssue returns the timestamp (Unix) of the most recent sample for a pod
-// that was "unhealthy" within the window, or 0 if none. Unhealthy means: the
-// pod was offline, had waiting requests, had preemptions, or had KV cache
-// above the given threshold.
+// that was "unhealthy" within the window, or 0 if none (see LastIssueIn).
 func (s *Store) LastIssue(namespace, name string, window time.Duration, kvThresholdPct float64) int64 {
 	if window <= 0 {
 		window = 6 * time.Hour
 	}
+	return LastIssueIn(s.Series(namespace, name, window), kvThresholdPct)
+}
+
+// LastIssueIn returns the Unix time of the most recent unhealthy sample in a
+// chronological series, or 0 if none. Unhealthy means: offline, waiting
+// requests, KV cache at or above the threshold, or new preemptions since the
+// previous online sample.
+//
+// Preemptions are vLLM's lifetime counter, so only an increase counts: a pod
+// preempted once, days ago, is not unhealthy now. The baseline is the
+// previous *online* sample, because an offline sample carries no counters.
+func LastIssueIn(pts []Point, kvThresholdPct float64) int64 {
 	var last int64
-	for _, p := range s.Series(namespace, name, window) {
-		unhealthy := !p.Online || p.Waiting > 0 || p.Preemptions > 0
+	var prevPreemptions int64
+	havePrev := false
+	for _, p := range pts {
+		unhealthy := !p.Online || p.Waiting > 0
 		if !unhealthy && p.KVCachePercent != nil && *p.KVCachePercent >= kvThresholdPct {
 			unhealthy = true
+		}
+		if p.Online {
+			if havePrev && p.Preemptions > prevPreemptions {
+				unhealthy = true
+			}
+			prevPreemptions = p.Preemptions
+			havePrev = true
 		}
 		if unhealthy && p.Unix > last {
 			last = p.Unix

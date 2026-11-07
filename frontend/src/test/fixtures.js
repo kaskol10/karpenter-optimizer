@@ -68,7 +68,8 @@ function servingPod(name, model, node, gpuDevices, metrics = {}) {
     gpuDevices,
     running: 4,
     waiting: 0,
-    preemptions: 0,
+    preemptions: 17, // lifetime counter: old preemptions must not mark a healthy pod
+    preemptionsRecent: 0,
     kvCachePercent: 48,
     ttftSeconds: 0.21,
     ttftP95Seconds: 0.4,

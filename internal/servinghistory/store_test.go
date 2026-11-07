@@ -149,3 +149,29 @@ func TestLastIssueDetectsOffline(t *testing.T) {
 		t.Fatalf("expected offline flagged as issue, got unix %d", last)
 	}
 }
+
+func TestLastIssueInPreemptionsAreARate(t *testing.T) {
+	t.Parallel()
+	kv := 20.0
+	pt := func(u int64, preemptions int64) Point {
+		return Point{Unix: u, Online: true, KVCachePercent: &kv, Preemptions: preemptions}
+	}
+
+	// A large but flat lifetime counter is not an issue.
+	if got := LastIssueIn([]Point{pt(10, 500), pt(20, 500), pt(30, 500)}, 85); got != 0 {
+		t.Errorf("flat lifetime counter flagged at %d; want 0", got)
+	}
+	// An increase is an issue at the sample where it happened.
+	if got := LastIssueIn([]Point{pt(10, 500), pt(20, 503), pt(30, 503)}, 85); got != 20 {
+		t.Errorf("increase flagged at %d; want 20", got)
+	}
+	// An offline sample (no counters) between two equal counts is not a jump.
+	offline := Point{Unix: 20, Online: false}
+	if got := LastIssueIn([]Point{pt(10, 500), offline, pt(30, 500)}, 85); got != 20 {
+		t.Errorf("offline gap: got %d; want 20 (the offline sample itself, not a fake preemption at 30)", got)
+	}
+	// A counter reset (restart) is not an increase.
+	if got := LastIssueIn([]Point{pt(10, 500), pt(20, 3)}, 85); got != 0 {
+		t.Errorf("counter reset flagged at %d; want 0", got)
+	}
+}
