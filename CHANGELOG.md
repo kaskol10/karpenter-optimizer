@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Frontend dependencies**: `npm audit --omit=dev` reported five advisories (axios, follow-redirects, form-data, picomatch, postcss-selector-parser; three high). The lockfile now resolves patched versions (axios 1.21.0, follow-redirects 1.16.2, form-data 4.0.6, picomatch 2.3.2), and `npm audit` reports none, dev dependencies included. The axios range is raised to `^1.21.0` so an install cannot resolve back.
+- **Build- and test-only packages are dev dependencies**: Testing Library and `tailwindcss-animate` (which pulled Tailwind, chokidar and picomatch into the production tree) move to `devDependencies`, so the production audit covers only what ships in the bundle.
+
+### Changed
+- **Faster first load**: every page except the Overview, the Log Explorer and the overview's trend sparklines load on first use (`React.lazy`), with a skeleton while a page arrives. The charting library alone was about 300 kB. The JavaScript needed for the first paint drops from 1,025 kB (305 kB gzip) to about 445 kB (145 kB gzip), and the build no longer warns about chunk size.
+- **Frontend image**: `frontend/.dockerignore` keeps `node_modules`, `build` and `coverage` out of the build context. Before, `COPY . .` copied a local `node_modules` over the one `npm ci` had just installed, which breaks native packages built for another platform.
+
 ### Added
 - **Command palette (⌘K / Ctrl+K, or the header Search button)**:
   - **Jump** to any page, node, pod, GPU (by model or part of its UUID) or model by typing part of its name. Words can match in any order, and "ip1012" finds `ip-10-0-10-12`.

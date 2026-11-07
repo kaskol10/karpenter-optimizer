@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { FileText, X } from 'lucide-react';
-import LogExplorer from './LogExplorer';
+import { SkeletonRows } from './ui/skeleton';
+
+// Loaded the first time the drawer opens.
+const LogExplorer = lazy(() => import('./LogExplorer'));
 
 // LogDrawer shows the Log Explorer in a side drawer over any page, so
 // opening a pod's logs from Topology or Serving never loses your place.
@@ -28,7 +31,11 @@ export function LogDrawer({ pod, onClose }) {
               <X className="h-4 w-4" />
             </Dialog.Close>
           </div>
-          <div className="flex-1 overflow-y-auto p-5">{open && <LogExplorer seedPod={pod || undefined} />}</div>
+          <div className="flex-1 overflow-y-auto p-5">{open && (
+              <Suspense fallback={<SkeletonRows rows={6} />}>
+                <LogExplorer seedPod={pod || undefined} />
+              </Suspense>
+            )}</div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

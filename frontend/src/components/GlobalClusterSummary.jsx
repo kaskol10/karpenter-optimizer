@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -9,7 +9,6 @@ import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 import { Skeleton } from './ui/skeleton';
 import { EmptyState } from './ui/empty-state';
-import Sparkline from './Sparkline';
 import { RefreshCw, Zap, Loader2, LayoutDashboard } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getCacheStats } from '../lib/pricingCache';
@@ -17,6 +16,10 @@ import { PricingSourceLabel } from './NodeBits';
 import { useCurrencyFormatter } from '../lib/currency';
 import { API_URL } from '../lib/api';
 import { usePolling, usePollingTick } from '../hooks/usePolling';
+
+// The charting library is the largest dependency; the trend sparklines load
+// it after the overview's numbers are on screen.
+const Sparkline = lazy(() => import('./Sparkline'));
 
 // ClusterTrends renders sparklines for CPU %, memory %, GPU memory % and
 // estimated cost over the selected window (1h / 6h / 24h).
@@ -94,7 +97,9 @@ function ClusterTrends({ API_URL }) {
                 {tile.data.length ? tile.fmt(tile.data[tile.data.length - 1].value) : '—'}
               </p>
             </div>
-            <Sparkline points={tile.data} stroke={tile.stroke} height={36} formatValue={tile.fmt} />
+            <Suspense fallback={<div style={{ height: 36 }} />}>
+              <Sparkline points={tile.data} stroke={tile.stroke} height={36} formatValue={tile.fmt} />
+            </Suspense>
           </div>
         ))}
       </div>
