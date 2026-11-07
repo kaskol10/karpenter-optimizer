@@ -213,7 +213,9 @@ func TestCollector(t *testing.T) {
 	// Nothing available: nil, cached too.
 	prom.err, ms.err = errors.New("down"), errors.New("down")
 	now = now.Add(2 * time.Minute)
-	if c.Get(context.Background()) != nil || c.Get(context.Background()) != nil {
+	first := c.Get(context.Background())
+	second := c.Get(context.Background()) // served from the cached miss
+	if first != nil || second != nil {
 		t.Error("expected nil without sources")
 	}
 	if ms.calls != 2 {
