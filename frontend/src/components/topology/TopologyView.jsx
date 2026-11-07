@@ -3,7 +3,7 @@ import { Button } from '../ui/button';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { SkeletonRows } from '../ui/skeleton';
 import { EmptyState } from '../ui/empty-state';
-import { RefreshCw, Loader2, Network } from 'lucide-react';
+import { RefreshCw, Loader2, Network, History } from 'lucide-react';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { useCopyPodName } from './CopyablePodName';
 import { ClusterMap } from './ClusterMap';
@@ -18,12 +18,16 @@ import { DrainPanel } from './DrainPanel';
 import { FocusBanner } from './FocusBanner';
 import { NodeList } from './NodeList';
 import { TopologyFilters } from './TopologyFilters';
+import { TimeScrubber } from './TimeScrubber';
+import { ChangesPanel } from './ChangesPanel';
 import { isDaemonSetPod } from './podUtils';
 import { shortLabelFor } from '../../lib/gpuFit';
 import { LENSES, LENS_IDS, lensContext } from '../../lib/topologyLenses';
 import { useTopologyZoom } from '../../hooks/useTopologyZoom';
 import { useTopologyData } from '../../hooks/useTopologyData';
 import { useDrainPlan } from '../../hooks/useDrainPlan';
+import { useTopologyHistory } from '../../hooks/useTopologyHistory';
+import { diffTopology, formatClock, withChanges } from '../../lib/topologyHistory';
 import { risksOnNode, workloadSpread } from '../../lib/blastRadius';
 
 const TOPOLOGY_METRICS = ['cpu', 'memory'];
@@ -71,20 +75,36 @@ export default function TopologyView({
   // falls back to Requests, so its own "needs" never triggers a fetch.
   const lensNeeds = LENSES.find((l) => l.id === lens)?.needs;
   const {
-    nodes,
+    nodes: liveNodes,
     currency,
-    usageMeta,
-    gpuUsage,
+    usageMeta: liveUsageMeta,
+    gpuUsage: liveGpuUsage,
     servingPods,
     disruptions,
-    loading,
-    error,
+    loading: liveLoading,
+    error: liveError,
     fallbackMode,
     refresh: fetchTopology,
   } = useTopologyData({
     needServing: lensNeeds === 'serving' || level === 'gpu',
     needDisruptions: lensNeeds === 'disruptions',
   });
+  // Time travel: ?at= replays a past snapshot everywhere below (no usage
+  // then, it is "now" data); ?compare= keeps the live view and diffs it.
+  const history = useTopologyHistory();
+  const replaying = Boolean(history.at);
+  const nodes = useMemo(
+    () => (replaying ? history.replay.nodes || [] : liveNodes),
+    [replaying, history.replay.nodes, liveNodes],
+  );
+  const usageMeta = replaying ? null : liveUsageMeta;
+  const gpuUsage = replaying ? null : liveGpuUsage;
+  const loading = replaying ? history.replay.loading : liveLoading;
+  const error = replaying ? history.replay.error : liveError;
+  const diff = useMemo(
+    () => (history.compare && history.baseline.nodes ? diffTopology(history.baseline.nodes, liveNodes) : null),
+    [history.compare, history.baseline.nodes, liveNodes],
+  );
   const activeLens = lens === 'usage' && !usageMeta ? 'requests' : lens;
   const {
     fitText,
@@ -156,17 +176,25 @@ export default function TopologyView({
     return Array.from(s).sort();
   }, [nodes]);
 
-  const filteredNodes = useMemo(() => {
-    return nodes.filter((node) => {
+  const matchesNodeFilters = useCallback(
+    (node) => {
       if (nodePoolFilter && node.nodePool !== nodePoolFilter) return false;
       if (zoneFilter && node.zone !== zoneFilter) return false;
-      if (nodeNameFilter) {
-        const q = nodeNameFilter.toLowerCase();
-        if (!node.name.toLowerCase().includes(q)) return false;
-      }
+      if (nodeNameFilter && !node.name.toLowerCase().includes(nodeNameFilter.toLowerCase())) return false;
       return true;
-    });
-  }, [nodes, nodePoolFilter, zoneFilter, nodeNameFilter]);
+    },
+    [nodePoolFilter, zoneFilter, nodeNameFilter],
+  );
+  const filteredNodes = useMemo(() => nodes.filter(matchesNodeFilters), [nodes, matchesNodeFilters]);
+  // Compare mode: removed nodes come back as ghosts on the Cluster map, under
+  // the same filters as the live ones.
+  const mapNodes = useMemo(
+    () =>
+      diff
+        ? withChanges(filteredNodes, { ...diff, removedNodes: diff.removedNodes.filter(matchesNodeFilters) })
+        : filteredNodes,
+    [diff, filteredNodes, matchesNodeFilters],
+  );
 
   const grouped = useMemo(() => {
     const m = new Map();
@@ -226,17 +254,41 @@ export default function TopologyView({
             Pods on nodes with segment sizes proportional to resource requests (Nomad-style overview).
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchTopology} disabled={loading}>
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </>
+        <div className="flex items-center gap-2">
+          {!history.open && !fallbackMode && (
+            <Button variant="outline" size="sm" onClick={() => history.setOpen(true)}>
+              <History className="h-4 w-4 mr-2" />
+              History
+            </Button>
           )}
-        </Button>
+          <Button variant="outline" size="sm" onClick={fetchTopology} disabled={liveLoading}>
+            {liveLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {history.open && <TimeScrubber history={history} />}
+      {replaying && history.replay.at && (
+        <p className="text-[11px] text-muted-foreground">
+          Replaying the cluster at {formatClock(history.replay.at)}: placement and requests as recorded, cost at
+          today&apos;s prices, no usage. Node actions copy commands for nodes that may be gone.
+        </p>
+      )}
+      {diff && (
+        <ChangesPanel
+          diff={diff}
+          events={history.events}
+          since={formatClock(history.baseline.at || history.compare)}
+          onSelectNode={(name) => zoomTo({ zoom: 'node', at: name })}
+        />
+      )}
 
       <TopologyFilters
         metric={metric}
@@ -336,7 +388,7 @@ export default function TopologyView({
         <div className="space-y-4">
           <BlastRadiusSummary risks={risks} onSelectNode={selectNode} />
           <ClusterMap
-            nodes={filteredNodes}
+            nodes={mapNodes}
             lens={activeLens}
             ctx={ctx}
             onSelectNode={selectNode}

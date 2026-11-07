@@ -58,6 +58,7 @@ import (
 	"github.com/karpenter-optimizer/internal/hostedprices"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/litellm"
+	"github.com/karpenter-optimizer/internal/placementhistory"
 	"github.com/karpenter-optimizer/internal/power"
 	"github.com/karpenter-optimizer/internal/recommender"
 	"github.com/karpenter-optimizer/internal/servingdurable"
@@ -116,6 +117,13 @@ type Server struct {
 	// usage reads actual pod and GPU usage for the Topology tab (display
 	// only): Prometheus when PROMETHEUS_URL is set, then metrics-server.
 	usage *usage.Collector
+
+	// placementHistory records where every pod ran over the last day for
+	// Topology time travel (nil when PLACEMENT_HISTORY_HOURS=0).
+	placementHistory   *placementhistory.Store
+	placementInterval  time.Duration
+	placementWindow    time.Duration
+	placementReasonErr sync.Once
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -220,6 +228,11 @@ func NewServer(cfg *config.Config) *Server {
 		alertsManager:           newAlertsManager(cfg),
 		hostedPrices:            hostedprices.New(hostedprices.DefaultURL),
 		usage:                   newUsageCollector(cfg, k8sClient),
+		placementInterval:       placementIntervalFromEnv(),
+		placementWindow:         placementWindowFromEnv(),
+	}
+	if k8sClient != nil && server.placementWindow > 0 {
+		server.placementHistory = placementhistory.New(server.placementWindow, placementKeyEvery)
 	}
 
 	// Root cancellable context for all background samplers. Created here so
@@ -247,6 +260,7 @@ func NewServer(cfg *config.Config) *Server {
 		server.startServingHistorySampler(rootCtx)
 		server.startGatewayHistorySampler(rootCtx)
 		server.startAlertsSampler(rootCtx)
+		server.startPlacementSampler(rootCtx)
 	}
 
 	return server
@@ -428,6 +442,8 @@ func (s *Server) setupRoutes() {
 		protected.GET("/disruptions/recent", s.getRecentNodeDeletions)
 		protected.GET("/nodes", s.getNodesWithUsage)
 		protected.GET("/topology", s.getTopology)
+		protected.GET("/topology/history", s.getTopologyHistory)
+		protected.GET("/topology/events", s.getTopologyEvents)
 		protected.GET("/cluster/summary", s.getClusterSummary)
 		protected.GET("/history", s.getHistory)
 		protected.GET("/serving", s.getServing)
@@ -1564,54 +1580,15 @@ func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResour
 	return out
 }
 
-// GetTopology godoc
-// @Summary      Get cluster topology (nodes and pods)
-// @Description  Nodes with scheduled pods and per-pod resource requests for topology visualization
-// @Tags         nodes
-// @Accept       json
-// @Produce      json
-// @Param        maxPodsPerNode  query     int  false  "Max pods per node (default 200, max 1000)"
-// @Success      200  {object}  map[string]interface{}  "Topology data"
-// @Failure      503  {object}  map[string]interface{}  "Kubernetes client not configured"
-// @Failure      500  {object}  map[string]interface{}  "Internal server error"
-// @Router       /topology [get]
-func (s *Server) getTopology(c *gin.Context) {
-	if s.k8sClient == nil {
-		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
-		return
-	}
-
-	maxPodsPerNode := 200
-	if v := c.Query("maxPodsPerNode"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxPodsPerNode = n
-			if maxPodsPerNode > 1000 {
-				maxPodsPerNode = 1000
-			}
-		} else {
-			debugLog(
-				s.config.Debug,
-				"[topology] invalid maxPodsPerNode query value %q, using default %d\n",
-				v,
-				maxPodsPerNode,
-			)
-		}
-	}
-	debugLog(
-		s.config.Debug,
-		"[topology] request received remote=%s maxPodsPerNode=%d\n",
-		c.ClientIP(),
-		maxPodsPerNode,
-	)
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
-	defer cancel()
-
+// buildTopologyNodes lists nodes and the pods on them (one paginated pod
+// list) and returns them in the topology shape, at most maxPodsPerNode pods
+// per node (largest CPU request first). Cost and usage are attached by the
+// caller. Shared by GET /topology and the placement-history sampler.
+func (s *Server) buildTopologyNodes(ctx context.Context, maxPodsPerNode int) ([]TopologyNode, error) {
 	nodes, err := s.k8sClient.GetAllNodesWithUsage(ctx)
 	if err != nil {
 		debugLog(s.config.Debug, "[topology] failed to fetch nodes: %v\n", err)
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return nil, err
 	}
 	debugLog(s.config.Debug, "[topology] fetched %d nodes\n", len(nodes))
 
@@ -1623,8 +1600,7 @@ func (s *Server) getTopology(c *gin.Context) {
 	allPods, err := s.k8sClient.GetPodsOnNodes(ctx, nodeNames)
 	if err != nil {
 		debugLog(s.config.Debug, "[topology] failed to fetch pods on nodes: %v\n", err)
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return nil, err
 	}
 	debugLog(s.config.Debug, "[topology] fetched %d pods across selected nodes\n", len(allPods))
 
@@ -1708,6 +1684,57 @@ func (s *Server) getTopology(c *gin.Context) {
 			GPUPods:            node.GPUPods,
 			HamiDetected:       node.HamiDetected,
 		})
+	}
+	return out, nil
+}
+
+// GetTopology godoc
+// @Summary      Get cluster topology (nodes and pods)
+// @Description  Nodes with scheduled pods and per-pod resource requests for topology visualization
+// @Tags         nodes
+// @Accept       json
+// @Produce      json
+// @Param        maxPodsPerNode  query     int  false  "Max pods per node (default 200, max 1000)"
+// @Success      200  {object}  map[string]interface{}  "Topology data"
+// @Failure      503  {object}  map[string]interface{}  "Kubernetes client not configured"
+// @Failure      500  {object}  map[string]interface{}  "Internal server error"
+// @Router       /topology [get]
+func (s *Server) getTopology(c *gin.Context) {
+	if s.k8sClient == nil {
+		c.JSON(503, gin.H{"error": "Kubernetes client not configured"})
+		return
+	}
+
+	maxPodsPerNode := 200
+	if v := c.Query("maxPodsPerNode"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxPodsPerNode = n
+			if maxPodsPerNode > 1000 {
+				maxPodsPerNode = 1000
+			}
+		} else {
+			debugLog(
+				s.config.Debug,
+				"[topology] invalid maxPodsPerNode query value %q, using default %d\n",
+				v,
+				maxPodsPerNode,
+			)
+		}
+	}
+	debugLog(
+		s.config.Debug,
+		"[topology] request received remote=%s maxPodsPerNode=%d\n",
+		c.ClientIP(),
+		maxPodsPerNode,
+	)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+	defer cancel()
+
+	out, err := s.buildTopologyNodes(ctx, maxPodsPerNode)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 	if price := s.instancePricer(ctx); price != nil {
 		attachTopologyCost(out, price)
