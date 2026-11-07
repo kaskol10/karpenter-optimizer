@@ -32,37 +32,20 @@ describe('useTopologyData', () => {
     expect(result.current).toEqual(expect.objectContaining({ nodes: [], currency: 'USD', usageMeta: null, gpuUsage: null }));
   });
 
-  test('falls back to /nodes on a 404, with equal-weight pods from podNames', async () => {
-    route({
-      '/api/v1/topology': httpError(404),
-      '/api/v1/nodes': { nodes: [{ name: 'a', podNames: ['prod/web-1', 'lonely'] }, { name: 'b' }] },
-    });
-    const { result } = renderHook(() => useTopologyData());
-    await waitFor(() => expect(result.current.fallbackMode).toBe(true));
-    expect(result.current.nodes[0].pods).toEqual([
-      expect.objectContaining({ namespace: 'prod', name: 'web-1', requests: { cpuCores: 1, memoryGiB: 1, gpu: 0 } }),
-      expect.objectContaining({ namespace: 'default', name: 'lonely' }),
-    ]);
-    expect(result.current.nodes[1].pods).toEqual([]);
-  });
-
-  test('errors: the API message, the fallback failing, a fallback with no nodes', async () => {
+  test('errors: the API message, an older backend, no message', async () => {
     route({ '/api/v1/topology': httpError(500, 'boom') });
     const a = renderHook(() => useTopologyData());
     await waitFor(() => expect(a.result.current.error).toBe('boom'));
 
-    route({ '/api/v1/topology': httpError(404), '/api/v1/nodes': httpError(503) });
+    route({ '/api/v1/topology': httpError(404), '/api/v1/nodes': { nodes: [{ name: 'a' }] } });
     const b = renderHook(() => useTopologyData());
-    await waitFor(() => expect(b.result.current.error).toBe('HTTP 503'));
+    await waitFor(() => expect(b.result.current.error).toMatch(/no \/api\/v1\/topology.*same release/));
+    expect(b.result.current.nodes).toEqual([]);
+    expect(axios.get).not.toHaveBeenCalledWith(expect.stringMatching(/\/api\/v1\/nodes$/));
 
     route({ '/api/v1/topology': new Error('') });
     const c = renderHook(() => useTopologyData());
     await waitFor(() => expect(c.result.current.error).toBe('Failed to load topology'));
-
-    route({ '/api/v1/topology': httpError(404), '/api/v1/nodes': {} });
-    const d = renderHook(() => useTopologyData());
-    await waitFor(() => expect(d.result.current.fallbackMode).toBe(true));
-    expect(d.result.current.nodes).toEqual([]);
   });
 
   test('lens data only when needed; failures become empty lists', async () => {

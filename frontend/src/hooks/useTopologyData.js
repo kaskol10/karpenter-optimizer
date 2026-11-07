@@ -2,33 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '../lib/api';
 
-// fallbackNodes turns /api/v1/nodes into topology-shaped nodes for backends
-// older than /api/v1/topology: pods come from podNames with equal weights,
-// since real requests need /topology.
-function fallbackNodes(nodeItems) {
-  return nodeItems.map((node) => ({
-    ...node,
-    pods: (node.podNames || []).map((qualifiedName) => {
-      const slashIdx = qualifiedName.indexOf('/');
-      const namespace = slashIdx > 0 ? qualifiedName.slice(0, slashIdx) : 'default';
-      const name = slashIdx > 0 ? qualifiedName.slice(slashIdx + 1) : qualifiedName;
-      return {
-        name,
-        namespace,
-        nodeName: node.name,
-        workloadName: '',
-        workloadType: '',
-        qosClass: '',
-        requests: { cpuCores: 1, memoryGiB: 1, gpu: 0 },
-      };
-    }),
-  }));
-}
+// A 404 means a backend older than this frontend. The chart ships both
+// images from one release, so that pairing is not supported; say so.
+const OLD_BACKEND =
+  'This backend has no /api/v1/topology. Run the frontend and backend from the same release (the Helm chart does).';
 
-const errorText = (err) => err.response?.data?.error || err.message || 'Failed to load topology';
+const errorText = (err) =>
+  err.response?.status === 404 ? OLD_BACKEND : err.response?.data?.error || err.message || 'Failed to load topology';
 
-// useTopologyData loads /api/v1/topology (falling back to /nodes on a 404)
-// and, only when asked, the serving pods and disruptions that some lenses
+// useTopologyData loads /api/v1/topology and, only when asked, the serving pods and disruptions that some lenses
 // and the GPU level need. A failed lens fetch leaves its data empty ("no
 // data" tiles), never an error.
 export function useTopologyData({ needServing = false, needDisruptions = false } = {}) {
@@ -39,13 +21,12 @@ export function useTopologyData({ needServing = false, needDisruptions = false }
     gpuUsage: null, // UUID -> MiB in use (DCGM)
     loading: false,
     error: null,
-    fallbackMode: false,
   });
   const [servingPods, setServingPods] = useState(null);
   const [disruptions, setDisruptions] = useState(null);
 
   const refresh = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null, fallbackMode: false }));
+    setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const { data } = await axios.get(`${API_URL}/api/v1/topology`);
       setState((s) => ({
@@ -57,16 +38,7 @@ export function useTopologyData({ needServing = false, needDisruptions = false }
         loading: false,
       }));
     } catch (err) {
-      if (err.response?.status !== 404) {
-        setState((s) => ({ ...s, loading: false, error: errorText(err) }));
-        return;
-      }
-      try {
-        const { data } = await axios.get(`${API_URL}/api/v1/nodes`);
-        setState((s) => ({ ...s, nodes: fallbackNodes(data.nodes || []), fallbackMode: true, loading: false }));
-      } catch (fallbackErr) {
-        setState((s) => ({ ...s, loading: false, error: errorText(fallbackErr) }));
-      }
+      setState((s) => ({ ...s, loading: false, error: errorText(err) }));
     }
   }, []);
 

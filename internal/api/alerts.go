@@ -44,6 +44,22 @@ func (s *Server) getAlertsConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"config": out})
 }
 
+// getAlertsStatus godoc
+// @Summary      Firing alerts
+// @Description  Whether alerting is on and which conditions are firing now, for the header status strip. Always 200; `enabled` is false when alerting is off or has no channel.
+// @Tags         alerts
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Router       /alerts/status [get]
+func (s *Server) getAlertsStatus(c *gin.Context) {
+	if s.alertsManager == nil {
+		c.JSON(http.StatusOK, gin.H{"enabled": false, "firing": []alerts.FiringAlert{}})
+		return
+	}
+	enabled, firing := s.alertsManager.Status()
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "firing": firing})
+}
+
 func maskChannelURL(u string) string {
 	return alerts.MaskURL(u)
 }

@@ -3,7 +3,7 @@
 // (a past snapshot, same shape as /topology) and /api/v1/topology/events.
 import { fragmentation, nodeGpus } from './gpuFit';
 
-// parseAtParam reads a ?at= / ?compare= value (Unix seconds), or null.
+// parseAtParam reads a ?time= / ?compare= value (Unix seconds), or null.
 export function parseAtParam(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);

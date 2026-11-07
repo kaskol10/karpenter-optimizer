@@ -15,11 +15,34 @@ vi.mock('./components/DisruptionTracker', () => ({ default: () => <p>disruptions
 vi.mock('./components/WorkloadUsageView', () => ({ default: () => <p>workloads page</p> }));
 vi.mock('./components/AgentRecommendations', () => ({ default: () => <p>recommendations page</p> }));
 vi.mock('./components/serving/GatewayPage', () => ({ default: () => <p>gateway page</p> }));
+vi.mock('./components/CommandPalette', () => ({
+  isPaletteShortcut: (e) => (e.metaKey || e.ctrlKey) && e.key === 'k',
+  CommandPalette: ({ open, onOpenChange, onRun: run }) => {
+    const onRun = (r) => {
+      onOpenChange(false);
+      run(r);
+    };
+    return open ? (
+      <div role="dialog" aria-label="Command palette">
+        <button type="button" onClick={() => onRun({ type: 'navigate', page: 'topology', params: { drain: 'n2' } })}>
+          run drain
+        </button>
+        <button type="button" onClick={() => onRun({ type: 'logs', pod: 'llm/x' })}>
+          run logs
+        </button>
+        <button type="button" onClick={() => onRun({ type: 'theme' })}>
+          run theme
+        </button>
+      </div>
+    ) : null;
+  },
+}));
 vi.mock('./components/LogExplorer', () => ({ default: ({ seedPod }) => <p>log explorer on {seedPod || 'picker'}</p> }));
 vi.mock('./components/topology/TopologyView', () => ({
   default: ({ focus, onOpenLogs, onOpenServing }) => (
     <div>
       <p>topology page{focus ? ` focused on ${focus.node}` : ''}</p>
+      <p>topology url {window.location.search}</p>
       <button type="button" onClick={() => onOpenLogs({ namespace: 'llm', name: 'vllm-0' })}>
         topology logs
       </button>
@@ -138,5 +161,31 @@ describe('App navigation', () => {
     await userEvent.click(screen.getByRole('button', { name: 'topology serving' }));
     expect(screen.getByText('serving page focused on llm/vllm-0')).toBeInTheDocument();
     expect(here()).toBe('/inference/serving?pod=llm%2Fvllm-0');
+  });
+
+  test('⌘K opens the palette; its jumps reload the page with the new params', async () => {
+    setUrl('/cluster/topology?zoom=gpu&card=x');
+    render(<App />);
+    expect(screen.getByText('topology url ?zoom=gpu&card=x')).toBeInTheDocument();
+    await userEvent.keyboard('{Control>}k{/Control}');
+    await userEvent.click(screen.getByRole('button', { name: 'run drain' }));
+    expect(here()).toBe('/cluster/topology?drain=n2');
+    expect(screen.getByText('topology url ?drain=n2')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'run logs' }));
+    expect(await screen.findByText('log explorer on llm/x')).toBeInTheDocument();
+  });
+
+  test('the palette can switch the theme, and ⌘K toggles it closed', async () => {
+    render(<App />);
+    const dark = document.documentElement.classList.contains('dark');
+    await userEvent.keyboard('{Meta>}k{/Meta}');
+    await userEvent.click(screen.getByRole('button', { name: 'run theme' }));
+    expect(document.documentElement.classList.contains('dark')).toBe(!dark);
+    await userEvent.keyboard('{Meta>}k{/Meta}');
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+    await userEvent.keyboard('{Meta>}k{/Meta}');
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
   });
 });

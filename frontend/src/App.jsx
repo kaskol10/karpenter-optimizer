@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { Alert, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
-import { Loader2, Settings, Info, X, Sun, Moon, Server, BrainCircuit, Sparkles, FileText } from 'lucide-react';
+import { Loader2, Settings, Info, X, Sun, Moon, Server, BrainCircuit, Sparkles, FileText, Search } from 'lucide-react';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
@@ -13,31 +13,20 @@ import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
 import { LogDrawer } from './components/LogDrawer';
+import { CommandPalette, isPaletteShortcut } from './components/CommandPalette';
+import { StatusStrip } from './components/StatusStrip';
 import GatewayPage from './components/serving/GatewayPage';
 import AlertsSettings from './components/AlertsSettings';
 import ServingHealth from './components/serving/ServingHealth';
 import { cn } from './lib/utils';
 import { CurrencyRegionContext, formatCurrency } from './lib/currency';
 import { API_URL } from './lib/api';
-import { usePolling, useLastRefresh } from './hooks/usePolling';
+import { usePolling } from './hooks/usePolling';
 import { AREAS, areaOf, buildUrl, logsParam, pagePath, parseLocation } from './lib/routes';
 
 const AREA_ICONS = { cluster: Server, inference: BrainCircuit, optimize: Sparkles };
 
 const readLocation = () => parseLocation(window.location.pathname, window.location.search);
-
-// LastUpdated shows when the polled panels last refreshed on the shared
-// polling clock, so everyone reading the screen knows how fresh it is.
-function LastUpdated() {
-  const at = useLastRefresh();
-  if (!at) return null;
-  const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  return (
-    <span className="mr-2 text-xs text-muted-foreground tabular-nums" title="Polling pauses while this browser tab is hidden">
-      Updated {time}
-    </span>
-  );
-}
 
 function NavItem({ label, Icon, active, badge, onClick, href }) {
   return (
@@ -122,11 +111,13 @@ function App() {
 
   // navigate opens a page (and its focus). The log drawer stays as it is;
   // the page's own filters are kept only when staying on the same page.
-  const navigate = useCallback((page, focus = null) => {
+  // params (from the command palette) replace the page's own params.
+  const navigate = useCallback((page, focus = null, params = null) => {
     const here = readLocation();
     setActiveTab(page);
     setTabFocus(focus);
-    const next = buildUrl(page, { focus, logs: here.logs, keep: here.page === page ? window.location.search : '' });
+    const keep = params ? new URLSearchParams(params).toString() : here.page === page ? window.location.search : '';
+    const next = buildUrl(page, { focus, logs: here.logs, keep });
     if (next !== `${window.location.pathname}${window.location.search}`) {
       window.history.pushState({ tab: page, from: here.page }, '', next);
     }
@@ -152,6 +143,21 @@ function App() {
     }
     const here = readLocation();
     window.history.replaceState(window.history.state, '', buildUrl(here.page, { focus: here.focus, keep: window.location.search }));
+  }, []);
+
+  // Command palette: ⌘K / Ctrl+K anywhere. A palette jump remounts the page
+  // (navSeq) so it reads the new URL params even when it is already open.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navSeq, setNavSeq] = useState(0);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (isPaletteShortcut(e)) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   useEffect(() => {
@@ -244,7 +250,17 @@ function App() {
               <p className="text-sm text-muted-foreground m-0">Karpenter capacity and GPU inference operations</p>
             </div>
             <div className="flex items-center gap-2">
-              <LastUpdated />
+              <StatusStrip
+                config={config}
+                onOpenAlerts={() => {
+                  setShowSettings(true);
+                }}
+              />
+              <Button onClick={() => setPaletteOpen(true)} variant="outline" size="sm" aria-label="Search (⌘K)">
+                <Search className="h-4 w-4 mr-2" />
+                Search
+                <kbd className="ml-2 rounded border px-1 font-sans text-[10px] text-muted-foreground">⌘K</kbd>
+              </Button>
               <Button onClick={() => openLogs('')} variant="outline" size="sm">
                 <FileText className="h-4 w-4 mr-2" />
                 Logs
@@ -318,7 +334,7 @@ function App() {
           />
         </div>
 
-        <div key={activeTab} className="space-y-6 animate-tab-in">
+        <div key={`${activeTab}:${navSeq}`} className="space-y-6 animate-tab-in">
           {showSettings && (
             <Card>
               <CardHeader>
@@ -603,6 +619,18 @@ function App() {
         </div>
       </main>
       <LogDrawer pod={logsPod} onClose={closeLogs} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onRun={(run) => {
+          if (run.type === 'logs') openLogs(run.pod);
+          else if (run.type === 'theme') toggleTheme();
+          else {
+            navigate(run.page, run.focus || null, run.params || null);
+            setNavSeq((n) => n + 1);
+          }
+        }}
+      />
     </div>
     </CurrencyRegionContext.Provider>
   );

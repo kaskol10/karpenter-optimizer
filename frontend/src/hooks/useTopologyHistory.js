@@ -39,14 +39,15 @@ function useSnapshot(at) {
   return state;
 }
 
-// useTopologyHistory drives Topology time travel. `?at=` (Unix seconds)
+// useTopologyHistory drives Topology time travel. `?time=` (Unix seconds)
 // replays the cluster at that moment; `?compare=` diffs the live view
 // against that moment. The timeline (range + events) is fetched only once
-// time travel is opened or a URL asks for it, so the live view costs no
+// time travel is opened or a URL asks for it. (Not ?at=: the zoom level
+// uses that for the node or NodePool it shows.), so the live view costs no
 // extra request. `available` is false when the backend has no history
 // (older backend: 404, disabled: 503).
 export function useTopologyHistory() {
-  const [atParam, setAtParam] = useUrlParam('at');
+  const [atParam, setAtParam] = useUrlParam('time');
   const [compareParam, setCompareParam] = useUrlParam('compare');
   const at = parseAtParam(atParam);
   const compare = at ? null : parseAtParam(compareParam);

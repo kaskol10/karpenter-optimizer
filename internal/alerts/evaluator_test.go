@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -148,5 +149,50 @@ func TestEvaluator_RestartSafety(t *testing.T) {
 	// Immediately after restart the alert must NOT re-fire.
 	if got := e2.Evaluate(cfg, costSnap(15, 10)); len(got) != 0 {
 		t.Fatalf("restart caused a duplicate fire: %v", got)
+	}
+}
+
+func TestEvaluator_Firing(t *testing.T) {
+	clk := &clock{t: time.Now()}
+	e := NewEvaluator(clk.now)
+	cfg := costCfg()
+	if got := e.Firing(); len(got) != 0 {
+		t.Fatalf("nothing should fire yet: %v", got)
+	}
+	e.Evaluate(cfg, costSnap(16, 10)) // pending
+	if got := e.Firing(); len(got) != 0 {
+		t.Fatalf("pending is not firing: %v", got)
+	}
+	clk.advance(10 * time.Minute)
+	e.Evaluate(cfg, costSnap(16, 10))
+	got := e.Firing()
+	if len(got) != 1 || got[0].ID == "" || got[0].Title == "" || !got[0].Since.Equal(clk.t) {
+		t.Fatalf("want one firing alert stamped now, got %+v", got)
+	}
+	// Recovering but inside the held-clear window still counts as firing.
+	clk.advance(time.Minute)
+	e.Evaluate(cfg, costSnap(11, 10))
+	if got := e.Firing(); len(got) != 1 {
+		t.Fatalf("clearing should still count: %+v", got)
+	}
+	clk.advance(time.Hour)
+	e.Evaluate(cfg, costSnap(11, 10))
+	if got := e.Firing(); len(got) != 0 {
+		t.Fatalf("cleared should not count: %+v", got)
+	}
+}
+
+func TestManager_Status(t *testing.T) {
+	m := NewManager(filepath.Join(t.TempDir(), "alerts.json"))
+	if enabled, firing := m.Status(); enabled || len(firing) != 0 {
+		t.Fatalf("default config should be disabled, got %v %v", enabled, firing)
+	}
+	cfg := costCfg()
+	cfg.Channels = []ChannelConfig{{Type: "webhook", URL: "https://example.com/hook"}}
+	if err := m.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, firing := m.Status(); !enabled || firing == nil || len(firing) != 0 {
+		t.Fatalf("enabled with nothing firing, got %v %v", enabled, firing)
 	}
 }
