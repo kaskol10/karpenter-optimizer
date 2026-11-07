@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Navigation: three areas instead of eight tabs**:
+  - **Areas:** **Cluster** (Overview, Nodes, Topology, Disruptions), **Inference** (Serving, Gateway) and **Optimize** (Recommendations, Workloads), with the active area's pages as a second row. The Disruptions count shows on both the Cluster area and its page, and an area reopens the page you last had open in it.
+  - **Paths:** pages have paths: `/cluster/topology`, `/inference/serving`, `/optimize/workloads` (the Overview stays at `/`). Nav items are real links, so middle-click opens a page in a new tab.
+  - **Old links:** `?tab=` links keep working; they are rewritten to the new path with their focus and filters (`?tab=topology&node=x` → `/cluster/topology?node=x`). Unknown or partial paths go to the nearest real page.
+  - **Logs drawer:** logs are a drawer, not a tab. The header **Logs** button, or a Logs link in Topology or Serving, opens the Log Explorer over the current page (`?logs=namespace/name`); closing it returns to where you were. The old `?tab=logs&pod=x` opens the drawer.
+  - **Gateway page:** the LiteLLM gateway has its own page (Inference → Gateway) instead of sitting above the model servers; its view and split are URL params (`?view=models&split=team`).
+  - **Tagline:** "Karpenter capacity and GPU inference operations".
+  - **Routing:** `lib/routes.js` holds the scheme (areas, `parseLocation`, `buildUrl`) and is in the coverage gate. nginx already falls back to `index.html` for any path, so no deployment change is needed.
+
 ### Added
 - **Topology: time travel**: a **History** button opens a timeline of the last day under the header.
   - **Replay** (`?at=`, shareable): every zoom level shows the cluster as it was at that moment, from where each pod ran to each GPU's tenants. Cost uses today's prices and there is no usage, which is "now" data.

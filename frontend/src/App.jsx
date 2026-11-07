@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { Alert, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
-import { Loader2, Settings, Info, X, Sun, Moon, LayoutDashboard, Server, Network, Cpu, Boxes, AlertTriangle, Sparkles, FileText } from 'lucide-react';
+import { Loader2, Settings, Info, X, Sun, Moon, Server, BrainCircuit, Sparkles, FileText } from 'lucide-react';
 import NodePoolCard from './components/NodePoolCard';
 import DisruptionTracker from './components/DisruptionTracker';
 import NodeUsageView from './components/NodeUsageView';
@@ -12,63 +12,19 @@ import TopologyView from './components/topology/TopologyView';
 import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
 import AgentRecommendations from './components/AgentRecommendations';
-import LogExplorer from './components/LogExplorer';
+import { LogDrawer } from './components/LogDrawer';
+import GatewayPage from './components/serving/GatewayPage';
 import AlertsSettings from './components/AlertsSettings';
 import ServingHealth from './components/serving/ServingHealth';
 import { cn } from './lib/utils';
 import { CurrencyRegionContext, formatCurrency } from './lib/currency';
 import { API_URL } from './lib/api';
 import { usePolling, useLastRefresh } from './hooks/usePolling';
+import { AREAS, areaOf, buildUrl, logsParam, pagePath, parseLocation } from './lib/routes';
 
-// Tab definitions: id, label, and icon. Order is the nav order.
-const TABS = [
-  { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
-  { id: 'nodes', label: 'Nodes', Icon: Server },
-  { id: 'topology', label: 'Topology', Icon: Network },
-  { id: 'serving', label: 'Serving', Icon: Cpu },
-  { id: 'workloads', label: 'Workloads', Icon: Boxes },
-  { id: 'disruptions', label: 'Disruptions', Icon: AlertTriangle },
-  { id: 'recommendations', label: 'Recommendations', Icon: Sparkles },
-  { id: 'logs', label: 'Log Analyzer', Icon: FileText },
-];
+const AREA_ICONS = { cluster: Server, inference: BrainCircuit, optimize: Sparkles };
 
-const TAB_IDS = new Set(TABS.map((t) => t.id));
-
-// The active tab (and a Topology focus target) live in the URL so views can be
-// shared, survive a refresh, and the browser back button returns from a
-// Serving → Topology jump: ?tab=topology&node=<node>&pod=<ns/name>&gpu=<uuid>
-function readLocation() {
-  const q = new URLSearchParams(window.location.search);
-  const tab = TAB_IDS.has(q.get('tab')) ? q.get('tab') : 'overview';
-  let focus = null;
-  if (tab === 'topology' && q.get('node')) {
-    focus = { node: q.get('node'), pod: q.get('pod') || '', gpu: q.get('gpu') || '' };
-  } else if ((tab === 'logs' || tab === 'serving') && q.get('pod')) {
-    focus = { pod: q.get('pod') }; // logs: "namespace/name" or "namespace"; serving: "namespace/name"
-  }
-  return { tab, focus };
-}
-
-const FOCUS_PARAMS = ['node', 'pod', 'gpu'];
-
-// buildSearch builds the query string for a tab and its optional focus
-// (Topology: node/pod/gpu; Logs and Serving: pod).
-// keep carries the current tab's own params (its filters, see useUrlParam)
-// when staying on the same tab; a different tab starts with a clean URL.
-function buildSearch(tab, focus, keep = '') {
-  const q = new URLSearchParams();
-  if (tab !== 'overview') q.set('tab', tab);
-  if (focus) {
-    if (focus.node) q.set('node', focus.node);
-    if (focus.pod) q.set('pod', focus.pod);
-    if (focus.gpu) q.set('gpu', focus.gpu);
-  }
-  new URLSearchParams(keep).forEach((value, key) => {
-    if (key !== 'tab' && !FOCUS_PARAMS.includes(key)) q.set(key, value);
-  });
-  const str = q.toString();
-  return str ? `?${str}` : window.location.pathname;
-}
+const readLocation = () => parseLocation(window.location.pathname, window.location.search);
 
 // LastUpdated shows when the polled panels last refreshed on the shared
 // polling clock, so everyone reading the screen knows how fresh it is.
@@ -83,10 +39,16 @@ function LastUpdated() {
   );
 }
 
-function NavItem({ id, label, Icon, active, badge, onClick }) {
+function NavItem({ label, Icon, active, badge, onClick, href }) {
   return (
-    <button
-      onClick={onClick}
+    <a
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        onClick();
+      }}
       className={cn(
         'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
         active
@@ -96,12 +58,44 @@ function NavItem({ id, label, Icon, active, badge, onClick }) {
     >
       <Icon className="h-4 w-4" />
       {label}
-      {badge > 0 && (
-        <span className="ml-0.5 rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
-          {badge}
-        </span>
-      )}
-    </button>
+      <CountBadge count={badge} />
+    </a>
+  );
+}
+
+function CountBadge({ count }) {
+  if (!(count > 0)) return null;
+  return (
+    <span className="ml-0.5 rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
+      {count}
+    </span>
+  );
+}
+
+// PageNav is the second row: the pages of the active area as pills.
+function PageNav({ area, page, badges, onSelect }) {
+  return (
+    <nav className="flex flex-wrap gap-1" aria-label={`${area.label} pages`}>
+      {area.pages.map((p) => (
+        <a
+          key={p.id}
+          href={pagePath(p.id)}
+          aria-current={p.id === page ? 'page' : undefined}
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onSelect(p.id);
+          }}
+          className={cn(
+            'flex items-center rounded-md px-3 py-1.5 text-sm',
+            p.id === page ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+          )}
+        >
+          {p.label}
+          <CountBadge count={badges[p.id]} />
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -111,30 +105,61 @@ function App() {
   const [clusterCost, setClusterCost] = useState(null);
   const [config, setConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => readLocation().tab);
-  const [tabFocus, setTabFocus] = useState(() => readLocation().focus);
+  const [initialLocation] = useState(readLocation);
+  const [activeTab, setActiveTab] = useState(initialLocation.page);
+  const [tabFocus, setTabFocus] = useState(initialLocation.focus);
+  const [logsPod, setLogsPod] = useState(initialLocation.logs);
   const [showKarpenterBanner, setShowKarpenterBanner] = useState(true);
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
   );
   const [disruptionCount, setDisruptionCount] = useState(0);
 
-  const navigate = useCallback((tab, focus = null) => {
-    setActiveTab(tab);
+  // Old ?tab= links and non-canonical paths become the new URL in place.
+  useEffect(() => {
+    if (initialLocation.redirect) window.history.replaceState(window.history.state, '', initialLocation.redirect);
+  }, [initialLocation]);
+
+  // navigate opens a page (and its focus). The log drawer stays as it is;
+  // the page's own filters are kept only when staying on the same page.
+  const navigate = useCallback((page, focus = null) => {
+    const here = readLocation();
+    setActiveTab(page);
     setTabFocus(focus);
-    const sameTab = readLocation().tab === tab;
-    const next = buildSearch(tab, focus, sameTab ? window.location.search : '');
-    const current = window.location.search || window.location.pathname;
-    if (next !== current) {
-      window.history.pushState({ tab, from: readLocation().tab }, '', next);
+    const next = buildUrl(page, { focus, logs: here.logs, keep: here.page === page ? window.location.search : '' });
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({ tab: page, from: here.page }, '', next);
     }
+  }, []);
+
+  // openLogs opens the drawer on a pod ("namespace/name", a {namespace,
+  // name} pod, or '' for the picker) without leaving the page.
+  const openLogs = useCallback((pod) => {
+    const here = readLocation();
+    const logs = logsParam(pod);
+    setLogsPod(logs);
+    const next = buildUrl(here.page, { focus: here.focus, logs, keep: window.location.search });
+    window.history.pushState({ ...window.history.state, drawer: true }, '', next);
+  }, []);
+
+  // closeLogs steps back when the drawer was opened in this session (so
+  // Back does not reopen it), else drops ?logs= in place.
+  const closeLogs = useCallback(() => {
+    setLogsPod(null);
+    if (window.history.state?.drawer) {
+      window.history.back();
+      return;
+    }
+    const here = readLocation();
+    window.history.replaceState(window.history.state, '', buildUrl(here.page, { focus: here.focus, keep: window.location.search }));
   }, []);
 
   useEffect(() => {
     const onPop = () => {
-      const { tab, focus } = readLocation();
-      setActiveTab(tab);
+      const { page, focus, logs } = readLocation();
+      setActiveTab(page);
       setTabFocus(focus);
+      setLogsPod(logs);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -160,6 +185,10 @@ function App() {
     });
   };
 
+  const currentArea = areaOf(activeTab);
+  // An area remembers the page you last had open in it.
+  const lastPage = useRef({});
+  lastPage.current[currentArea.id] = activeTab;
   const karpenterDetected = config?.karpenter?.detected ?? false;
   const kubernetesConnected = config?.kubernetes?.connected ?? false;
   const showNoKarpenterBanner = showKarpenterBanner && kubernetesConnected && !karpenterDetected;
@@ -212,10 +241,14 @@ function App() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold text-primary m-0">Karpenter Optimizer</h1>
-              <p className="text-sm text-muted-foreground m-0">Cluster-level cost optimization</p>
+              <p className="text-sm text-muted-foreground m-0">Karpenter capacity and GPU inference operations</p>
             </div>
             <div className="flex items-center gap-2">
               <LastUpdated />
+              <Button onClick={() => openLogs('')} variant="outline" size="sm">
+                <FileText className="h-4 w-4 mr-2" />
+                Logs
+              </Button>
               <Button
                 onClick={toggleTheme}
                 variant="outline"
@@ -260,21 +293,29 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* Minimalist Tab Navigation */}
-        <div className="mb-6 border-b">
-          <nav className="flex space-x-1 -mb-px">
-            {TABS.map(({ id, label, Icon }) => (
+        {/* Three areas, then the active area's pages */}
+        <div className="mb-6 space-y-3">
+          <div className="border-b">
+          <nav className="-mb-px flex space-x-1" aria-label="Areas">
+            {AREAS.map((area) => (
               <NavItem
-                key={id}
-                id={id}
-                label={label}
-                Icon={Icon}
-                active={activeTab === id}
-                badge={id === 'disruptions' ? disruptionCount : 0}
-                onClick={() => navigate(id)}
+                key={area.id}
+                label={area.label}
+                Icon={AREA_ICONS[area.id]}
+                href={pagePath(lastPage.current[area.id] || area.pages[0].id)}
+                active={currentArea.id === area.id}
+                badge={area.id === 'cluster' ? disruptionCount : 0}
+                onClick={() => navigate(lastPage.current[area.id] || area.pages[0].id)}
               />
             ))}
           </nav>
+          </div>
+          <PageNav
+            area={currentArea}
+            page={activeTab}
+            badges={{ disruptions: disruptionCount }}
+            onSelect={(page) => navigate(page)}
+          />
         </div>
 
         <div key={activeTab} className="space-y-6 animate-tab-in">
@@ -527,7 +568,7 @@ function App() {
               onFocusDone={() => setTabFocus(null)}
               onOpenServing={(pod) => navigate('serving', { pod: `${pod.namespace}/${pod.name}` })}
               onOpenDisruptions={() => navigate('disruptions')}
-              onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
+              onOpenLogs={openLogs}
             />
           )}
 
@@ -535,10 +576,13 @@ function App() {
           {activeTab === 'serving' && (
             <ServingHealth
               onOpenTopology={(focus) => navigate('topology', focus)}
-              onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
+              onOpenLogs={openLogs}
               focusPod={tabFocus?.pod}
             />
           )}
+
+          {/* Gateway page */}
+          {activeTab === 'gateway' && <GatewayPage />}
 
           {/* Workloads Tab */}
           {activeTab === 'workloads' && <WorkloadUsageView />}
@@ -546,8 +590,6 @@ function App() {
           {/* Disruptions Tab */}
           {activeTab === 'disruptions' && <DisruptionTracker />}
 
-          {/* Log Analyzer Tab */}
-          {activeTab === 'logs' && <LogExplorer seedPod={tabFocus?.pod} />}
 
           {/* Recommendations Tab */}
           {activeTab === 'recommendations' && (
@@ -560,6 +602,7 @@ function App() {
 
         </div>
       </main>
+      <LogDrawer pod={logsPod} onClose={closeLogs} />
     </div>
     </CurrencyRegionContext.Provider>
   );

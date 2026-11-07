@@ -17,7 +17,6 @@ import { modelHeadroom } from '../../lib/servingHeadroom';
 import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
-import { GatewayCard } from './GatewayCard';
 import { ModelRow } from './ModelRow';
 import { ServingCard, servingCardId } from './ServingCard';
 import { TriageList } from './TriageList';
@@ -47,9 +46,6 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
   const [expandedOverrides, setExpandedOverrides] = useState({});
   const [highlightKey, setHighlightKey] = useState(null);
   const [servingHistory, setServingHistory] = useState({}); // key: ns/name -> {points, lastIssue}
-  const [gateway, setGateway] = useState(null);
-  const [gatewayView, setGatewayView] = useState('apps'); // 'apps' | 'models'
-  const [gatewaySplit, setGatewaySplit] = useState('app'); // 'app' | 'apikey' | 'team'
 
   const fetchServing = useCallback(async () => {
     setLoading(true);
@@ -80,18 +76,6 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
     }
   }, [trendWindow]);
 
-  // Gateway health is a separate concern (LiteLLM proxy /metrics), fetched on
-  // its own so a gateway failure never blocks the pod health view. null when
-  // no LiteLLM proxy is detected (the card then hides itself).
-  const fetchGateway = useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/v1/serving/gateway`);
-      setGateway(response.data.gateway || null);
-    } catch (err) {
-      setGateway(null);
-    }
-  }, []);
-
   // GPU neighbours come with /api/v1/serving (computed server-side), so the
   // tab no longer downloads the whole topology to find them.
   const placements = useMemo(() => {
@@ -103,8 +87,6 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
   }, [pods]);
 
   usePolling(fetchServing, 30000);
-
-  usePolling(fetchGateway, 30000);
 
   // Trend history is sampled server-side on the 60s cluster interval, so a
   // slower refresh (60s) keeps sparklines current without hammering the API.
@@ -157,7 +139,7 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
     [modelGroups],
   );
 
-  // Deep link (?tab=serving&pod=ns/name, e.g. from a Topology GPU slice):
+  // Deep link (/inference/serving?pod=ns/name, e.g. from a Topology GPU slice):
   // once the pods load, open that replica's row and ring its card.
   const handledFocusPod = useRef(null);
   useEffect(() => {
@@ -272,7 +254,6 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
           </Alert>
         ) : (
           <div className="space-y-4">
-            <GatewayCard gateway={gateway} view={gatewayView} onViewChange={setGatewayView} split={gatewaySplit} onSplitChange={setGatewaySplit} />
             {pods === null ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
