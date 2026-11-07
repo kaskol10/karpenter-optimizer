@@ -3,6 +3,7 @@ import { Badge } from '../ui/badge';
 import { Server, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { GatewayCostHistory } from './GatewayCostHistory';
+import { GatewayFlow } from './GatewayFlow';
 import { formatTokens } from './shared';
 
 // GatewayCard renders aggregated LiteLLM AI-gateway health: a row of stat
@@ -95,7 +96,7 @@ export function GatewayCard({ gateway, view = 'apps', onViewChange, split = 'app
         <>
           <div className="mb-2 flex items-center gap-3">
             <div className="flex items-center gap-1">
-              {(['apps', 'models']).map((v) => (
+              {(['apps', 'models', 'flow']).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -131,7 +132,9 @@ export function GatewayCard({ gateway, view = 'apps', onViewChange, split = 'app
             </div>
           </div>
 
-          {view === 'models' ? (
+          {view === 'flow' ? (
+            <GatewayFlow gateway={gateway} dimField={dim.model} dimLabel={colLabel} />
+          ) : view === 'models' ? (
             (gateway.models || []).length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">

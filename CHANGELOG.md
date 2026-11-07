@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Gateway flow view**: the Gateway page gets a third view, **Flow** (`?view=flow`).
+  - **The chart:** a Sankey from the Split-by values (apps, API keys or teams) on the left to models on the right, with each band sized by tokens or spend (toggle).
+  - **Reading it:** each node shows its total and share, and hovering a band highlights it and gives its exact value. The five largest flows are listed underneath, which is also what screen readers get.
+  - **Readability:** with many apps or models, the smaller ones are grouped into "N other apps" / "N other models" so the chart stays legible.
+  - **Data:** it reads the per-model breakdown `/serving/gateway` already returns, so there are no backend changes. The logic lives in `lib/gatewayFlow.js`, which is in the coverage gate.
 - **Topology time travel survives restarts**: with a database configured, the placement history is also written to Postgres (table `placement_history`, one row per sample: a full keyframe or the changes since the last one, as JSONB) and read back on startup, so a pod restart or a rollout no longer empties the timeline.
   - **Database:** it uses `PLACEMENT_HISTORY_DSN`, else the serving-history DSN, else the gateway's. With the chart's `database.enabled: true`, it shares the existing CNPG instance with no extra settings.
   - **Write failures:** if a write fails, the next sample is stored as a full keyframe, so a lost row never corrupts a rebuilt moment, and the problem is logged once. Without a reachable database, history stays in memory as before.
