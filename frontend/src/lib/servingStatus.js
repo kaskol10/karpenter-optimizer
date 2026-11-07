@@ -57,10 +57,15 @@ export function getServingStatus(pod, peers, placement) {
   let pressure = false;
   let busy = false;
 
-  // Objective pressure signals
-  if (pod.preemptions > 0) {
+  // Objective pressure signals. `preemptions` is vLLM's lifetime counter, so
+  // it only says pressure happened at some point; `preemptionsRecent` (its
+  // increase over the last 5 minutes, computed by the prober) says it is
+  // happening now. Unknown until the second probe, and then not a signal.
+  if (pod.preemptionsRecent > 0) {
     pressure = true;
-    reasons.push(`${pod.preemptions} preemption(s) — requests re-run due to KV cache pressure`);
+    reasons.push(
+      `${pod.preemptionsRecent} preemption(s) in the last 5 min — requests re-run due to KV cache pressure`,
+    );
   }
   if (pod.kvCachePercent != null) {
     if (pod.kvCachePercent >= KV_PRESSURE_PCT) {

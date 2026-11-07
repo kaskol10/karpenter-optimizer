@@ -43,10 +43,18 @@ describe('getServingStatus', () => {
     expect(s.neighbours.count).toBe(1);
   });
 
-  test('preemptions alone mean pressure, even with KV cache below the threshold', () => {
-    const s = getServingStatus({ ...base, preemptions: 2, kvCachePercent: 40, e2eP95Seconds: 1 }, []);
+  test('recent preemptions alone mean pressure, even with KV cache below the threshold', () => {
+    const s = getServingStatus({ ...base, preemptions: 90, preemptionsRecent: 2, kvCachePercent: 40, e2eP95Seconds: 1 }, []);
     expect(s.label).toBe('Under pressure');
-    expect(s.reasons[0]).toMatch(/2 preemption\(s\)/);
+    expect(s.reasons[0]).toMatch(/2 preemption\(s\) in the last 5 min/);
+  });
+
+  test('a lifetime preemption count with none recently is not pressure', () => {
+    expect(getServingStatus({ ...base, preemptions: 90, preemptionsRecent: 0, e2eP95Seconds: 1 }, []).label).toBe('OK');
+  });
+
+  test('a lifetime count with the recent rate still unknown (first probe) is not pressure', () => {
+    expect(getServingStatus({ ...base, preemptions: 90, e2eP95Seconds: 1 }, []).label).toBe('OK');
   });
 
   test('with no peers, a slow first token is the fallback signal', () => {

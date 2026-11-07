@@ -47,9 +47,14 @@ type PodHealth struct {
 	TTFTP95Seconds *float64 `json:"ttftP95Seconds,omitempty"` // p95 from histogram
 	E2ESeconds     *float64 `json:"e2eSeconds,omitempty"`     // mean end-to-end request latency
 	E2EP95Seconds  *float64 `json:"e2eP95Seconds,omitempty"`  // p95 end-to-end request latency
-	Preemptions    int64    `json:"preemptions"`
-	TokensPerSec   *float64 `json:"tokensPerSec,omitempty"`   // input+output, from counter diffs
-	RequestsPerSec *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
+	Preemptions    int64    `json:"preemptions"`              // lifetime counter since the server started
+	// PreemptionsRecent is how many preemptions happened in roughly the last
+	// PreemptionWindow (the increase of the lifetime counter). nil until the
+	// pod has been probed twice. Use this, not Preemptions, to judge whether
+	// a server is under memory pressure now.
+	PreemptionsRecent *int64   `json:"preemptionsRecent,omitempty"`
+	TokensPerSec      *float64 `json:"tokensPerSec,omitempty"`   // input+output, from counter diffs
+	RequestsPerSec    *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
 
 	// Placement (filled server-side after probing, not from the pod's own metrics).
 	Node             string      `json:"node,omitempty"`         // node name (spec.nodeName)
@@ -87,9 +92,18 @@ type NeighbourPod struct {
 // Prober holds the last counter samples per pod so rates (tokens/sec) can be
 // derived from diffs between successive probes.
 type Prober struct {
-	mu   sync.Mutex
-	last map[string]*rateState
-	http *http.Client
+	mu          sync.Mutex
+	last        map[string]*rateState
+	preemptions map[string][]counterSample // recent preemption counter samples per pod
+	http        *http.Client
+}
+
+// PreemptionWindow is how far back PodHealth.PreemptionsRecent looks.
+const PreemptionWindow = 5 * time.Minute
+
+type counterSample struct {
+	ts    time.Time
+	value float64
 }
 
 type rateState struct {
@@ -103,8 +117,9 @@ type rateState struct {
 // NewProber returns a Prober with a 5s HTTP timeout.
 func NewProber() *Prober {
 	return &Prober{
-		last: make(map[string]*rateState),
-		http: &http.Client{Timeout: 5 * time.Second},
+		last:        make(map[string]*rateState),
+		preemptions: make(map[string][]counterSample),
+		http:        &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -252,6 +267,7 @@ func (p *Prober) applyVLLMMetrics(h *PodHealth, samples []promSample) {
 	}
 	if v, ok := counterValue(counters, "num_preemptions_total"); ok {
 		h.Preemptions = int64(v)
+		p.updatePreemptions(h, v, time.Now())
 	}
 	if mean, ok := histogramMean(histogramVariants(histograms, "time_to_first_token_seconds")); ok {
 		h.TTFTSeconds = &mean
@@ -306,6 +322,61 @@ func (p *Prober) updateRates(h *PodHealth, samples []promSample) {
 		}
 	}
 	p.last[key] = &rateState{tokens: tokens, hasTokens: hasPrompt || hasGen, requests: requests, hasRequests: hasRequests, ts: now}
+}
+
+// updatePreemptions records the pod's lifetime preemption counter and sets
+// PreemptionsRecent to its increase over the last PreemptionWindow. The window
+// is time-based, so it does not depend on how often the pod is probed (the
+// endpoint and the history sampler share this prober).
+func (p *Prober) updatePreemptions(h *PodHealth, value float64, now time.Time) {
+	key := podKey(h.Namespace, h.Name)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	hist := p.preemptions[key]
+	if inc, ok := recentIncrease(hist, now, value, PreemptionWindow); ok {
+		n := int64(inc)
+		h.PreemptionsRecent = &n
+	}
+	p.preemptions[key] = trimSamples(append(hist, counterSample{ts: now, value: value}), now, PreemptionWindow)
+}
+
+// recentIncrease returns how much a cumulative counter grew over roughly the
+// last window: the current value minus the newest earlier sample taken at or
+// before now-window (or the oldest sample, when history is shorter than the
+// window). ok is false when there is no earlier sample. A counter that went
+// down was reset (server restart), so the increase counts from zero.
+func recentIncrease(hist []counterSample, now time.Time, current float64, window time.Duration) (float64, bool) {
+	if len(hist) == 0 {
+		return 0, false
+	}
+	cutoff := now.Add(-window)
+	base := hist[0]
+	for _, s := range hist {
+		if s.ts.After(cutoff) {
+			break
+		}
+		base = s
+	}
+	inc := current - base.value
+	if inc < 0 {
+		inc = current
+	}
+	return inc, true
+}
+
+// trimSamples drops samples that can no longer be a baseline: everything
+// older than now-window except the newest such sample.
+func trimSamples(hist []counterSample, now time.Time, window time.Duration) []counterSample {
+	cutoff := now.Add(-window)
+	first := 0
+	for i, s := range hist {
+		if s.ts.After(cutoff) {
+			break
+		}
+		first = i
+	}
+	return hist[first:]
 }
 
 // --- Prometheus text parsing ---

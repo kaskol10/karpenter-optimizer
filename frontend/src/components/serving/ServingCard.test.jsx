@@ -73,9 +73,15 @@ describe('ServingCard', () => {
 
   test('a metric help button opens its definition next to the number', async () => {
     renderCard(servingPods.r1);
-    expect(screen.queryByText(/Should stay near 0/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Should stay at 0/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'What is Preempt?' }));
-    expect(await screen.findByText(/Should stay near 0/)).toBeInTheDocument();
+    expect(await screen.findByText(/Should stay at 0/)).toBeInTheDocument();
+  });
+
+  test('the Preempt tile shows the last 5 minutes, with the lifetime total below', () => {
+    renderCard(servingPods.r1);
+    expect(screen.getByText('17 total')).toBeInTheDocument();
+    expect(screen.getByText('OK')).toBeInTheDocument();
   });
 
   test('an offline replica shows its error instead of metrics', () => {
