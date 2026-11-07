@@ -17,6 +17,10 @@ export const SLOW_TTFT_FLOOR_SEC = 3; // no-peer fallback: first token > 3s
 // the pods it shares a physical GPU with.
 // `meaning` is a plain-English "what does this state mean", and `fixes` is a
 // short list of concrete things to try.
+// SEVERITY orders statuses from most to least urgent (lower = worse), for
+// the needs-attention sort and anything else that ranks servers by health.
+export const SEVERITY = { offline: 0, pressure: 1, busy: 2, slow: 3, ok: 4 };
+
 export const STATUS_FIXES = {
   pressure: [
     'Add GPU capacity (more/bigger nodes for this model)',
@@ -40,6 +44,7 @@ export function getServingStatus(pod, peers, placement) {
   if (!pod.online) {
     return {
       label: 'offline',
+      severity: SEVERITY.offline,
       tone: 'red',
       reasons: [pod.error || 'unreachable'],
       meaning: 'The server did not answer its /v1/models or /metrics endpoint.',
@@ -112,6 +117,7 @@ export function getServingStatus(pod, peers, placement) {
   if (pressure) {
     return {
       label: 'Under pressure',
+      severity: SEVERITY.pressure,
       tone: 'red',
       reasons,
       limited,
@@ -123,6 +129,7 @@ export function getServingStatus(pod, peers, placement) {
   if (busy) {
     return {
       label: 'Busy',
+      severity: SEVERITY.busy,
       tone: 'amber',
       reasons,
       limited,
@@ -134,6 +141,7 @@ export function getServingStatus(pod, peers, placement) {
   if (reasons.length > 0) {
     return {
       label: 'Slow',
+      severity: SEVERITY.slow,
       tone: 'orange',
       reasons,
       limited,
@@ -144,6 +152,7 @@ export function getServingStatus(pod, peers, placement) {
   }
   return {
     label: 'OK',
+    severity: SEVERITY.ok,
     tone: 'green',
     reasons: limited ? ['limited data (first sample)'] : [],
     limited,
@@ -152,4 +161,19 @@ export function getServingStatus(pod, peers, placement) {
       : 'No problems detected from the current metrics: no queue, no preemptions, headroom in GPU memory, and latency in line with its peers.',
     fixes: STATUS_FIXES.ok,
   };
+}
+
+// sortByAttention orders serving pods worst-first (offline, under pressure,
+// busy, slow, then healthy), so the pod that needs a human is at the top.
+// Ties go to the busier server (tokens/s), then to the name for stability.
+// Status is judged against the whole fleet, exactly as the cards judge it.
+export function sortByAttention(pods) {
+  const severity = new Map(pods.map((p) => [p, getServingStatus(p, pods).severity]));
+  const name = (p) => `${p.namespace}/${p.name}`;
+  return pods.slice().sort(
+    (a, b) =>
+      severity.get(a) - severity.get(b) ||
+      (b.tokensPerSec ?? -1) - (a.tokensPerSec ?? -1) ||
+      name(a).localeCompare(name(b)),
+  );
 }

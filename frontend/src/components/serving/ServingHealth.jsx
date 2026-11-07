@@ -9,15 +9,15 @@ import { EmptyState } from '../ui/empty-state';
 import { RefreshCw, Loader2, Server, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { findGpuNeighbours } from '../../lib/servingPlacement';
+import { sortByAttention } from '../../lib/servingStatus';
 import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { GatewayCard } from './GatewayCard';
-import { MetricExplainer } from './MetricExplainer';
 import { ModelUsageChart } from './ModelUsageChart';
 import { ServingCard } from './ServingCard';
 
-const SERVING_SORTS = ['throughput', 'requests', 'queue', 'name'];
+const SERVING_SORTS = ['attention', 'throughput', 'requests', 'queue', 'name'];
 
 const TREND_WINDOWS = ['1h', '6h', '24h', '7d'];
 
@@ -27,7 +27,9 @@ function ServingHealth({ onOpenTopology }) {
   const [topologyNodes, setTopologyNodes] = useState(null); // for GPU co-location
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [sortBy, setSortBy] = useUrlParam('sort', 'throughput', SERVING_SORTS);
+  // Default: worst first, so a struggling replica is never at the bottom of
+  // the grid. ?sort=throughput etc. still selects the other orders.
+  const [sortBy, setSortBy] = useUrlParam('sort', 'attention', SERVING_SORTS);
   const [trendWindow, setTrendWindow] = useUrlParam('trend', '6h', TREND_WINDOWS);
   const [servingHistory, setServingHistory] = useState({}); // key: ns/name -> {points, lastIssue}
   const [gateway, setGateway] = useState(null);
@@ -107,6 +109,7 @@ function ServingHealth({ onOpenTopology }) {
 
   const sortedPods = useMemo(() => {
     if (!pods) return pods;
+    if (sortBy === 'attention') return sortByAttention(pods);
     const byThroughput = (p) => (p.tokensPerSec ?? -1);
     const byRequests = (p) => (p.requestsPerSec ?? -1);
     const byQueue = (p) => (p.running || 0) + (p.waiting || 0);
@@ -152,10 +155,11 @@ function ServingHealth({ onOpenTopology }) {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-[180px]" aria-label="Sort servers">
+              <SelectTrigger className="w-[210px]" aria-label="Sort servers">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="attention">Sort: Needs attention</SelectItem>
                 <SelectItem value="throughput">Sort: Throughput</SelectItem>
                 <SelectItem value="requests">Sort: Requests/s</SelectItem>
                 <SelectItem value="queue">Sort: Active load</SelectItem>
@@ -187,7 +191,6 @@ function ServingHealth({ onOpenTopology }) {
           </Alert>
         ) : (
           <div className="space-y-4">
-            <MetricExplainer />
             <GatewayCard gateway={gateway} view={gatewayView} onViewChange={setGatewayView} split={gatewaySplit} onSplitChange={setGatewaySplit} />
             {pods === null ? (
               <div className="flex flex-col items-center justify-center py-12">

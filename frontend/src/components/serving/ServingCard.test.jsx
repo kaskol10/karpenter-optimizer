@@ -65,6 +65,19 @@ describe('ServingCard', () => {
     expect(screen.getByRole('button', { name: /Show placement in topology/ })).toBeInTheDocument();
   });
 
+  test('the latency split shows first token vs generation on the model scale', () => {
+    renderCard(servingPods.r2);
+    expect(screen.getByRole('img', { name: 'First token 0.21s, generation 4.9s' })).toBeInTheDocument();
+    expect(screen.getByText('5.1s mean')).toBeInTheDocument();
+  });
+
+  test('a metric help button opens its definition next to the number', async () => {
+    renderCard(servingPods.r1);
+    expect(screen.queryByText(/Should stay near 0/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'What is Preempt?' }));
+    expect(await screen.findByText(/Should stay near 0/)).toBeInTheDocument();
+  });
+
   test('an offline replica shows its error instead of metrics', () => {
     renderCard(servingPods.offline, { withPlacement: false });
     expect(screen.getByText('offline')).toBeInTheDocument();

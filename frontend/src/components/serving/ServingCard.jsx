@@ -6,6 +6,7 @@ import { Cpu, Clock, AlertTriangle, Network, ArrowRight } from 'lucide-react';
 import { cn, shortGpuUuid, formatGPUMem } from '../../lib/utils';
 import { getServingStatus } from '../../lib/servingStatus';
 import { neighbourPods } from '../../lib/servingPlacement';
+import { latencySplit, formatSeconds } from '../../lib/servingLatency';
 import { ServingTrends } from './ServingTrends';
 import { MetricTip, STATUS_TONE_CLASSES, CopyableNode } from './shared';
 import { MetaLine } from '../NodeBits';
@@ -60,6 +61,47 @@ function DiagnosisPanel({ status, onShowInTopology }) {
           <ArrowRight className="h-3 w-3" aria-hidden="true" />
         </button>
       )}
+    </div>
+  );
+}
+
+// LatencySplit shows where a replica's mean response time goes: waiting for
+// the first token (prefill) vs generating the rest (decode), on a scale shared
+// with the other replicas of the same model so a slow one sticks out.
+const LATENCY_SPLIT_TIP =
+  'Mean time to first token (prefill: queueing and reading the prompt) and mean time spent generating the rest (decode). ' +
+  'The bar shares its scale with the other replicas of this model, so a slow replica sticks out. ' +
+  'A long first token points at queueing or long prompts; long generation points at GPU contention or long answers.';
+
+function LatencySplit({ pod, peers }) {
+  const split = latencySplit(pod, peers);
+  if (!split) return null;
+  const first = formatSeconds(split.ttft);
+  const gen = formatSeconds(split.decode);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <MetricTip label="Latency split" tip={LATENCY_SPLIT_TIP} />
+        <span className="font-mono">{formatSeconds(split.total)} mean</span>
+      </div>
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={`First token ${first}, generation ${gen}`}
+      >
+        <div className="bg-sky-500" style={{ width: `${split.ttftPct}%` }} />
+        <div className="bg-violet-500" style={{ width: `${split.decodePct}%` }} />
+      </div>
+      <div className="flex gap-3 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-sky-500" aria-hidden="true" />
+          first token {first}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-violet-500" aria-hidden="true" />
+          generation {gen}
+        </span>
+      </div>
     </div>
   );
 }
@@ -202,13 +244,13 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <MetricTip label="Running" tip="Requests currently being processed by the server."><Cpu className="h-3 w-3" /></MetricTip>
+                  <MetricTip label="Running" tip="Requests being processed right now. Compare with Waiting, the requests queued for a free slot."><Cpu className="h-3 w-3" /></MetricTip>
                 </p>
                 <p className="text-lg font-bold">{pod.running ?? 0}</p>
               </div>
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground">
-                  <MetricTip label="Waiting" tip="Requests queued, waiting for a free slot. Consistently > 0 means the server is overloaded." />
+                  <MetricTip label="Waiting" tip="Requests queued for a free slot. Above 0 for a sustained period means the server is overloaded: add replicas, or raise --max-num-seqs if GPU memory allows." />
                 </p>
                 <p className={cn("text-lg font-bold", (pod.waiting ?? 0) > 0 && "text-yellow-600")}>
                   {pod.waiting ?? 0}
@@ -216,7 +258,7 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
               </div>
               <div className="rounded-md bg-card/60 py-2">
                 <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <MetricTip label="Preempt" tip="Requests evicted from memory and re-run because the KV cache ran out. Rising preemptions = the server is under memory pressure."><Clock className="h-3 w-3" /></MetricTip>
+                  <MetricTip label="Preempt" tip="Requests evicted from GPU memory and re-run because the KV cache ran out. Should stay near 0; a rising count means memory pressure and silently repeated work, which adds latency."><Clock className="h-3 w-3" /></MetricTip>
                 </p>
                 <p className="text-lg font-bold">{pod.preemptions ?? 0}</p>
               </div>
@@ -262,6 +304,8 @@ export function ServingCard({ pod, peers, history, placement, onOpenTopology }) 
                 </span>
               )}
             </div>
+
+            <LatencySplit pod={pod} peers={peers || [pod]} />
 
             <ServingTrends history={history} />
           </div>

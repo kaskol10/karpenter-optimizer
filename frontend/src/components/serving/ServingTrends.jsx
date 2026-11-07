@@ -115,6 +115,10 @@ export function ServingTrends({ history }) {
               No issues in the window
             </p>
           )}
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Sampled every 60s. An issue is offline, queued requests, preemptions or KV cache at 85%+.
+            History is kept in memory unless durable serving history is configured.
+          </p>
         </div>
       )}
     </div>
