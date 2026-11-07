@@ -40,6 +40,8 @@ func (s *Server) getServing(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	// Only the endpoint needs neighbours; the history sampler skips this.
+	s.attachGPUNeighbours(ctx, health)
 	storeServingCache(health)
 	c.JSON(200, gin.H{"pods": health})
 }

@@ -58,6 +58,30 @@ type PodHealth struct {
 	GPUModel         string      `json:"gpuModel,omitempty"`
 	GPUCapacity      int         `json:"gpuCapacity,omitempty"`
 	GPUDevices       []GPUDevice `json:"gpuDevices,omitempty"` // physical cards from HAMi annotation
+
+	// GPUNeighbours lists the physical GPUs this pod shares with other pods,
+	// and who those pods are (the usual cause of one replica being slower than
+	// its peers). nil means it was not computed (the field is null in JSON);
+	// an empty slice means the pod is alone on its GPU(s).
+	GPUNeighbours []GPUShare `json:"gpuNeighbours"`
+	// GPUNeighboursPrecise is true when neighbours were matched by HAMi device
+	// UUID, false when inferred (two GPU pods on a single-GPU node must be
+	// time-slicing the same card).
+	GPUNeighboursPrecise bool `json:"gpuNeighboursPrecise,omitempty"`
+}
+
+// GPUShare is one physical GPU a serving pod shares, and the other pods on it.
+type GPUShare struct {
+	UUID  string         `json:"uuid,omitempty"`
+	Index int            `json:"index"`
+	Pods  []NeighbourPod `json:"pods"`
+}
+
+// NeighbourPod is another pod placed on a shared GPU.
+type NeighbourPod struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	MemoryMiB int    `json:"memoryMiB,omitempty"` // its share of that GPU's memory, when known
 }
 
 // Prober holds the last counter samples per pod so rates (tokens/sec) can be

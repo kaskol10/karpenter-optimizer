@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import axios from 'axios';
 import ServingHealth from './ServingHealth';
-import { allServingPods, topologyNodes } from '../../test/fixtures';
+import { allServingPods } from '../../test/fixtures';
 import { resetPollingClock } from '../../lib/pollingClock';
 
 vi.mock('axios', () => ({ default: { get: vi.fn() } }));
@@ -12,7 +12,6 @@ const RESPONSES = {
   '/api/v1/serving': { pods: allServingPods },
   '/api/v1/serving/history': { pods: [] },
   '/api/v1/serving/gateway': { gateway: null },
-  '/api/v1/topology': { nodes: topologyNodes },
 };
 
 function setUrl(search) {
@@ -47,6 +46,13 @@ describe('ServingHealth', () => {
     const order = await cardOrder();
     expect(order[0]).toBe('llm/llama-70b-r2');
     expect(screen.getByRole('combobox', { name: 'Sort servers' })).toHaveTextContent('Needs attention');
+  });
+
+  test('GPU neighbours come with /serving; the tab never downloads the topology', async () => {
+    setUrl('?tab=serving');
+    render(<ServingHealth />);
+    expect(await screen.findByText('shares c3c3c3c3 with batch/embed-worker-7f9c')).toBeInTheDocument();
+    expect(axios.get.mock.calls.map(([url]) => url).filter((u) => u.includes('/topology'))).toEqual([]);
   });
 
   test('?sort=throughput keeps the throughput order', async () => {

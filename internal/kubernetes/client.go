@@ -1349,20 +1349,32 @@ func (p PodInfo) GPUDeviceMemoryMiB() float64 {
 	return total
 }
 
-// GetPodsOnNodes gets all pods running on the specified nodes.
-// It fetches per-node so pod resource requests, limits, and QoS are populated (required for topology and cost views).
+// GetPodsOnNodes gets all pods running on the specified nodes, with resource
+// requests, limits, QoS and GPU placement populated (required for topology,
+// cost and serving views).
+//
+// It lists pods once and groups them by node. Field selectors only accept a
+// single spec.nodeName, so asking per node meant one cluster-wide list per
+// node: N full pod lists for an N-node topology.
 func (c *Client) GetPodsOnNodes(ctx context.Context, nodeNames map[string]bool) ([]PodInfo, error) {
-	var allPods []PodInfo
-
+	if len(nodeNames) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(nodeNames))
 	for nodeName := range nodeNames {
-		pods, err := c.getPodsOnNode(ctx, nodeName)
-		if err != nil {
-			c.debugLog("Warning: failed to get pods for node %s: %v\n", nodeName, err)
-			continue
-		}
-		allPods = append(allPods, pods...)
+		names = append(names, nodeName)
+	}
+	byNode, err := c.getPodsOnNodes(ctx, names)
+	if err != nil {
+		return nil, err
 	}
 
+	var allPods []PodInfo
+	for _, nodeName := range names {
+		if np := byNode[nodeName]; np != nil {
+			allPods = append(allPods, np.infos...)
+		}
+	}
 	return allPods, nil
 }
 
@@ -2383,18 +2395,6 @@ func buildPodInfoFromObject(pod *corev1.Pod) (*PodInfo, *podCheckInfo) {
 type nodePods struct {
 	infos  []PodInfo
 	checks []*podCheckInfo
-}
-
-// getPodsOnNode gets pods that were running on a specific node
-func (c *Client) getPodsOnNode(ctx context.Context, nodeName string) ([]PodInfo, error) {
-	byNode, err := c.getPodsOnNodes(ctx, []string{nodeName})
-	if err != nil {
-		return nil, err
-	}
-	if np := byNode[nodeName]; np != nil {
-		return np.infos, nil
-	}
-	return nil, nil
 }
 
 // getPodsOnNodes fetches pods for the given nodes in a single paginated API

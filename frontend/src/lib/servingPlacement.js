@@ -96,6 +96,30 @@ export function findGpuNeighbours(servingPod, nodes) {
   return { node: node.name, precise: false, shared: [], unplaced: others };
 }
 
+// placementFromServing reads the GPU neighbours that /api/v1/serving computes
+// server-side (gpuNeighbours, gpuNeighboursPrecise) into the same shape as
+// findGpuNeighbours, so the Serving tab needs no topology download. Returns
+// null when the backend did not compute them (null/absent: unknown, as
+// opposed to [] which means alone).
+export function placementFromServing(servingPod) {
+  if (!servingPod || !Array.isArray(servingPod.gpuNeighbours)) return null;
+  return {
+    node: servingPod.node || '',
+    precise: !!servingPod.gpuNeighboursPrecise,
+    shared: servingPod.gpuNeighbours.map((share) => {
+      const device = { uuid: share.uuid || '', index: share.index ?? 0 };
+      return {
+        gpu: { key: gpuKey(device), label: gpuLabel(device), uuid: device.uuid, index: device.index },
+        neighbours: (share.pods || []).map((p) => ({
+          pod: { namespace: p.namespace, name: p.name },
+          memMiB: p.memoryMiB || 0,
+        })),
+      };
+    }),
+    unplaced: [],
+  };
+}
+
 // neighbourPods flattens a placement into the unique neighbour pods.
 export function neighbourPods(placement) {
   if (!placement) return [];

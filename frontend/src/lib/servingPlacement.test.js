@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { findGpuNeighbours, describeNeighbours, neighbourPods, gpuKey } from './servingPlacement';
+import { findGpuNeighbours, describeNeighbours, neighbourPods, gpuKey, placementFromServing } from './servingPlacement';
+import { allServingPods, servingPods, topologyNodes as fixtureTopology } from '../test/fixtures';
 
 const gpuA = { uuid: 'GPU-aaaaaaaa-1111-2222-3333-444444444444', index: 0, memoryMiB: 20000 };
 const gpuB = { uuid: 'GPU-bbbbbbbb-1111-2222-3333-444444444444', index: 0, memoryMiB: 20000 };
@@ -91,5 +92,51 @@ describe('describeNeighbours', () => {
       gpuText: 'aaaaaaaa',
       count: 3,
     });
+  });
+});
+
+describe('placementFromServing', () => {
+  test('null when the backend did not compute neighbours', () => {
+    expect(placementFromServing(servingPods.offline)).toBeNull();
+    expect(placementFromServing({ namespace: 'a', name: 'b' })).toBeNull();
+    expect(placementFromServing(null)).toBeNull();
+  });
+
+  test('an empty list means alone', () => {
+    const p = placementFromServing(servingPods.r1);
+    expect(p.shared).toEqual([]);
+    expect(describeNeighbours(p)).toBeNull();
+  });
+
+  test('reads the server-side shares into the findGpuNeighbours shape', () => {
+    const p = placementFromServing(servingPods.r2);
+    expect(p.precise).toBe(true);
+    expect(p.node).toBe('ip-10-0-7-88');
+    expect(p.shared).toHaveLength(1);
+    expect(p.shared[0].gpu).toEqual({
+      key: 'GPU-c3c3c3c3-0000-0000-0000-000000000000',
+      label: 'c3c3c3c3',
+      uuid: 'GPU-c3c3c3c3-0000-0000-0000-000000000000',
+      index: 0,
+    });
+    expect(p.shared[0].neighbours).toEqual([
+      { pod: { namespace: 'batch', name: 'embed-worker-7f9c' }, memMiB: 14000 },
+    ]);
+  });
+
+  test('shares without a UUID fall back to the index', () => {
+    const p = placementFromServing({ node: 'n', gpuNeighbours: [{ index: 0, pods: [{ namespace: 'ml', name: 't' }] }] });
+    expect(p.precise).toBe(false);
+    expect(p.shared[0].gpu).toMatchObject({ key: 'idx-0', label: 'GPU 0' });
+    expect(p.shared[0].neighbours[0].memMiB).toBe(0);
+  });
+
+  // The backend (internal/api/serving_neighbours.go) and findGpuNeighbours
+  // must agree; the fixtures encode both views of the same cluster.
+  test.each(allServingPods.map((p) => [p.name, p]))('agrees with findGpuNeighbours for %s', (_name, pod) => {
+    const fromServer = placementFromServing(pod);
+    const fromTopology = findGpuNeighbours(pod, fixtureTopology);
+    expect(describeNeighbours(fromServer)).toEqual(describeNeighbours(fromTopology));
+    expect(fromServer.shared.map((sh) => sh.gpu.key)).toEqual(fromTopology.shared.map((sh) => sh.gpu.key));
   });
 });
