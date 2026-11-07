@@ -2,12 +2,14 @@ import React from 'react';
 import { Gpu } from 'lucide-react';
 import { Input } from '../ui/input';
 import { cn } from '../../lib/utils';
-import { clusterFit, formatMiB, parseSize } from '../../lib/gpuFit';
+import { cardPhrase, clusterFit, formatMiB, parseSize } from '../../lib/gpuFit';
 
 // FitCheck is the "Will it fit?" box: type a GPU memory size and every card
 // with that much free on one GPU lights up in the node cards below. The
-// summary counts the nodes currently in view.
-export function FitCheck({ value, onChange, nodes }) {
+// summary counts the nodes currently in view. With replicas it becomes the
+// placement planner (lib/placementPlanner.js): where each replica would go,
+// spread across zones and nodes, and whether the pool must grow.
+export function FitCheck({ value, onChange, nodes, replicas = '1', onReplicasChange, plan }) {
   const requestMiB = parseSize(value);
   const invalid = value.trim() !== '' && requestMiB == null;
   const fit = requestMiB ? clusterFit(nodes, requestMiB) : null;
@@ -46,10 +48,40 @@ export function FitCheck({ value, onChange, nodes }) {
         aria-describedby="gpu-fit-summary"
         className="h-8 w-32"
       />
+      {onReplicasChange && (
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          ×
+          <Input
+            type="number"
+            min={1}
+            max={64}
+            value={replicas}
+            onChange={(e) => onReplicasChange(e.target.value)}
+            aria-label="Replicas"
+            className="h-8 w-16"
+          />
+          replicas
+        </label>
+      )}
       <p id="gpu-fit-summary" className={cn('text-xs', tone)} aria-live="polite">
         {summary}
         <span className="text-muted-foreground"> Memory only: HAMi also limits cores and tasks per card.</span>
       </p>
+      {plan && plan.replicas > 1 && (
+        <div className="basis-full text-xs" aria-label="Placement plan">
+          <p className={cn('font-medium', plan.complete ? 'text-foreground' : 'text-amber-700 dark:text-amber-400')}>{plan.message}</p>
+          {plan.placed.length > 0 && (
+            <ol className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+              {plan.placed.map((p) => (
+                <li key={p.replica}>
+                  <span className="font-semibold text-foreground">R{p.replica}</span> {p.node} · {cardPhrase(p.label)}
+                  {p.zone ? ` · ${p.zone}` : ''}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
     </div>
   );
 }

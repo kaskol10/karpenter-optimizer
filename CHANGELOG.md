@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Topology: drain simulator**: pick **Simulate drain** in any node's Actions menu, for one node or several (`?drain=a,b`, shareable). A panel answers "what happens if I drain these?":
+  - **Moves:** where each pod would land, re-placed largest first on the remaining nodes, preferring the same NodePool and fitting CPU, memory and per-GPU memory (a fractional HAMi pod needs room on one card, a whole-GPU pod needs empty cards).
+  - **Leftovers:** pods that would not fit anywhere are listed in red with the reason; DaemonSet pods go with the node.
+  - **Saving:** the monthly saving from the nodes' prices.
+  - **Display:** drained nodes are greyed out at every zoom level. The result is labelled approximate and lists what it does not model (taints, affinity, topology spread, PodDisruptionBudgets, Karpenter launching nodes). Read-only: nothing changes in the cluster.
+- **Topology: placement planner**: the Will it fit? box gains a replicas field (`?replicas=2`).
+  - **Placement:** the planner ranks GPUs by free memory on one card, then places replicas spreading across zones, then nodes, then onto the tightest card that fits.
+  - **On the cards:** planned cards get R1, R2… badges.
+  - **Verdict:** it says "fits across N nodes in M zones", warns when every replica would share one node or zone, and says when the pool must grow. Nodes in a drain simulation are not offered.
+- **Topology code**: `TopologyView.jsx` drops from 552 to 410 lines: the node-card list moved to `NodeList.jsx`, data loading to `hooks/useTopologyData.js`, and the what-ifs to `hooks/useDrainPlan.js`.
 - **Topology: requested vs used**: when a usage source is available, the Topology tab shows what pods actually use next to what they request. This is display only; recommendations keep their no-Prometheus rule.
   - **Sources:**
     - **metrics-server** is read automatically, giving live CPU and memory per pod. It is read through the existing Kubernetes client, so there is no new dependency.

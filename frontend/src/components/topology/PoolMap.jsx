@@ -16,7 +16,7 @@ function MiniBar({ label, value }) {
 
 // PoolMap is the NodePool zoom level: the pool's nodes as larger tiles with
 // their name, instance type, the lens value and request bars.
-export function PoolMap({ nodes, lens, ctx, onSelectNode }) {
+export function PoolMap({ nodes, lens, ctx, onSelectNode, drained = new Set() }) {
   const [group] = groupNodes(nodes);
   if (!group) return null;
   return (
@@ -33,10 +33,10 @@ export function PoolMap({ nodes, lens, ctx, onSelectNode }) {
                   <button
                     type="button"
                     onClick={() => onSelectNode(node.name)}
-                    aria-label={`${node.name}: ${c.value}`}
+                    aria-label={`${node.name}: ${c.value}${drained.has(node.name) ? ' (simulated drain)' : ''}`}
                     title={c.title}
                     className="w-full rounded-md border border-l-[6px] bg-card p-2 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    style={{ borderLeftColor: c.fill }}
+                    style={{ borderLeftColor: c.fill, opacity: drained.has(node.name) ? 0.4 : undefined }}
                   >
                     <span className="block truncate font-mono text-xs font-medium">{node.name}</span>
                     <span className="flex justify-between text-[10px] text-muted-foreground">

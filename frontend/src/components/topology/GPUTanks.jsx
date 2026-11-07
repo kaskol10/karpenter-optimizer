@@ -22,7 +22,7 @@ const FIT_RING = {
 // faded and unnamed. With a "Will it fit?" size, cards with room are ringed
 // green ("maybe", amber dashed, when an unplaced pod could be on that card)
 // and the rest fade.
-export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu, onSelectGpu, gpuUsage }) {
+export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu, onSelectGpu, gpuUsage, planned = [] }) {
   const frag = fragmentation(layout);
   const focusedKeys = new Set(
     layout.gpus
@@ -41,6 +41,8 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
       <div className="flex gap-2 overflow-x-auto p-1" role="list" aria-label="GPUs">
         {layout.gpus.map((gpu) => {
           const fit = fitMiB ? gpuFits(gpu, fitMiB) : null;
+          // Placement plan: which replicas the planner put on this card.
+          const replicas = planned.filter((p) => p.key === gpu.key).map((p) => p.replica);
           const focused = focusedKeys.has(gpu.key);
           const usedShare = gpu.totalMiB > 0 ? gpu.usedMiB / gpu.totalMiB : 0;
           // Framebuffer actually in use (DCGM), when Prometheus reports it.
@@ -58,7 +60,7 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
             <div
               key={gpu.key}
               role="listitem"
-              aria-label={`GPU ${gpu.label}: ${formatMiB(gpu.freeMiB)} free${fit === 'yes' ? ', fits' : fit === 'maybe' ? ', may fit' : ''}`}
+              aria-label={`GPU ${gpu.label}: ${formatMiB(gpu.freeMiB)} free${fit === 'yes' ? ', fits' : fit === 'maybe' ? ', may fit' : ''}${replicas.length ? `, planned replica ${replicas.join(' and ')}` : ''}`}
               className={cn('flex min-w-[56px] sm:min-w-[76px] max-w-[160px] flex-1 flex-col items-stretch gap-1 transition-opacity', fit === 'no' && 'opacity-40')}
             >
               <div
@@ -114,6 +116,11 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
                     style={{ bottom: `${actualShare * 100}%` }}
                     data-testid="gpu-used-line"
                   />
+                )}
+                {replicas.length > 0 && (
+                  <span className="absolute right-1 top-1 z-10 rounded bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                    {replicas.map((r) => `R${r}`).join(' ')}
+                  </span>
                 )}
                 {usedShare < 0.85 && (
                   <span className="absolute inset-x-0 top-1 text-center text-[10px] text-muted-foreground">
