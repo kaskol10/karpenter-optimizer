@@ -28,6 +28,7 @@ export function NodeCard({
   copiedKey,
   cardRef,
   fitMiB = null,
+  onSelectGpu,
 }) {
   const nodePods = node.pods || [];
   const isFocusNode = !!focus && focus.node === node.name;
@@ -84,6 +85,7 @@ export function NodeCard({
                   copiedKey={copiedKey}
                   focusPodKey={focusPodKey}
                   focusGpu={isFocusNode ? focus.gpu || null : null}
+                  onSelectGpu={onSelectGpu}
                 />
               ) : (
                 <NodePodBar

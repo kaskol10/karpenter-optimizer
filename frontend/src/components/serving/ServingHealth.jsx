@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -33,7 +33,7 @@ const podKeyOf = (p) => `${p.namespace}/${p.name}`;
 // ServingHealth lists LLM serving pods (vLLM/sglang) and their inference
 // health: a triage list of what needs a human, then one row per model
 // (expanding into its replica cards), or the flat replica grid (?view=replicas).
-function ServingHealth({ onOpenTopology, onOpenLogs }) {
+function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
   const [pods, setPods] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -156,6 +156,17 @@ function ServingHealth({ onOpenTopology, onOpenLogs }) {
     },
     [modelGroups],
   );
+
+  // Deep link (?tab=serving&pod=ns/name, e.g. from a Topology GPU slice):
+  // once the pods load, open that replica's row and ring its card.
+  const handledFocusPod = useRef(null);
+  useEffect(() => {
+    if (!focusPod || !pods || handledFocusPod.current === focusPod) return;
+    const pod = pods.find((p) => podKeyOf(p) === focusPod);
+    if (!pod) return;
+    handledFocusPod.current = focusPod;
+    focusCard(pod);
+  }, [focusPod, pods, focusCard]);
 
   useEffect(() => {
     if (!highlightKey) return undefined;

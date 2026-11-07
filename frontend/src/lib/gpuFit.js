@@ -40,6 +40,15 @@ export function formatMiB(mib) {
 const isGpuPod = (pod) => (pod.requests?.gpu || 0) > 0 || (pod.requests?.gpuMemMiB || 0) > 0;
 const shortUuid = (uuid) => (uuid || '').replace(/^GPU-/, '').slice(0, 8);
 
+// shortLabelFor names a card key the way the tanks label it: the first 8
+// characters of a HAMi UUID, "GPU <n>" for an index-only key, "GPU" otherwise.
+export function shortLabelFor(key) {
+  if (!key) return 'GPU';
+  if (key.startsWith('idx-')) return `GPU ${key.slice(4)}`;
+  if (key.startsWith('unknown-')) return 'GPU (no uuid)';
+  return shortUuid(key);
+}
+
 // nodeGpus lays a node's GPU pods out on its cards:
 //   { perGpuMiB, gpus: [{ key, label, uuid, index, totalMiB, usedMiB, freeMiB,
 //                          segments: [{ pod, memMiB, placed }], known, uncertain }],

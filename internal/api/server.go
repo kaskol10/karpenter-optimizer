@@ -1507,6 +1507,12 @@ type TopologyNode struct {
 	GPUMemAllocatedMiB float64               `json:"gpuMemAllocatedMiB,omitempty"`
 	GPUPods            int                   `json:"gpuPods,omitempty"`
 	HamiDetected       bool                  `json:"hamiDetected,omitempty"`
+	// CostPerHour is the node's hourly price from the pricing cache (spot
+	// estimated at the usual discount); nil when it cannot be priced. Feeds
+	// the Topology Cost lens.
+	CostPerHour *float64 `json:"costPerHour"`
+	CostSource  string   `json:"costSource,omitempty"` // aws-pricing-api, hardcoded, regional-fallback, family-estimate
+	PricedAs    string   `json:"pricedAs,omitempty"`   // capacity type the price assumes
 }
 
 func (s *Server) topologyRequestsFromPod(p kubernetes.PodInfo) TopologyPodResources {
@@ -1694,11 +1700,15 @@ func (s *Server) getTopology(c *gin.Context) {
 			HamiDetected:       node.HamiDetected,
 		})
 	}
+	if price := s.instancePricer(ctx); price != nil {
+		attachTopologyCost(out, price)
+	}
 	debugLog(s.config.Debug, "[topology] returning topology response with %d nodes\n", len(out))
 
 	c.JSON(200, gin.H{
-		"nodes": out,
-		"count": len(out),
+		"currency": awspricing.PricingCurrencyForRegion(s.config.AWSRegion),
+		"nodes":    out,
+		"count":    len(out),
 	})
 }
 

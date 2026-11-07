@@ -10,17 +10,38 @@ import { RefreshCw, Loader2, Network } from 'lucide-react';
 import { API_URL } from '../../lib/api';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { useCopyPodName } from './CopyablePodName';
+import { ClusterMap } from './ClusterMap';
 import { FitCheck } from './FitCheck';
+import { GpuDetail } from './GpuDetail';
+import { LensBar } from './LensBar';
+import { Minimap } from './Minimap';
+import { PoolMap } from './PoolMap';
+import { ZoomBreadcrumb } from './ZoomBreadcrumb';
 import { FocusBanner } from './FocusBanner';
 import { NodeCard } from './NodeCard';
 import { TopologyFilters } from './TopologyFilters';
 import { isDaemonSetPod } from './podUtils';
-import { parseSize } from '../../lib/gpuFit';
+import { parseSize, shortLabelFor } from '../../lib/gpuFit';
+import { LENSES, LENS_IDS, lensContext } from '../../lib/topologyLenses';
+import { useTopologyZoom } from '../../hooks/useTopologyZoom';
 
 const TOPOLOGY_METRICS = ['cpu', 'memory'];
 
-export default function TopologyView({ focus = null, onClearFocus, onBackToServing }) {
+export default function TopologyView({
+  focus = null,
+  onClearFocus,
+  onBackToServing,
+  onFocusDone,
+  onOpenServing,
+  onOpenLogs,
+}) {
   const [nodes, setNodes] = useState([]);
+  const [currency, setCurrency] = useState('USD');
+  const [servingPods, setServingPods] = useState(null);
+  const [disruptions, setDisruptions] = useState(null);
+  // Semantic zoom (one history entry per level) and the tile colour lens.
+  const [zoomLoc, goZoom] = useTopologyZoom();
+  const [lens, setLens] = useUrlParam('lens', 'requests', LENS_IDS);
   const nodeRefs = useRef({});
   const handledFocus = useRef(null);
   const [loading, setLoading] = useState(false);
@@ -105,6 +126,7 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
     try {
       const response = await axios.get(`${API_URL}/api/v1/topology`);
       setNodes(response.data.nodes || []);
+      setCurrency(response.data.currency || 'USD');
     } catch (err) {
       if (err.response?.status === 404) {
         try {
@@ -131,6 +153,37 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
     fetchTopology();
   }, [fetchTopology]);
 
+  // A deep link from Serving shows the node level until the user zooms
+  // elsewhere (an explicit ?zoom= wins over the focus).
+  const level = focus && !zoomLoc.explicit ? 'node' : zoomLoc.zoom;
+  const lensNeeds = LENSES.find((l) => l.id === lens)?.needs;
+  const needServing = lensNeeds === 'serving' || level === 'gpu';
+  const needDisruptions = lensNeeds === 'disruptions';
+
+  // Lens data is fetched only when a lens or level needs it; a failure just
+  // leaves those tiles grey ("no data").
+  useEffect(() => {
+    if (!needServing || servingPods) return;
+    axios
+      .get(`${API_URL}/api/v1/serving`)
+      .then((res) => setServingPods(res.data.pods || []))
+      .catch(() => setServingPods([]));
+  }, [needServing, servingPods]);
+  useEffect(() => {
+    if (!needDisruptions || disruptions) return;
+    axios
+      .get(`${API_URL}/api/v1/disruptions`, { params: { hours: 24 } })
+      .then((res) => setDisruptions(res.data.disruptions || []))
+      .catch(() => setDisruptions([]));
+  }, [needDisruptions, disruptions]);
+
+  const zoomTo = useCallback(
+    (next) => {
+      if (focus) onFocusDone?.();
+      goZoom(next);
+    },
+    [focus, onFocusDone, goZoom],
+  );
   // Deep-link focus: once per focus target, clear any filter that could hide
   // the node or pod, then scroll the node card into view.
   const focusKey = focus ? `${focus.node}|${focus.pod}|${focus.gpu}` : null;
@@ -202,6 +255,29 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
     return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredNodes]);
 
+  const ctx = useMemo(
+    () => lensContext(filteredNodes, { servingPods, disruptions, currency }),
+    [filteredNodes, servingPods, disruptions, currency],
+  );
+  const zoomPoolNodes = useMemo(
+    () => filteredNodes.filter((n) => (n.nodePool || '(no NodePool)') === zoomLoc.at),
+    [filteredNodes, zoomLoc.at],
+  );
+  // Node level: one node when zoomed onto it, else every node in view.
+  const atNode = level === 'node' || level === 'gpu' ? nodes.find((n) => n.name === zoomLoc.at) : null;
+  const shownGroups = level === 'node' && atNode && !focus ? [[atNode.nodePool || '(unknown)', [atNode]]] : grouped;
+
+  const breadcrumb = [{ label: 'Cluster', onClick: () => zoomTo({ zoom: 'cluster' }) }];
+  const crumbPool = level === 'pool' ? zoomLoc.at : atNode ? atNode.nodePool || '(no NodePool)' : null;
+  if (crumbPool) breadcrumb.push({ label: crumbPool, onClick: () => zoomTo({ zoom: 'pool', at: crumbPool }) });
+  if (atNode && (level === 'node' || level === 'gpu')) {
+    breadcrumb.push({ label: atNode.name, onClick: () => zoomTo({ zoom: 'node', at: atNode.name }) });
+  } else if (level === 'node') {
+    breadcrumb.push({ label: focus ? `${focus.node} (from Serving)` : 'All nodes' });
+  }
+  if (level === 'gpu') breadcrumb.push({ label: shortLabelFor(zoomLoc.card) });
+  const selectNode = (name) => zoomTo({ zoom: 'node', at: name });
+
   const podNsMatch = (pod) => {
     if (!podNsFilter) return true;
     return pod.namespace.toLowerCase().includes(podNsFilter.toLowerCase());
@@ -261,7 +337,14 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
         <FitCheck value={fitText} onChange={setFitText} nodes={filteredNodes} />
       )}
 
-      {focus && (
+      {nodes.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-lg border px-3 py-2.5">
+          <ZoomBreadcrumb steps={breadcrumb} />
+          {(level === 'cluster' || level === 'pool') && <LensBar lens={lens} onChange={setLens} />}
+        </div>
+      )}
+
+      {focus && level === 'node' && (
         <FocusBanner
           focus={focus}
           nodes={nodes}
@@ -305,9 +388,41 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
           hint="Topology renders once the cluster reports nodes. Check cluster connectivity, then refresh."
           onRetry={fetchTopology}
         />
+      ) : level === 'cluster' ? (
+        <ClusterMap
+          nodes={filteredNodes}
+          lens={lens}
+          ctx={ctx}
+          onSelectNode={selectNode}
+          onSelectPool={(pool) => zoomTo({ zoom: 'pool', at: pool })}
+        />
+      ) : level === 'pool' ? (
+        zoomPoolNodes.length > 0 ? (
+          <PoolMap nodes={zoomPoolNodes} lens={lens} ctx={ctx} onSelectNode={selectNode} />
+        ) : (
+          <EmptyState icon={Network} title={`No nodes in ${zoomLoc.at}`} hint="The NodePool has no nodes, or the filters hide them all." />
+        )
+      ) : level === 'gpu' ? (
+        <GpuDetail
+          node={atNode}
+          cardKey={zoomLoc.card}
+          servingPods={servingPods}
+          copyPod={copyPod}
+          copiedKey={copiedKey}
+          onOpenServing={onOpenServing}
+          onOpenLogs={onOpenLogs}
+          onZoomOut={() => zoomTo(atNode ? { zoom: 'node', at: atNode.name } : { zoom: 'cluster' })}
+        />
+      ) : zoomLoc.at && !atNode && !focus ? (
+        <EmptyState
+          icon={Network}
+          title={`${zoomLoc.at} is no longer in the cluster`}
+          hint="Karpenter may have removed it. Zoom out to see the nodes that are here now."
+          onRetry={() => zoomTo({ zoom: 'cluster' })}
+        />
       ) : (
         <div className="space-y-8">
-          {grouped.map(([poolName, poolNodes], idx) => (
+          {shownGroups.map(([poolName, poolNodes], idx) => (
             <div key={poolName}>
               <div className="flex items-center gap-2 mb-3">
                 <h3 className="text-base font-semibold">{poolName}</h3>
@@ -331,16 +446,28 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
                     copyPod={copyPod}
                     copiedKey={copiedKey}
                     fitMiB={fitMiB}
+                    onSelectGpu={(card) => zoomTo({ zoom: 'gpu', at: node.name, card })}
                     cardRef={(el) => {
                       nodeRefs.current[node.name] = el;
                     }}
                   />
                 ))}
               </div>
-              {idx < grouped.length - 1 && <Separator className="mt-8" />}
+              {idx < shownGroups.length - 1 && <Separator className="mt-8" />}
             </div>
           ))}
         </div>
+      )}
+
+      {level !== 'cluster' && nodes.length > 0 && (
+        <Minimap
+          nodes={filteredNodes}
+          lens={lens}
+          ctx={ctx}
+          current={new Set(atNode ? [atNode.name] : level === 'pool' ? zoomPoolNodes.map((n) => n.name) : focus ? [focus.node] : [])}
+          onSelectNode={selectNode}
+          onZoomOut={() => zoomTo({ zoom: 'cluster' })}
+        />
       )}
     </div>
   );

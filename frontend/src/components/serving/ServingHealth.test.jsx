@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import axios from 'axios';
 import ServingHealth from './ServingHealth';
 import { allServingPods } from '../../test/fixtures';
@@ -108,5 +108,17 @@ describe('ServingHealth', () => {
     expect(within(triage).getByText('llm/llama-70b-r2')).toBeInTheDocument();
     fireEvent.click(within(triage).getByRole('button', { name: 'Open logs for llm/llama-70b-r2' }));
     expect(onOpenLogs).toHaveBeenCalledWith(expect.objectContaining({ name: 'llama-70b-r2' }));
+  });
+
+  test('a ?pod= deep link opens that replica and rings its card', async () => {
+    setUrl('?tab=serving&pod=llm/qwen3-8b-0');
+    render(<ServingHealth focusPod="llm/qwen3-8b-0" />);
+    await screen.findByRole('button', { name: 'llm/qwen3-8b-0: OK' });
+    const card = await waitFor(() => {
+      const el = document.getElementById('serving-card-llm-qwen3-8b-0');
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(card.className).toMatch(/ring-primary/);
   });
 });

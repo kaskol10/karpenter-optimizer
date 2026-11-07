@@ -21,7 +21,8 @@ describe('TopologyView', () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  test('groups nodes by NodePool and shows each node card', async () => {
+  test('the node level groups nodes by NodePool and shows each node card', async () => {
+    setUrl('?tab=topology&zoom=node');
     render(<TopologyView />);
     expect(await screen.findByRole('heading', { name: 'gpu-l40s' })).toBeInTheDocument();
     expect(screen.getByText('ip-10-0-4-12')).toBeInTheDocument();
@@ -54,7 +55,7 @@ describe('TopologyView', () => {
   });
 
   test('filters come from the URL', async () => {
-    setUrl('?tab=topology&ns=batch&ds=hide');
+    setUrl('?tab=topology&zoom=node&ns=batch&ds=hide');
     render(<TopologyView />);
     await screen.findByRole('heading', { name: 'gpu-l40s' });
     expect(screen.getByDisplayValue('batch')).toBeInTheDocument();
@@ -72,6 +73,7 @@ describe('TopologyView', () => {
   });
 
   test('each GPU is a tank with its free memory, and each node states its fragmentation', async () => {
+    setUrl('?tab=topology&zoom=node');
     render(<TopologyView />);
     const gpus = await screen.findAllByRole('list', { name: 'GPUs' });
     expect(gpus).toHaveLength(2);
@@ -82,7 +84,7 @@ describe('TopologyView', () => {
   });
 
   test('a pod hidden by a filter still takes its memory', async () => {
-    setUrl('?tab=topology&ns=llm');
+    setUrl('?tab=topology&zoom=node&ns=llm');
     render(<TopologyView />);
     const gpus = await screen.findAllByRole('list', { name: 'GPUs' });
     // embed-worker is filtered out, but c3c3c3c3 still has only 2.0 GiB free.
@@ -90,7 +92,7 @@ describe('TopologyView', () => {
   });
 
   test('Will it fit? lights up the cards with room and survives a refresh', async () => {
-    setUrl('?tab=topology&fit=17GiB');
+    setUrl('?tab=topology&zoom=node&fit=17GiB');
     render(<TopologyView />);
     expect(await screen.findByText(/17.0 GiB fits on 5 GPUs across 2 nodes/)).toBeInTheDocument();
     const gpus = screen.getAllByRole('list', { name: 'GPUs' });
@@ -108,7 +110,7 @@ describe('TopologyView', () => {
   });
 
   test('Will it fit? counts only the nodes in view, and says when none report GPU memory', async () => {
-    setUrl('?tab=topology&fit=40&nodeq=7-88');
+    setUrl('?tab=topology&zoom=node&fit=40&nodeq=7-88');
     render(<TopologyView />);
     expect(await screen.findByText(/40.0 GiB fits on 2 GPUs across 1 node\./)).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: /Will it fit/ }), { target: { value: '' } });
