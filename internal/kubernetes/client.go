@@ -2679,10 +2679,11 @@ type NodePlacement struct {
 	GPUMemTotalMiB float64 `json:"gpuMemTotalMiB,omitempty"`
 }
 
-// nodeCapacityType reads spot vs on-demand from node labels: Karpenter's
+// placementCapacityType reads spot vs on-demand from node labels: Karpenter's
 // karpenter.sh/capacity-type, else EKS managed node groups'
-// eks.amazonaws.com/capacityType (SPOT / ON_DEMAND). Empty when unknown.
-func nodeCapacityType(labels map[string]string) string {
+// eks.amazonaws.com/capacityType (SPOT / ON_DEMAND). Unlike nodeCapacityType
+// it returns "" when unknown, so callers can say the price is an assumption.
+func placementCapacityType(labels map[string]string) string {
 	if v := labels["karpenter.sh/capacity-type"]; v != "" {
 		return v
 	}
@@ -2755,7 +2756,7 @@ func (c *Client) GetNodePlacement(ctx context.Context, nodeNames []string) (map[
 				placement.GPUCapacity = int(gpu.Value())
 			}
 		}
-		placement.CapacityType = nodeCapacityType(node.Labels)
+		placement.CapacityType = placementCapacityType(node.Labels)
 		placement.GPUMemTotalMiB = nodeGPUMemTotalMiB(&node, placement.GPUCapacity)
 		out[node.Name] = placement
 	}
