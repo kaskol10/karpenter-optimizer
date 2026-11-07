@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseSize, formatMiB, nodeGpus, fragmentation, gpuFits, clusterFit } from './gpuFit';
+import { parseSize, formatMiB, nodeGpus, fragmentation, gpuFits, clusterFit, shortLabelFor } from './gpuFit';
 import { topologyNodes, GPU } from '../test/fixtures';
 
 const [node412, node788] = topologyNodes;
@@ -123,4 +123,11 @@ describe('gpuFits and clusterFit', () => {
     const g = nodeGpus(node412).gpus;
     expect(g.filter((x) => x.freeMiB === 0).map((x) => x.uuid)).toEqual([GPU.a.uuid, GPU.b.uuid]);
   });
+});
+
+test('shortLabelFor names card keys like the tanks do', () => {
+  expect(shortLabelFor(GPU.c.uuid)).toBe('c3c3c3c3');
+  expect(shortLabelFor('idx-2')).toBe('GPU 2');
+  expect(shortLabelFor('unknown-3')).toBe('GPU (no uuid)');
+  expect(shortLabelFor('')).toBe('GPU');
 });

@@ -13,18 +13,58 @@ import (
 // false when the instance could not be priced.
 type nodePrice func(instanceType, capacityType string) (cost float64, source string, ok bool)
 
-// attachServingCost fills Cost on each serving pod from the recommender's
-// cached instance prices. Pods it cannot price keep a nil Cost.
-func (s *Server) attachServingCost(ctx context.Context, health []llmhealth.PodHealth) {
+// instancePricer returns a nodePrice backed by the recommender's cached
+// instance prices, or nil when pricing is not configured.
+func (s *Server) instancePricer(ctx context.Context) nodePrice {
 	if s.recommender == nil || s.config == nil {
-		return
+		return nil
 	}
-	price := func(instanceType, capacityType string) (float64, string, bool) {
+	return func(instanceType, capacityType string) (float64, string, bool) {
 		res, _ := s.recommender.EstimateCostWithSource(ctx, []string{instanceType}, capacityType, 1)
 		if res.Source == recommender.PricingSourceUnknown || res.Cost <= 0 {
 			return 0, "", false
 		}
 		return res.Cost, string(res.Source), true
+	}
+}
+
+// cachedPricer memoizes a nodePrice per instance type and capacity type for
+// the life of one request.
+func cachedPricer(price nodePrice) nodePrice {
+	type key struct{ instanceType, capacityType string }
+	type result struct {
+		cost   float64
+		source string
+		ok     bool
+	}
+	cache := map[key]result{}
+	return func(instanceType, capacityType string) (float64, string, bool) {
+		k := key{instanceType, capacityType}
+		r, seen := cache[k]
+		if !seen {
+			r.cost, r.source, r.ok = price(instanceType, capacityType)
+			cache[k] = r
+		}
+		return r.cost, r.source, r.ok
+	}
+}
+
+// pricedCapacityType is the capacity type a node is priced as: spot when
+// known to be spot, else on-demand (the project-wide default, so an unknown
+// node's estimate errs high).
+func pricedCapacityType(capacityType string) string {
+	if capacityType == "spot" {
+		return "spot"
+	}
+	return "on-demand"
+}
+
+// attachServingCost fills Cost on each serving pod from the recommender's
+// cached instance prices. Pods it cannot price keep a nil Cost.
+func (s *Server) attachServingCost(ctx context.Context, health []llmhealth.PodHealth) {
+	price := s.instancePricer(ctx)
+	if price == nil {
+		return
 	}
 	attachCost(health, price, awspricing.PricingCurrencyForRegion(s.config.AWSRegion))
 }
@@ -34,14 +74,7 @@ func (s *Server) attachServingCost(ctx context.Context, health []llmhealth.PodHe
 // instance type and capacity type. A node of unknown capacity type is priced
 // as on-demand, the project-wide default, so the estimate errs high.
 func attachCost(health []llmhealth.PodHealth, price nodePrice, currency string) {
-	type key struct{ instanceType, capacityType string }
-	type result struct {
-		cost   float64
-		source string
-		ok     bool
-	}
-	cache := map[key]result{}
-
+	price = cachedPricer(price)
 	for i := range health {
 		h := &health[i]
 		if h.NodeInstanceType == "" {
@@ -51,27 +84,19 @@ func attachCost(health []llmhealth.PodHealth, price nodePrice, currency string) 
 		if !ok {
 			continue
 		}
-		capacityType := h.NodeCapacityType
-		if capacityType != "spot" {
-			capacityType = "on-demand"
-		}
-		k := key{h.NodeInstanceType, capacityType}
-		r, seen := cache[k]
-		if !seen {
-			r.cost, r.source, r.ok = price(k.instanceType, k.capacityType)
-			cache[k] = r
-		}
-		if !r.ok {
+		capacityType := pricedCapacityType(h.NodeCapacityType)
+		cost, source, ok := price(h.NodeInstanceType, capacityType)
+		if !ok {
 			continue
 		}
 		h.Cost = &llmhealth.ReplicaCost{
-			CostPerHour:      r.cost * share,
-			NodeCostPerHour:  r.cost,
+			CostPerHour:      cost * share,
+			NodeCostPerHour:  cost,
 			NodeCapacityType: capacityType,
 			Share:            share,
 			ShareBasis:       basis,
 			Currency:         currency,
-			PriceSource:      r.source,
+			PriceSource:      source,
 		}
 	}
 }

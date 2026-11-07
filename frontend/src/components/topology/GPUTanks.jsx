@@ -21,7 +21,7 @@ const FIT_RING = {
 // faded and unnamed. With a "Will it fit?" size, cards with room are ringed
 // green ("maybe", amber dashed, when an unplaced pod could be on that card)
 // and the rest fade.
-export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu }) {
+export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focusPodKey, focusGpu, onSelectGpu }) {
   const frag = fragmentation(layout);
   const focusedKeys = new Set(
     layout.gpus
@@ -102,12 +102,27 @@ export function GPUTanks({ layout, visibleKeys, fitMiB, copyPod, copiedKey, focu
                   </span>
                 )}
               </div>
-              <span
-                className={cn('truncate text-center font-mono text-[10px]', focused ? 'font-semibold text-primary' : 'text-muted-foreground')}
-                title={gpu.uuid || undefined}
-              >
-                {gpu.label}
-              </span>
+              {onSelectGpu ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectGpu(gpu.key)}
+                  className={cn(
+                    'truncate text-center font-mono text-[10px] underline-offset-2 hover:underline',
+                    focused ? 'font-semibold text-primary' : 'text-muted-foreground',
+                  )}
+                  title={`${gpu.uuid || gpu.label}: zoom into this GPU`}
+                  aria-label={`Zoom into GPU ${gpu.label}`}
+                >
+                  {gpu.label}
+                </button>
+              ) : (
+                <span
+                  className={cn('truncate text-center font-mono text-[10px]', focused ? 'font-semibold text-primary' : 'text-muted-foreground')}
+                  title={gpu.uuid || undefined}
+                >
+                  {gpu.label}
+                </span>
+              )}
             </div>
           );
         })}

@@ -43,8 +43,8 @@ function readLocation() {
   let focus = null;
   if (tab === 'topology' && q.get('node')) {
     focus = { node: q.get('node'), pod: q.get('pod') || '', gpu: q.get('gpu') || '' };
-  } else if (tab === 'logs' && q.get('pod')) {
-    focus = { pod: q.get('pod') }; // "namespace/name" or "namespace"
+  } else if ((tab === 'logs' || tab === 'serving') && q.get('pod')) {
+    focus = { pod: q.get('pod') }; // logs: "namespace/name" or "namespace"; serving: "namespace/name"
   }
   return { tab, focus };
 }
@@ -52,7 +52,7 @@ function readLocation() {
 const FOCUS_PARAMS = ['node', 'pod', 'gpu'];
 
 // buildSearch builds the query string for a tab and its optional focus
-// (Topology: node/pod/gpu; Logs: pod).
+// (Topology: node/pod/gpu; Logs and Serving: pod).
 // keep carries the current tab's own params (its filters, see useUrlParam)
 // when staying on the same tab; a different tab starts with a clean URL.
 function buildSearch(tab, focus, keep = '') {
@@ -524,6 +524,9 @@ function App() {
               focus={tabFocus}
               onClearFocus={() => navigate('topology')}
               onBackToServing={backToServing}
+              onFocusDone={() => setTabFocus(null)}
+              onOpenServing={(pod) => navigate('serving', { pod: `${pod.namespace}/${pod.name}` })}
+              onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
             />
           )}
 
@@ -532,6 +535,7 @@ function App() {
             <ServingHealth
               onOpenTopology={(focus) => navigate('topology', focus)}
               onOpenLogs={(pod) => navigate('logs', { pod: `${pod.namespace}/${pod.name}` })}
+              focusPod={tabFocus?.pod}
             />
           )}
 
