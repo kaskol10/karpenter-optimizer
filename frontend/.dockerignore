@@ -1,0 +1,14 @@
+# The image runs `npm ci` and `npm run build` itself. Without this file,
+# `COPY . .` would copy a local node_modules over the one npm ci installed
+# (wrong platform for native packages on alpine), plus old build output.
+node_modules
+build
+coverage
+
+# Local and editor files
+.env*
+!.env.example
+npm-debug.log*
+.DS_Store
+.vscode
+.idea

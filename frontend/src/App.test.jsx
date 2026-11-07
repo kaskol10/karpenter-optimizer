@@ -82,7 +82,7 @@ describe('App navigation', () => {
     expect(within(areas).getAllByRole('link').map((a) => a.textContent.replace(/\d+$/, ''))).toEqual(['Cluster', 'Inference', 'Optimize']);
     const pages = screen.getByRole('navigation', { name: 'Cluster pages' });
     expect(within(pages).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['/', '/cluster/nodes', '/cluster/topology', '/cluster/disruptions']);
-    expect(screen.getByText('overview page')).toBeInTheDocument();
+    expect(await screen.findByText('overview page')).toBeInTheDocument();
     // The disruption count shows on the Cluster area and the Disruptions page.
     expect(await within(areas).findByText('3')).toBeInTheDocument();
     expect(within(pages).getByRole('link', { name: /^Disruptions\s*3$/ })).toBeInTheDocument();
@@ -92,30 +92,30 @@ describe('App navigation', () => {
     render(<App />);
     await userEvent.click(screen.getByRole('link', { name: 'Topology' }));
     expect(here()).toBe('/cluster/topology');
-    expect(screen.getByText('topology page')).toBeInTheDocument();
+    expect(await screen.findByText('topology page')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('link', { name: 'Inference' }));
     expect(here()).toBe('/inference/serving');
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Inference pages' })).getByRole('link', { name: 'Gateway' }));
-    expect(screen.getByText('gateway page')).toBeInTheDocument();
+    expect(await screen.findByText('gateway page')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('link', { name: /Cluster/ }));
     expect(here()).toBe('/cluster/topology');
     await userEvent.click(screen.getByRole('link', { name: 'Optimize' }));
-    expect(screen.getByText('recommendations page')).toBeInTheDocument();
+    expect(await screen.findByText('recommendations page')).toBeInTheDocument();
 
     // Back follows the history.
     await act(async () => {
       window.history.back();
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(screen.getByText('topology page')).toBeInTheDocument();
+    expect(await screen.findByText('topology page')).toBeInTheDocument();
   });
 
-  test('old ?tab= links land on the new page and the address is rewritten', () => {
+  test('old ?tab= links land on the new page and the address is rewritten', async () => {
     setUrl('/?tab=topology&node=n1&lens=cost');
     render(<App />);
-    expect(screen.getByText('topology page focused on n1')).toBeInTheDocument();
+    expect(await screen.findByText('topology page focused on n1')).toBeInTheDocument();
     expect(here()).toBe('/cluster/topology?node=n1&lens=cost');
   });
 
@@ -133,10 +133,10 @@ describe('App navigation', () => {
   test('logs open in a drawer over the page you are on', async () => {
     setUrl('/cluster/topology?zoom=node');
     render(<App />);
-    await userEvent.click(screen.getByRole('button', { name: 'topology logs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'topology logs' }));
     const drawer = await screen.findByRole('dialog', { name: /Logs/ });
     expect(within(drawer).getByText('log explorer on llm/vllm-0')).toBeInTheDocument();
-    expect(screen.getByText('topology page')).toBeInTheDocument();
+    expect(await screen.findByText('topology page')).toBeInTheDocument();
     expect(here()).toBe('/cluster/topology?zoom=node&logs=llm%2Fvllm-0');
 
     // Closing steps back, so Back does not reopen the drawer.
@@ -155,22 +155,22 @@ describe('App navigation', () => {
   test('Serving and Topology deep-link into each other with focus', async () => {
     setUrl('/inference/serving');
     render(<App />);
-    await userEvent.click(screen.getByRole('button', { name: 'serving topology' }));
-    expect(screen.getByText('topology page focused on n1')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'serving topology' }));
+    expect(await screen.findByText('topology page focused on n1')).toBeInTheDocument();
     expect(here()).toBe('/cluster/topology?node=n1&pod=llm%2Fvllm-0');
-    await userEvent.click(screen.getByRole('button', { name: 'topology serving' }));
-    expect(screen.getByText('serving page focused on llm/vllm-0')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'topology serving' }));
+    expect(await screen.findByText('serving page focused on llm/vllm-0')).toBeInTheDocument();
     expect(here()).toBe('/inference/serving?pod=llm%2Fvllm-0');
   });
 
   test('⌘K opens the palette; its jumps reload the page with the new params', async () => {
     setUrl('/cluster/topology?zoom=gpu&card=x');
     render(<App />);
-    expect(screen.getByText('topology url ?zoom=gpu&card=x')).toBeInTheDocument();
+    expect(await screen.findByText('topology url ?zoom=gpu&card=x')).toBeInTheDocument();
     await userEvent.keyboard('{Control>}k{/Control}');
     await userEvent.click(screen.getByRole('button', { name: 'run drain' }));
     expect(here()).toBe('/cluster/topology?drain=n2');
-    expect(screen.getByText('topology url ?drain=n2')).toBeInTheDocument();
+    expect(await screen.findByText('topology url ?drain=n2')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Search/ }));
     await userEvent.click(screen.getByRole('button', { name: 'run logs' }));

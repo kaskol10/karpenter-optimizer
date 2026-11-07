@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
@@ -6,23 +6,33 @@ import { Alert, AlertTitle } from './components/ui/alert';
 import { Badge } from './components/ui/badge';
 import { Loader2, Settings, Info, X, Sun, Moon, Server, BrainCircuit, Sparkles, FileText, Search } from 'lucide-react';
 import NodePoolCard from './components/NodePoolCard';
-import DisruptionTracker from './components/DisruptionTracker';
-import NodeUsageView from './components/NodeUsageView';
-import TopologyView from './components/topology/TopologyView';
-import WorkloadUsageView from './components/WorkloadUsageView';
 import GlobalClusterSummary from './components/GlobalClusterSummary';
-import AgentRecommendations from './components/AgentRecommendations';
 import { LogDrawer } from './components/LogDrawer';
+import { SkeletonRows } from './components/ui/skeleton';
 import { CommandPalette, isPaletteShortcut } from './components/CommandPalette';
 import { StatusStrip } from './components/StatusStrip';
-import GatewayPage from './components/serving/GatewayPage';
 import AlertsSettings from './components/AlertsSettings';
-import ServingHealth from './components/serving/ServingHealth';
 import { cn } from './lib/utils';
 import { CurrencyRegionContext, formatCurrency } from './lib/currency';
 import { API_URL } from './lib/api';
 import { usePolling } from './hooks/usePolling';
 import { AREAS, areaOf, buildUrl, logsParam, pagePath, parseLocation } from './lib/routes';
+
+// Pages other than the Overview load on first visit, so the first paint
+// does not wait for Topology, Serving and the rest.
+const DisruptionTracker = lazy(() => import('./components/DisruptionTracker'));
+const NodeUsageView = lazy(() => import('./components/NodeUsageView'));
+const TopologyView = lazy(() => import('./components/topology/TopologyView'));
+const WorkloadUsageView = lazy(() => import('./components/WorkloadUsageView'));
+const AgentRecommendations = lazy(() => import('./components/AgentRecommendations'));
+const GatewayPage = lazy(() => import('./components/serving/GatewayPage'));
+const ServingHealth = lazy(() => import('./components/serving/ServingHealth'));
+
+const PageFallback = () => (
+  <div className="py-6" aria-label="Loading page">
+    <SkeletonRows rows={5} />
+  </div>
+);
 
 const AREA_ICONS = { cluster: Server, inference: BrainCircuit, optimize: Sparkles };
 
@@ -335,6 +345,7 @@ function App() {
         </div>
 
         <div key={`${activeTab}:${navSeq}`} className="space-y-6 animate-tab-in">
+          <Suspense fallback={<PageFallback />}>
           {showSettings && (
             <Card>
               <CardHeader>
@@ -614,8 +625,7 @@ function App() {
               onClusterCostUpdate={setClusterCost}
             />
           )}
-
-
+          </Suspense>
         </div>
       </main>
       <LogDrawer pod={logsPod} onClose={closeLogs} />
