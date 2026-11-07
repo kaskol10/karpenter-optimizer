@@ -43,6 +43,14 @@ describe('GatewayPage', () => {
     expect(await screen.findByText('search')).toBeInTheDocument();
   });
 
+  test('the Flow view shows who sends what to which model', async () => {
+    route(gateway);
+    render(<GatewayPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'flow' }));
+    expect(window.location.search).toBe('?view=flow');
+    expect(screen.getByRole('region', { name: 'Gateway flow' })).toBeInTheDocument();
+  });
+
   test('explains when no gateway is found or the request fails', async () => {
     route(null);
     const { unmount } = render(<GatewayPage />);

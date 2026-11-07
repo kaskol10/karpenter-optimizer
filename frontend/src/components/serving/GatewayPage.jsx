@@ -9,7 +9,7 @@ import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { GatewayCard } from './GatewayCard';
 
-const VIEWS = ['apps', 'models'];
+const VIEWS = ['apps', 'models', 'flow'];
 const SPLITS = ['app', 'apikey', 'team'];
 
 // GatewayPage is Inference → Gateway: the LiteLLM AI gateway's health,
