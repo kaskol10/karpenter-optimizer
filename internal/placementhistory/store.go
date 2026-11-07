@@ -46,30 +46,30 @@ func (p Pod) Key() string { return p.Namespace + "/" + p.Name }
 // DisruptionReason is the latest Karpenter disruption event seen on it (e.g.
 // "Underutilized"), carried into its termination event.
 type Node struct {
-	Name               string
-	NodePool           string
-	Zone               string
-	InstanceType       string
-	CapacityType       string
-	Architecture       string
-	CreationTime       string
-	CPUUsed            float64 // requested cores
-	CPUCapacity        float64
-	CPUAllocatable     float64
-	CPUPercent         float64
-	MemUsed            float64 // requested GiB
-	MemCapacity        float64
-	MemAllocatable     float64
-	MemPercent         float64
-	PodCount           int
-	GPUCapacity        float64
-	GPUAllocated       float64
-	GPUModel           string
-	GPUMemTotalMiB     float64
-	GPUMemAllocatedMiB float64
-	GPUPods            int
-	HamiDetected       bool
-	DisruptionReason   string
+	Name               string  `json:"name,omitempty"`
+	NodePool           string  `json:"nodePool,omitempty"`
+	Zone               string  `json:"zone,omitempty"`
+	InstanceType       string  `json:"instanceType,omitempty"`
+	CapacityType       string  `json:"capacityType,omitempty"`
+	Architecture       string  `json:"arch,omitempty"`
+	CreationTime       string  `json:"created,omitempty"`
+	CPUUsed            float64 `json:"cpuUsed,omitempty"` // requested cores
+	CPUCapacity        float64 `json:"cpuCap,omitempty"`
+	CPUAllocatable     float64 `json:"cpuAlloc,omitempty"`
+	CPUPercent         float64 `json:"cpuPct,omitempty"`
+	MemUsed            float64 `json:"memUsed,omitempty"` // requested GiB
+	MemCapacity        float64 `json:"memCap,omitempty"`
+	MemAllocatable     float64 `json:"memAlloc,omitempty"`
+	MemPercent         float64 `json:"memPct,omitempty"`
+	PodCount           int     `json:"pods,omitempty"`
+	GPUCapacity        float64 `json:"gpuCap,omitempty"`
+	GPUAllocated       float64 `json:"gpuAlloc,omitempty"`
+	GPUModel           string  `json:"gpuModel,omitempty"`
+	GPUMemTotalMiB     float64 `json:"gpuMemTotal,omitempty"`
+	GPUMemAllocatedMiB float64 `json:"gpuMemAlloc,omitempty"`
+	GPUPods            int     `json:"gpuPods,omitempty"`
+	HamiDetected       bool    `json:"hami,omitempty"`
+	DisruptionReason   string  `json:"reason,omitempty"`
 }
 
 // Snapshot is the cluster's placement at one moment.
@@ -111,6 +111,7 @@ type Store struct {
 	entries   []entry
 	last      *Snapshot
 	sinceKey  int
+	forceKey  bool
 }
 
 // New returns a store keeping retention of history, with a full keyframe
@@ -122,16 +123,18 @@ func New(retention time.Duration, keyEvery int) *Store {
 	return &Store{retention: retention, keyEvery: keyEvery}
 }
 
-// Add records a snapshot. Snapshots must arrive in time order; one older
-// than the last is ignored.
-func (s *Store) Add(snap *Snapshot) {
+// Add records a snapshot and returns the entry it stored, encoded for a
+// durable store (a keyframe or a delta). Snapshots must arrive in time
+// order; one not after the last is ignored (ok false).
+func (s *Store) Add(snap *Snapshot) (rec Record, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.last != nil && !snap.At.After(s.last.At) {
-		return
+		return Record{}, false
 	}
 	c := snap.clone()
-	if s.last == nil || s.sinceKey+1 >= s.keyEvery {
+	if s.last == nil || s.forceKey || s.sinceKey+1 >= s.keyEvery {
+		s.forceKey = false
 		s.entries = append(s.entries, entry{at: c.At, key: c})
 		s.sinceKey = 0
 	} else {
@@ -140,6 +143,16 @@ func (s *Store) Add(snap *Snapshot) {
 	}
 	s.last = c
 	s.prune(c.At)
+	return encodeEntry(s.entries[len(s.entries)-1]), true
+}
+
+// ForceKeyframe makes the next Add store a full keyframe. A durable store
+// calls it after a failed write, so a lost delta never corrupts the states
+// rebuilt after a restart.
+func (s *Store) ForceKeyframe() {
+	s.mu.Lock()
+	s.forceKey = true
+	s.mu.Unlock()
 }
 
 // prune drops whole segments (a keyframe and its deltas) that end before the

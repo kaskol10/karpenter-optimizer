@@ -241,6 +241,14 @@ servingHistory:
   # Retention for raw serving samples (hours). 168 = 7 days.
   retentionHours: 168
 
+# Topology time travel: where every pod ran, sampled on an interval and kept
+# for a window. Kept in memory, and also in the same CNPG instance as the
+# other histories when database.enabled is true (or PLACEMENT_HISTORY_DSN is
+# set via env), so it survives restarts. hours: 0 turns it off.
+placementHistory:
+  hours: 24
+  intervalSeconds: 120
+
 # Environment variables
 env: []
   # - name: CUSTOM_VAR

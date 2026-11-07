@@ -120,6 +120,10 @@ spec:
               value: {{ .Values.servingHistory.retentionHours | quote }}
             {{- end }}
             {{- end }}
+            - name: PLACEMENT_HISTORY_HOURS
+              value: {{ .Values.placementHistory.hours | quote }}
+            - name: PLACEMENT_HISTORY_INTERVAL_SECS
+              value: {{ .Values.placementHistory.intervalSeconds | quote }}
             {{- if .Values.alerts.enabled }}
             # Alerting engine (opt-in).
             - name: ALERTS_ENABLED

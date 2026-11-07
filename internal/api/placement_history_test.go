@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/placementhistory"
 	"github.com/stretchr/testify/assert"
@@ -187,4 +188,69 @@ func TestEventsEmptyIsArray(t *testing.T) {
 	server.router.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/topology/events", nil))
 	assert.Contains(t, w.Body.String(), `"events":[]`)
 	assert.NotContains(t, w.Body.String(), `"from"`)
+}
+
+// fakePlacementStore is an in-memory placementdurable.Store.
+type fakePlacementStore struct {
+	recs    []placementhistory.Record
+	addErr  error
+	loadErr error
+	closed  bool
+}
+
+func (f *fakePlacementStore) Add(r placementhistory.Record) error {
+	if f.addErr != nil {
+		return f.addErr
+	}
+	f.recs = append(f.recs, r)
+	return nil
+}
+
+func (f *fakePlacementStore) Load(time.Time, time.Duration) ([]placementhistory.Record, error) {
+	return f.recs, f.loadErr
+}
+
+func (f *fakePlacementStore) Close() error { f.closed = true; return nil }
+
+func TestPlacementDurableWriteAndRestore(t *testing.T) {
+	server, _ := historyTestServer(t)
+	store := &fakePlacementStore{}
+	server.placementDurable = store
+
+	server.samplePlacement(context.Background())
+	time.Sleep(10 * time.Millisecond)
+	server.samplePlacement(context.Background())
+	require.Len(t, store.recs, 2)
+	assert.True(t, store.recs[0].Keyframe)
+	assert.False(t, store.recs[1].Keyframe)
+
+	// A failed write forces the next sample to be a full keyframe.
+	store.addErr = assert.AnError
+	time.Sleep(10 * time.Millisecond)
+	server.samplePlacement(context.Background())
+	store.addErr = nil
+	time.Sleep(10 * time.Millisecond)
+	server.samplePlacement(context.Background())
+	require.Len(t, store.recs, 3)
+	assert.True(t, store.recs[2].Keyframe, "the sample after a failed write is a keyframe")
+
+	// A fresh process restores what was saved.
+	fresh := placementhistory.New(time.Hour, 10)
+	assert.Equal(t, 3, restorePlacement(store, fresh, time.Hour, time.Now()))
+	snap, ok := fresh.At(time.Now())
+	require.True(t, ok)
+	assert.Contains(t, snap.Nodes, "n1")
+	assert.Contains(t, snap.Pods, "default/web-0")
+
+	// Read errors keep the store empty; Close closes the durable store.
+	broken := &fakePlacementStore{loadErr: assert.AnError}
+	assert.Equal(t, 0, restorePlacement(broken, placementhistory.New(time.Hour, 10), time.Hour, time.Now()))
+	server.Close()
+	assert.True(t, store.closed)
+}
+
+func TestInitPlacementDurableWithoutDatabase(t *testing.T) {
+	mem := placementhistory.New(time.Hour, 10)
+	assert.Nil(t, initPlacementDurable(&config.Config{}, mem, time.Hour))
+	assert.Nil(t, initPlacementDurable(&config.Config{PlacementHistoryDSN: "postgres://u:p@127.0.0.1:1/db?sslmode=disable"}, mem, time.Hour))
 }

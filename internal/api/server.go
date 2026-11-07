@@ -58,6 +58,7 @@ import (
 	"github.com/karpenter-optimizer/internal/hostedprices"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/litellm"
+	"github.com/karpenter-optimizer/internal/placementdurable"
 	"github.com/karpenter-optimizer/internal/placementhistory"
 	"github.com/karpenter-optimizer/internal/power"
 	"github.com/karpenter-optimizer/internal/recommender"
@@ -124,6 +125,8 @@ type Server struct {
 	placementInterval  time.Duration
 	placementWindow    time.Duration
 	placementReasonErr sync.Once
+	placementDurable   placementdurable.Store
+	placementWriteErr  sync.Once
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -233,6 +236,7 @@ func NewServer(cfg *config.Config) *Server {
 	}
 	if k8sClient != nil && server.placementWindow > 0 {
 		server.placementHistory = placementhistory.New(server.placementWindow, placementKeyEvery)
+		server.placementDurable = initPlacementDurable(cfg, server.placementHistory, server.placementWindow)
 	}
 
 	// Root cancellable context for all background samplers. Created here so
@@ -277,6 +281,11 @@ func (s *Server) Close() {
 	if s.servingDurableStore != nil {
 		if err := s.servingDurableStore.Close(); err != nil {
 			log.Printf("warning: close serving durable store: %v", err)
+		}
+	}
+	if s.placementDurable != nil {
+		if err := s.placementDurable.Close(); err != nil {
+			log.Printf("warning: close placement durable store: %v", err)
 		}
 	}
 	if s.gatewayHistoryStore != nil {
