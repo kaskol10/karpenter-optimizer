@@ -10,10 +10,12 @@ import { RefreshCw, Loader2, Network } from 'lucide-react';
 import { API_URL } from '../../lib/api';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { useCopyPodName } from './CopyablePodName';
+import { FitCheck } from './FitCheck';
 import { FocusBanner } from './FocusBanner';
 import { NodeCard } from './NodeCard';
 import { TopologyFilters } from './TopologyFilters';
 import { isDaemonSetPod } from './podUtils';
+import { parseSize } from '../../lib/gpuFit';
 
 const TOPOLOGY_METRICS = ['cpu', 'memory'];
 
@@ -32,6 +34,9 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
   const [nodeNameFilter, setNodeNameFilter] = useUrlParam('nodeq');
   const [podNsFilter, setPodNsFilter] = useUrlParam('ns');
   const [podNameFilter, setPodNameFilter] = useUrlParam('podq');
+  // "Will it fit?" size, as typed (?fit=40GiB), so a check can be shared.
+  const [fitText, setFitText] = useUrlParam('fit');
+  const fitMiB = parseSize(fitText);
   const [showAllPodsInOverview, setShowAllPodsInOverview] = useState(false);
   const [daemonSetsParam, setDaemonSetsParam] = useUrlParam('ds', 'show', ['show', 'hide']);
   const hideDaemonSets = daemonSetsParam === 'hide';
@@ -252,6 +257,10 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
         setPodNameFilter={setPodNameFilter}
       />
 
+      {nodes.some((n) => (n.gpuCapacity || 0) > 0) && (
+        <FitCheck value={fitText} onChange={setFitText} nodes={filteredNodes} />
+      )}
+
       {focus && (
         <FocusBanner
           focus={focus}
@@ -321,6 +330,7 @@ export default function TopologyView({ focus = null, onClearFocus, onBackToServi
                     showAllPodsInList={showAllPodsInOverview}
                     copyPod={copyPod}
                     copiedKey={copiedKey}
+                    fitMiB={fitMiB}
                     cardRef={(el) => {
                       nodeRefs.current[node.name] = el;
                     }}

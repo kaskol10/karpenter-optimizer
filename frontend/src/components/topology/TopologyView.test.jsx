@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axios from 'axios';
 import TopologyView from './TopologyView';
@@ -69,5 +69,49 @@ describe('TopologyView', () => {
     await screen.findByText(/Shares c3c3c3c3 with/);
     await waitFor(() => expect(screen.queryByDisplayValue('search')).not.toBeInTheDocument());
     expect(window.location.search).not.toContain('ns=');
+  });
+
+  test('each GPU is a tank with its free memory, and each node states its fragmentation', async () => {
+    render(<TopologyView />);
+    const gpus = await screen.findAllByRole('list', { name: 'GPUs' });
+    expect(gpus).toHaveLength(2);
+    expect(within(gpus[1]).getByRole('listitem', { name: 'GPU c3c3c3c3: 2.0 GiB free' })).toBeInTheDocument();
+    expect(within(gpus[1]).getByRole('listitem', { name: 'GPU d4d4d4d4: 17.6 GiB free' })).toBeInTheDocument();
+    expect(screen.getByText('109.4 GiB free')).toBeInTheDocument();
+    expect(screen.getAllByText(/largest single gap 44.9 GiB/)).toHaveLength(2);
+  });
+
+  test('a pod hidden by a filter still takes its memory', async () => {
+    setUrl('?tab=topology&ns=llm');
+    render(<TopologyView />);
+    const gpus = await screen.findAllByRole('list', { name: 'GPUs' });
+    // embed-worker is filtered out, but c3c3c3c3 still has only 2.0 GiB free.
+    expect(within(gpus[1]).getByRole('listitem', { name: 'GPU c3c3c3c3: 2.0 GiB free' })).toBeInTheDocument();
+  });
+
+  test('Will it fit? lights up the cards with room and survives a refresh', async () => {
+    setUrl('?tab=topology&fit=17GiB');
+    render(<TopologyView />);
+    expect(await screen.findByText(/17.0 GiB fits on 5 GPUs across 2 nodes/)).toBeInTheDocument();
+    const gpus = screen.getAllByRole('list', { name: 'GPUs' });
+    expect(within(gpus[1]).getByRole('listitem', { name: 'GPU d4d4d4d4: 17.6 GiB free, fits' })).toBeInTheDocument();
+    expect(within(gpus[1]).getByRole('listitem', { name: 'GPU c3c3c3c3: 2.0 GiB free' })).toHaveClass('opacity-40');
+
+    const input = screen.getByRole('textbox', { name: /Will it fit/ });
+    fireEvent.change(input, { target: { value: '50' } });
+    expect(screen.getByText(/50.0 GiB fits on no GPU in view. Largest free space on one card: 44.9 GiB/)).toBeInTheDocument();
+    expect(window.location.search).toContain('fit=50');
+
+    fireEvent.change(input, { target: { value: 'lots' } });
+    expect(screen.getByText(/Use a size such as 40/)).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  test('Will it fit? counts only the nodes in view, and says when none report GPU memory', async () => {
+    setUrl('?tab=topology&fit=40&nodeq=7-88');
+    render(<TopologyView />);
+    expect(await screen.findByText(/40.0 GiB fits on 2 GPUs across 1 node\./)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: /Will it fit/ }), { target: { value: '' } });
+    expect(screen.getByText(/Type a size to see which GPUs/)).toBeInTheDocument();
   });
 });

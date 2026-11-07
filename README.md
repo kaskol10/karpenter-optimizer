@@ -14,7 +14,7 @@ Karpenter Optimizer helps you optimize your Karpenter NodePool configurations by
 - 🎯 **Automatic Workload Discovery**: Automatically fetch workloads from your Kubernetes cluster
 - 📈 **Cluster Trends**: CPU, memory, GPU-memory and estimated-cost trend sparklines in the Cluster Overview (1h/6h/24h) from a background sampler; per-node age badges in the Topology view
 - 📊 **Real-time Node Usage**: Visualize actual CPU and memory usage per node with interactive charts
-- 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool); GPU nodes additionally get a dedicated GPU requests section (memory-based under HAMi), with per-GPU placement lanes under HAMi. Free GPU memory shows its remaining amount, and pod names are click-to-copy (`namespace/name`)
+- 🗺️ **Topology View**: Bird’s-eye view of pods on nodes with segment sizes by CPU or memory requests (grouped by NodePool); GPU nodes additionally get a dedicated GPU requests section (memory-based under HAMi), with each physical GPU drawn as a memory tank (pods stacked, free on top) and a per-node fragmentation line ("66 GiB free, largest single gap 38 GiB"). A **Will it fit?** box takes a size and highlights every GPU with that much free on one card (`?fit=40GiB`, shareable), and pod names are click-to-copy (`namespace/name`)
 - 🏗️ **NodePool Analysis**: Analyze existing Karpenter NodePool configurations for accurate before/after comparisons
 - 💡 **AI-Powered Recommendations**: Get intelligent NodePool recommendations optimized for cost and performance using Ollama/LiteLLM/VLLM/AWS Bedrock
 - 💰 **AWS Pricing Integration**: Real-time pricing from AWS Pricing API for accurate cost calculations
