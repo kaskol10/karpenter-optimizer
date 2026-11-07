@@ -55,6 +55,11 @@ type PodHealth struct {
 	PreemptionsRecent *int64   `json:"preemptionsRecent,omitempty"`
 	TokensPerSec      *float64 `json:"tokensPerSec,omitempty"`   // input+output, from counter diffs
 	RequestsPerSec    *float64 `json:"requestsPerSec,omitempty"` // from num_requests_total diffs
+	// PromptTokensPerSec and GenerationTokensPerSec split TokensPerSec into
+	// input and output, which hosted APIs price differently. Each is nil when
+	// its counter is missing or on the first sample.
+	PromptTokensPerSec     *float64 `json:"promptTokensPerSec,omitempty"`
+	GenerationTokensPerSec *float64 `json:"generationTokensPerSec,omitempty"`
 
 	// Placement (filled server-side after probing, not from the pod's own metrics).
 	Node             string      `json:"node,omitempty"`         // node name (spec.nodeName)
@@ -62,7 +67,19 @@ type PodHealth struct {
 	NodeInstanceType string      `json:"nodeInstanceType,omitempty"`
 	GPUModel         string      `json:"gpuModel,omitempty"`
 	GPUCapacity      int         `json:"gpuCapacity,omitempty"`
-	GPUDevices       []GPUDevice `json:"gpuDevices,omitempty"` // physical cards from HAMi annotation
+	GPUDevices       []GPUDevice `json:"gpuDevices,omitempty"`       // physical cards from HAMi annotation
+	GPURequested     int         `json:"gpuRequested,omitempty"`     // nvidia.com/gpu the pod asks for (vGPUs under HAMi)
+	NodeCapacityType string      `json:"nodeCapacityType,omitempty"` // spot / on-demand, empty when unknown
+	NodeGPUMemMiB    float64     `json:"nodeGpuMemMiB,omitempty"`    // node's total GPU memory, 0 when unknown
+
+	// Cost is this replica's share of its node's hourly price. nil when it
+	// could not be priced (no instance type, unknown price, or no way to tell
+	// how much of the node's GPUs the pod holds). Endpoint only.
+	Cost *ReplicaCost `json:"cost"`
+	// HostedPrice is what a hosted API charges for the same model, for
+	// comparison. nil when the model is not in the hosted catalog or the
+	// catalog could not be fetched. Endpoint only.
+	HostedPrice *HostedPrice `json:"hostedPrice"`
 
 	// GPUNeighbours lists the physical GPUs this pod shares with other pods,
 	// and who those pods are (the usual cause of one replica being slower than
@@ -73,6 +90,32 @@ type PodHealth struct {
 	// UUID, false when inferred (two GPU pods on a single-GPU node must be
 	// time-slicing the same card).
 	GPUNeighboursPrecise bool `json:"gpuNeighboursPrecise,omitempty"`
+}
+
+// ReplicaCost is an estimate of what one serving replica costs per hour: its
+// node's price times the share of the node's GPUs it holds. GPUs dominate
+// the price of GPU instances, so CPU and memory are not apportioned.
+type ReplicaCost struct {
+	CostPerHour      float64 `json:"costPerHour"`
+	NodeCostPerHour  float64 `json:"nodeCostPerHour"`
+	NodeCapacityType string  `json:"nodeCapacityType"` // capacity type the price assumes (spot / on-demand)
+	Share            float64 `json:"share"`            // 0-1 of the node's GPUs
+	// ShareBasis says how Share was worked out: "gpu-memory" (HAMi placement
+	// memory over the node's GPU memory) or "gpu-count" (GPUs over the node's
+	// GPU count).
+	ShareBasis  string `json:"shareBasis"`
+	Currency    string `json:"currency"`
+	PriceSource string `json:"priceSource"` // aws-pricing-api, hardcoded, regional-fallback, family-estimate
+}
+
+// HostedPrice is a hosted API's list price for a model, in USD per million
+// tokens, split into input (prompt) and output (generation).
+type HostedPrice struct {
+	Source        string  `json:"source"` // "openrouter"
+	Model         string  `json:"model"`  // the hosted model id that matched
+	InputPerMTok  float64 `json:"inputPerMTok"`
+	OutputPerMTok float64 `json:"outputPerMTok"`
+	FetchedAtUnix int64   `json:"fetchedAt"`
 }
 
 // GPUShare is one physical GPU a serving pod shares, and the other pods on it.
@@ -109,6 +152,10 @@ type counterSample struct {
 type rateState struct {
 	tokens      float64
 	hasTokens   bool
+	prompt      float64
+	hasPrompt   bool
+	gen         float64
+	hasGen      bool
 	requests    float64
 	hasRequests bool
 	ts          time.Time
@@ -312,6 +359,12 @@ func (p *Prober) updateRates(h *PodHealth, samples []promSample) {
 				}
 				h.TokensPerSec = &rate
 			}
+			if hasPrompt && prev.hasPrompt {
+				h.PromptTokensPerSec = counterRate(prompt, prev.prompt, dt)
+			}
+			if hasGen && prev.hasGen {
+				h.GenerationTokensPerSec = counterRate(gen, prev.gen, dt)
+			}
 			if hasRequests && prev.hasRequests {
 				rate := (requests - prev.requests) / dt
 				if rate < 0 {
@@ -321,7 +374,22 @@ func (p *Prober) updateRates(h *PodHealth, samples []promSample) {
 			}
 		}
 	}
-	p.last[key] = &rateState{tokens: tokens, hasTokens: hasPrompt || hasGen, requests: requests, hasRequests: hasRequests, ts: now}
+	p.last[key] = &rateState{
+		tokens: tokens, hasTokens: hasPrompt || hasGen,
+		prompt: prompt, hasPrompt: hasPrompt,
+		gen: gen, hasGen: hasGen,
+		requests: requests, hasRequests: hasRequests,
+		ts: now,
+	}
+}
+
+// counterRate is the per-second increase of a counter, 0 after a reset.
+func counterRate(now, prev, dt float64) *float64 {
+	rate := (now - prev) / dt
+	if rate < 0 {
+		rate = 0
+	}
+	return &rate
 }
 
 // updatePreemptions records the pod's lifetime preemption counter and sets

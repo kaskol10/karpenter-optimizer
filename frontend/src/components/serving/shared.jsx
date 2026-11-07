@@ -21,9 +21,9 @@ export function MetricTip({ label, tip, children }) {
             <HelpCircle className="h-3 w-3" aria-hidden="true" />
           </button>
         </PopoverTrigger>
-        <PopoverContent side="top" className="w-72 p-3 text-xs leading-relaxed">
+        <PopoverContent side="top" className="w-80 p-3 text-xs leading-relaxed">
           <p className="font-semibold text-foreground">{label}</p>
-          <p className="mt-1 text-muted-foreground">{tip}</p>
+          <p className="mt-1 whitespace-pre-line text-muted-foreground">{tip}</p>
         </PopoverContent>
       </Popover>
       {children}

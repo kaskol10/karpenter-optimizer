@@ -12,6 +12,8 @@ import { placementFromServing } from '../../lib/servingPlacement';
 import { sortByAttention } from '../../lib/servingStatus';
 import { groupByModel, hasProblem, sortModels } from '../../lib/servingModels';
 import { buildTriage } from '../../lib/servingTriage';
+import { modelCost } from '../../lib/servingCost';
+import { modelHeadroom } from '../../lib/servingHeadroom';
 import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
@@ -286,6 +288,8 @@ function ServingHealth({ onOpenTopology, onOpenLogs }) {
                       <ModelRow
                         key={group.model}
                         group={group}
+                        cost={modelCost(group.replicas)}
+                        headroom={modelHeadroom(group.replicas, servingHistory)}
                         expanded={isExpanded(group)}
                         onToggle={() => toggleModel(group)}
                         onSelectReplica={focusCard}

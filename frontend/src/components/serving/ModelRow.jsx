@@ -2,7 +2,9 @@ import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatSeconds } from '../../lib/servingLatency';
-import { STATUS_TONE_CLASSES } from './shared';
+import { comparison, costInputsText, formatMoney } from '../../lib/servingCost';
+import { headroomText } from '../../lib/servingHeadroom';
+import { MetricTip, STATUS_TONE_CLASSES } from './shared';
 
 // Replica dots use the badge tone colours, solid, so a row reads at a glance:
 // three green dots and one orange one.
@@ -15,20 +17,48 @@ const DOT_CLASSES = {
 
 const fmtRate = (v, unit) => (v == null ? '–' : `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${unit}`);
 
-function Stat({ label, value, title }) {
+// Stat is one figure in the row header. `tip` adds a help popover (used for
+// estimates, which must show their inputs); `title` is a plain hover hint.
+function Stat({ label, value, title, tip, sub, subClassName }) {
   return (
     <span className="flex flex-col leading-tight" title={title}>
-      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {tip ? <MetricTip label={label} tip={tip} /> : label}
+      </span>
       <span className="tabular-nums font-medium">{value}</span>
+      {sub && <span className={cn('text-[10px] tabular-nums', subClassName || 'text-muted-foreground')}>{sub}</span>}
     </span>
   );
+}
+
+// costStat renders a model's cost per 1M tokens and the hosted comparison.
+function costStat(cost) {
+  // Clusters with no prices at all (on-prem, no instance types) get no column.
+  if (!cost || (cost.unknown === 'unpriced' && !cost.hosted)) return null;
+  const vs = comparison(cost);
+  let value = '–';
+  if (cost.perMTok != null) value = `≈${formatMoney(cost.perMTok, cost.currency)}`;
+  else if (cost.unknown === 'no-traffic') value = 'idle';
+  let sub = null;
+  let subClassName = null;
+  if (vs) {
+    sub = `${vs.ratio < 0.1 ? vs.ratio.toFixed(2) : vs.ratio.toFixed(1)}× hosted ${formatMoney(cost.hosted.blendedPerMTok)}`;
+    subClassName = vs.cheaper ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400';
+  } else if (cost.hosted) {
+    sub = `hosted ${formatMoney(cost.hosted.inputPerMTok)}/${formatMoney(cost.hosted.outputPerMTok)}`;
+  } else if (cost.costPerHour != null) {
+    sub = `${formatMoney(cost.costPerHour, cost.currency)}/h`;
+  }
+  return { value, sub, subClassName, tip: costInputsText(cost) };
 }
 
 // ModelRow is one model in the Serving tab: a header that answers "is this
 // model healthy, and how loaded is it?" across all its replicas, expanding
 // into the replica cards. Each replica dot is a button that opens the row
 // and jumps to that replica's card.
-export function ModelRow({ group, expanded, onToggle, onSelectReplica, children }) {
+export function ModelRow({ group, cost, headroom, expanded, onToggle, onSelectReplica, children }) {
+  const costInfo = costStat(cost);
+  const headroomInfo = headroom ? headroomText(headroom) : null;
   const worst = [...group.statuses.values()].reduce((a, b) => (b.severity < a.severity ? b : a));
   const panelId = `model-row-${group.model.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   return (
@@ -81,6 +111,10 @@ export function ModelRow({ group, expanded, onToggle, onSelectReplica, children 
           <Stat label="E2E p95" value={group.e2eP95 == null ? '–' : formatSeconds(group.e2eP95)} title="Worst replica's p95 end-to-end latency" />
           <Stat label="KV max" value={group.kvMax == null ? '–' : `${group.kvMax.toFixed(0)}%`} title="Fullest replica's KV cache" />
           <Stat label="Queue" value={`${group.running} / ${group.waiting}`} title="Running / waiting requests, all replicas" />
+          {costInfo && (
+            <Stat label="Per 1M tok" value={costInfo.value} sub={costInfo.sub} subClassName={costInfo.subClassName} tip={costInfo.tip} />
+          )}
+          {headroomInfo && <Stat label="Headroom" value={headroomInfo.label} tip={headroomInfo.title} />}
         </div>
       </div>
       {expanded && (

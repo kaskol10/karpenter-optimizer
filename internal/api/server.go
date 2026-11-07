@@ -55,6 +55,7 @@ import (
 	"github.com/karpenter-optimizer/internal/config"
 	"github.com/karpenter-optimizer/internal/gatewayhistory"
 	"github.com/karpenter-optimizer/internal/history"
+	"github.com/karpenter-optimizer/internal/hostedprices"
 	"github.com/karpenter-optimizer/internal/kubernetes"
 	"github.com/karpenter-optimizer/internal/litellm"
 	"github.com/karpenter-optimizer/internal/power"
@@ -103,6 +104,13 @@ type Server struct {
 	// graceful shutdown, so the samplers stop instead of running for the life
 	// of the process.
 	cancelRoot context.CancelFunc
+	rootCtx    context.Context
+
+	// hostedPrices is the daily OpenRouter price list for the Serving tab's
+	// hosted comparison. Fetching starts on the first /serving request that
+	// finds serving pods, so clusters without LLMs never call out.
+	hostedPrices     *hostedprices.Catalog
+	hostedPricesOnce sync.Once
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -205,6 +213,7 @@ func NewServer(cfg *config.Config) *Server {
 		gatewayHistoryStore:     gwStore,
 		gatewayHistoryStoreName: gwStoreName,
 		alertsManager:           newAlertsManager(cfg),
+		hostedPrices:            hostedprices.New(hostedprices.DefaultURL),
 	}
 
 	// Root cancellable context for all background samplers. Created here so
@@ -212,6 +221,7 @@ func NewServer(cfg *config.Config) *Server {
 	// for the process lifetime (which also leaked samplers in tests).
 	rootCtx, cancelRoot := context.WithCancel(context.Background())
 	server.cancelRoot = cancelRoot
+	server.rootCtx = rootCtx
 
 	// Configure the process-wide LiteLLM gateway prober with the metrics
 	// auth key (empty = unauthenticated).
