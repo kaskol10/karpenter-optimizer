@@ -40,8 +40,14 @@ func (s *Server) getServing(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	// Only the endpoint needs neighbours; the history sampler skips this.
+	// Only the endpoint needs neighbours, cost and hosted prices; the history
+	// sampler skips them.
 	s.attachGPUNeighbours(ctx, health)
+	s.attachServingCost(ctx, health)
+	if len(health) > 0 {
+		s.startHostedPrices()
+	}
+	attachHostedPrices(health, s.hostedPrices)
 	storeServingCache(health)
 	c.JSON(200, gin.H{"pods": health})
 }
@@ -59,6 +65,7 @@ func (s *Server) probeServingPods(ctx context.Context) ([]llmhealth.PodHealth, e
 	for _, p := range pods {
 		h := servingProber.Probe(ctx, p.Namespace, p.Name, p.IP, p.Port)
 		h.Node = p.NodeName
+		h.GPURequested = p.GPURequested
 		// Surface the physical GPU cards (HAMi/KAI annotation) so the UI can
 		// show which specific card(s) each model occupies.
 		if len(p.GPUDevices) > 0 {
@@ -87,6 +94,8 @@ func (s *Server) probeServingPods(ctx context.Context) ([]llmhealth.PodHealth, e
 					health[i].NodeInstanceType = p.InstanceType
 					health[i].GPUModel = p.GPUModel
 					health[i].GPUCapacity = p.GPUCapacity
+					health[i].NodeCapacityType = p.CapacityType
+					health[i].NodeGPUMemMiB = p.GPUMemTotalMiB
 				}
 			}
 		}

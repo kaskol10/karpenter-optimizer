@@ -2495,6 +2495,9 @@ type LLMPodInfo struct {
 	// parsed from the HAMi/KAI hami.io/vgpu-devices-allocated annotation.
 	// Empty on standard whole-GPU pods (no HAMi annotation).
 	GPUDevices []GPUDevice `json:"gpuDevices,omitempty"`
+	// GPURequested is the number of nvidia.com/gpu the pod asks for (limits,
+	// else requests, summed over containers). Under HAMi it counts vGPUs.
+	GPURequested int `json:"gpuRequested,omitempty"`
 }
 
 // llmImageMarkers are substrings matched against a container image or command
@@ -2524,16 +2527,32 @@ func (c *Client) FindLLMPods(ctx context.Context) ([]LLMPodInfo, error) {
 			continue
 		}
 		out = append(out, LLMPodInfo{
-			Namespace:  pod.Namespace,
-			Name:       pod.Name,
-			IP:         pod.Status.PodIP,
-			Port:       port,
-			Image:      image,
-			NodeName:   pod.Spec.NodeName,
-			GPUDevices: parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
+			Namespace:    pod.Namespace,
+			Name:         pod.Name,
+			IP:           pod.Status.PodIP,
+			Port:         port,
+			Image:        image,
+			NodeName:     pod.Spec.NodeName,
+			GPUDevices:   parseHamiVGPUDevices(pod.Annotations[hamiVGPUDevicesAnnotation]),
+			GPURequested: podGPURequest(&pod),
 		})
 	}
 	return out, nil
+}
+
+// podGPURequest sums nvidia.com/gpu over the pod's containers, preferring
+// limits (extended resources must set them) and falling back to requests.
+func podGPURequest(pod *corev1.Pod) int {
+	gpu := corev1.ResourceName("nvidia.com/gpu")
+	total := 0
+	for _, container := range pod.Spec.Containers {
+		if q, ok := container.Resources.Limits[gpu]; ok && !q.IsZero() {
+			total += int(q.Value())
+		} else if q, ok := container.Resources.Requests[gpu]; ok && !q.IsZero() {
+			total += int(q.Value())
+		}
+	}
+	return total
 }
 
 // detectLLMServing returns (matchedMarker, port, image) for a pod that looks
@@ -2652,6 +2671,44 @@ type NodePlacement struct {
 	InstanceType string `json:"instanceType,omitempty"`
 	GPUModel     string `json:"gpuModel,omitempty"`
 	GPUCapacity  int    `json:"gpuCapacity,omitempty"`
+	// CapacityType is "spot" or "on-demand" (karpenter.sh/capacity-type, else
+	// the EKS managed node group label; empty when neither is set).
+	CapacityType string `json:"capacityType,omitempty"`
+	// GPUMemTotalMiB is the node's total GPU memory (nvidia.com/gpu.memory x
+	// count, else the HAMi nvidia.com/gpumem capacity); 0 when unknown.
+	GPUMemTotalMiB float64 `json:"gpuMemTotalMiB,omitempty"`
+}
+
+// placementCapacityType reads spot vs on-demand from node labels: Karpenter's
+// karpenter.sh/capacity-type, else EKS managed node groups'
+// eks.amazonaws.com/capacityType (SPOT / ON_DEMAND). Unlike nodeCapacityType
+// it returns "" when unknown, so callers can say the price is an assumption.
+func placementCapacityType(labels map[string]string) string {
+	if v := labels["karpenter.sh/capacity-type"]; v != "" {
+		return v
+	}
+	switch labels["eks.amazonaws.com/capacityType"] {
+	case "SPOT":
+		return "spot"
+	case "ON_DEMAND":
+		return "on-demand"
+	}
+	return ""
+}
+
+// nodeGPUMemTotalMiB is the node's total GPU memory: the per-GPU
+// nvidia.com/gpu.memory label times the GPU count, else the HAMi
+// nvidia.com/gpumem capacity (a node total). 0 when unknown.
+func nodeGPUMemTotalMiB(node *corev1.Node, gpuCount int) float64 {
+	if v, ok := node.Labels["nvidia.com/gpu.memory"]; ok && gpuCount > 0 {
+		if per, err := strconv.ParseFloat(v, 64); err == nil && per > 0 {
+			return per * float64(gpuCount)
+		}
+	}
+	if q, ok := node.Status.Capacity[corev1.ResourceName("nvidia.com/gpumem")]; ok && !q.IsZero() {
+		return float64(q.Value())
+	}
+	return 0
 }
 
 // GetNodePlacement returns instance type and GPU info for the requested nodes.
@@ -2699,6 +2756,8 @@ func (c *Client) GetNodePlacement(ctx context.Context, nodeNames []string) (map[
 				placement.GPUCapacity = int(gpu.Value())
 			}
 		}
+		placement.CapacityType = placementCapacityType(node.Labels)
+		placement.GPUMemTotalMiB = nodeGPUMemTotalMiB(&node, placement.GPUCapacity)
 		out[node.Name] = placement
 	}
 	return out, nil

@@ -55,7 +55,7 @@ export const topologyNodes = [
 ];
 
 function servingPod(name, model, node, gpuDevices, metrics = {}) {
-  return {
+  const pod = {
     namespace: 'llm',
     name,
     model,
@@ -77,11 +77,38 @@ function servingPod(name, model, node, gpuDevices, metrics = {}) {
     e2eP95Seconds: 2.1,
     tokensPerSec: 710,
     requestsPerSec: 1.4,
+    // A quarter of a g6e.12xlarge (one of its 4 GPUs) at $10/h on-demand.
+    cost: {
+      costPerHour: 2.5,
+      nodeCostPerHour: 10,
+      nodeCapacityType: 'on-demand',
+      share: 0.25,
+      shareBasis: 'gpu-count',
+      currency: 'USD',
+      priceSource: 'aws-pricing-api',
+    },
+    hostedPrice: null,
     ...metrics,
   };
+  // Three quarters of the traffic is prompt (input) tokens.
+  if (pod.tokensPerSec != null && pod.promptTokensPerSec === undefined) {
+    pod.promptTokensPerSec = pod.tokensPerSec * 0.75;
+    pod.generationTokensPerSec = pod.tokensPerSec * 0.25;
+  }
+  return pod;
 }
 
+// What OpenRouter charges for Llama 3.3 70B (USD per 1M tokens).
+export const LLAMA_HOSTED = {
+  source: 'openrouter',
+  model: 'meta-llama/llama-3.3-70b-instruct',
+  inputPerMTok: 0.13,
+  outputPerMTok: 0.39,
+  fetchedAt: 1767225600,
+};
+
 const LLAMA = 'meta-llama/Llama-3.3-70B';
+const llamaHosted = () => ({ hostedPrice: LLAMA_HOSTED });
 
 // gpuNeighbours as /api/v1/serving returns them (computed server-side from the
 // same placement as topologyNodes above).
@@ -94,8 +121,9 @@ function sharing(device, pods) {
 }
 
 export const servingPods = {
-  r1: servingPod('llama-70b-r1', LLAMA, 'ip-10-0-4-12', [GPU.a], alone),
+  r1: servingPod('llama-70b-r1', LLAMA, 'ip-10-0-4-12', [GPU.a], { ...alone, ...llamaHosted() }),
   r2: servingPod('llama-70b-r2', LLAMA, 'ip-10-0-7-88', [GPU.c], {
+    ...llamaHosted(),
     e2eSeconds: 5.1,
     e2eP95Seconds: 6.8,
     ttftP95Seconds: 1.9,
@@ -104,7 +132,7 @@ export const servingPods = {
     requestsPerSec: 0.6,
     ...sharing(GPU.c, [{ namespace: 'batch', name: 'embed-worker-7f9c', memoryMiB: 14000 }]),
   }),
-  r3: servingPod('llama-70b-r3', LLAMA, 'ip-10-0-4-12', [GPU.b], { e2eP95Seconds: 2.4, ...alone }),
+  r3: servingPod('llama-70b-r3', LLAMA, 'ip-10-0-4-12', [GPU.b], { e2eP95Seconds: 2.4, ...alone, ...llamaHosted() }),
   qwen: servingPod('qwen3-8b-0', 'Qwen/Qwen3-8B', 'ip-10-0-7-88', [GPU.d], {
     e2eP95Seconds: 0.9,
     tokensPerSec: 1980,

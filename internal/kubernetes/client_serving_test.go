@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -130,6 +131,108 @@ func TestGetNodePlacementHostname(t *testing.T) {
 	}
 	if workerA.Hostname != "worker-a" {
 		t.Errorf("worker-a Hostname = %q, want worker-a (fallback to node name)", workerA.Hostname)
+	}
+}
+
+func TestFindLLMPodsGPURequested(t *testing.T) {
+	t.Parallel()
+
+	// #given: one pod with a GPU limit on two containers, one with only a
+	// request, one with no GPU
+	withGPU := func(name string, limits, requests int64, containers int) *corev1.Pod {
+		p := llmPod(name, "node-1", nil)
+		for i := 1; i < containers; i++ {
+			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "side", Image: "busybox"})
+		}
+		gpu := corev1.ResourceName("nvidia.com/gpu")
+		for i := range p.Spec.Containers {
+			p.Spec.Containers[i].Resources = corev1.ResourceRequirements{Limits: corev1.ResourceList{}, Requests: corev1.ResourceList{}}
+			if limits > 0 {
+				p.Spec.Containers[i].Resources.Limits[gpu] = *resource.NewQuantity(limits, resource.DecimalSI)
+			}
+			if requests > 0 {
+				p.Spec.Containers[i].Resources.Requests[gpu] = *resource.NewQuantity(requests, resource.DecimalSI)
+			}
+		}
+		return p
+	}
+	c := &Client{clientset: fake.NewClientset(
+		withGPU("two-containers", 2, 0, 2),
+		withGPU("request-only", 0, 1, 1),
+		withGPU("no-gpu", 0, 0, 1),
+	)}
+
+	// #when
+	pods, err := c.FindLLMPods(context.Background())
+	if err != nil {
+		t.Fatalf("FindLLMPods() error = %v", err)
+	}
+
+	// #then
+	got := map[string]int{}
+	for _, p := range pods {
+		got[p.Name] = p.GPURequested
+	}
+	want := map[string]int{"two-containers": 4, "request-only": 1, "no-gpu": 0}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s GPURequested = %d, want %d", name, got[name], w)
+		}
+	}
+}
+
+func TestGetNodePlacementCapacityTypeAndGPUMemory(t *testing.T) {
+	t.Parallel()
+
+	// #given: a Karpenter spot node with per-GPU memory labels, an EKS
+	// on-demand node with HAMi's gpumem capacity, and an unlabelled node
+	objects := []runtime.Object{
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "karpenter-spot", Labels: map[string]string{
+			"karpenter.sh/capacity-type": "spot",
+			"nvidia.com/gpu.count":       "4",
+			"nvidia.com/gpu.memory":      "46068",
+		}}},
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "eks-od", Labels: map[string]string{
+				"eks.amazonaws.com/capacityType": "ON_DEMAND",
+			}},
+			Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+				"nvidia.com/gpu":    *resource.NewQuantity(1, resource.DecimalSI),
+				"nvidia.com/gpumem": *resource.NewQuantity(23028, resource.DecimalSI),
+			}},
+		},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "eks-spot", Labels: map[string]string{
+			"eks.amazonaws.com/capacityType": "SPOT",
+		}}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "plain"}},
+	}
+	c := &Client{clientset: fake.NewClientset(objects...)}
+
+	// #when
+	placements, err := c.GetNodePlacement(context.Background(), []string{"karpenter-spot", "eks-od", "eks-spot", "plain"})
+	if err != nil {
+		t.Fatalf("GetNodePlacement() error = %v", err)
+	}
+
+	// #then
+	cases := []struct {
+		node     string
+		capacity string
+		memMiB   float64
+	}{
+		{"karpenter-spot", "spot", 4 * 46068},
+		{"eks-od", "on-demand", 23028},
+		{"eks-spot", "spot", 0},
+		{"plain", "", 0},
+	}
+	for _, tc := range cases {
+		p := placements[tc.node]
+		if p.CapacityType != tc.capacity {
+			t.Errorf("%s CapacityType = %q, want %q", tc.node, p.CapacityType, tc.capacity)
+		}
+		if p.GPUMemTotalMiB != tc.memMiB {
+			t.Errorf("%s GPUMemTotalMiB = %v, want %v", tc.node, p.GPUMemTotalMiB, tc.memMiB)
+		}
 	}
 }
 

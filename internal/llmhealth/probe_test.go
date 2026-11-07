@@ -227,6 +227,14 @@ func TestProbeRatesAcrossProbes(t *testing.T) {
 	if *h.RequestsPerSec < 20 || *h.RequestsPerSec > 500 {
 		t.Errorf("requestsPerSec = %v, want ~100", *h.RequestsPerSec)
 	}
+	// Input and output are split: the prompt counter did not move, all the
+	// new tokens were generated.
+	if h.PromptTokensPerSec == nil || *h.PromptTokensPerSec != 0 {
+		t.Errorf("promptTokensPerSec = %v, want 0", h.PromptTokensPerSec)
+	}
+	if h.GenerationTokensPerSec == nil || *h.GenerationTokensPerSec != *h.TokensPerSec {
+		t.Errorf("generationTokensPerSec = %v, want the whole token rate %v", h.GenerationTokensPerSec, *h.TokensPerSec)
+	}
 }
 
 // TestProbeOffline verifies graceful degradation when nothing answers.
