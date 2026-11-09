@@ -17,6 +17,12 @@ func TestKarpenterDisruptionReason(t *testing.T) {
 		{"karpenter", "", "DisruptionTerminating", "Disrupting Node: Underutilized/Delete", "Underutilized"},
 		{"", "karpenter", "DisruptionLaunching", "Launching NodeClaim: Disrupting NodeClaim: Drifted/Replace", "Drifted"},
 		{"karpenter", "", "DisruptionTerminating", "Disrupting Node: Empty", "Empty"},
+		// Wording seen on Karpenter v1 clusters: no "/Delete" suffix.
+		{"karpenter", "", "DisruptionTerminating", "Disrupting Node: Underutilized", "Underutilized"},
+		{"karpenter", "", "InstanceTerminating", "Instance is terminating", "InstanceTerminating"},
+		{"karpenter", "", "Unconsolidatable", "Can't replace with a cheaper node", ""},
+		{"karpenter", "", "ConsolidationRejected", "Consolidation rejected: delete: [ip-10-0-0-1], reason: churn (savings: $0.18)", ""},
+		{"karpenter", "", "DisruptionBlocked", "Node is deleting or marked for deletion", ""},
 		{"karpenter", "", "DisruptionTerminating", "terminating", "Disrupted"},
 		{"karpenter", "", "DisruptionBlocked", "Cannot disrupt Node: pdb prevents pod evictions", ""},
 		{"karpenter", "", "SpotInterrupted", "Spot interruption warning was triggered", "SpotInterrupted"},
@@ -56,5 +62,40 @@ func TestNodeDisruptionReasonsKeepsLatestPerNode(t *testing.T) {
 	}
 	if got["n1"] != "Drifted" || got["n2"] != "SpotInterrupted" || len(got) != 2 {
 		t.Fatalf("got %v", got)
+	}
+}
+
+// A consolidated node logs the decision, then the instance terminating a few
+// minutes later (seen on a real cluster). The decision is the reason.
+func TestNodeDisruptionReasonsPrefersTheDecision(t *testing.T) {
+	now := time.Now()
+	ev := func(name, node, reason, msg string, at time.Time) *corev1.Event {
+		return &corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "default", Name: name},
+			InvolvedObject: corev1.ObjectReference{Kind: "Node", Name: node},
+			Source:         corev1.EventSource{Component: "karpenter"},
+			Reason:         reason,
+			Message:        msg,
+			LastTimestamp:  metav1.NewTime(at),
+		}
+	}
+	c := NewClientWithClientset(fake.NewClientset(
+		ev("a1", "consolidated", "DisruptionTerminating", "Disrupting Node: Underutilized", now.Add(-4*time.Minute)),
+		ev("a2", "consolidated", "InstanceTerminating", "Instance is terminating", now),
+		ev("b1", "spot", "InstanceTerminating", "Instance is terminating", now),
+		ev("b2", "spot", "SpotInterrupted", "Spot interruption warning was triggered", now.Add(-2*time.Minute)),
+		ev("c1", "plain", "InstanceTerminating", "Instance is terminating", now),
+		ev("d1", "twice", "DisruptionTerminating", "Disrupting Node: Underutilized", now.Add(-time.Hour)),
+		ev("d2", "twice", "DisruptionTerminating", "Disrupting Node: Empty", now),
+	))
+	got, err := c.NodeDisruptionReasons(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"consolidated": "Underutilized", "spot": "SpotInterrupted", "plain": "InstanceTerminating", "twice": "Empty"}
+	for node, reason := range want {
+		if got[node] != reason {
+			t.Errorf("%s: got %q, want %q", node, got[node], reason)
+		}
 	}
 }
