@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Time travel showed "InstanceTerminating" as the reason for consolidated nodes**: Karpenter logs "Disrupting Node: Underutilized" and then, a few minutes later, "Instance is terminating" on the same node. The latest event won, so the real reason was replaced. Reasons are now ranked:
+  - a disruption decision (Underutilized, Empty, Drifted…) first;
+  - then an interruption cause (SpotInterrupted, InstanceUnhealthy);
+  - then the generic instance-state events.
+
+  The latest event only breaks ties within a rank. Checked against Node events from a production Karpenter v1 cluster, whose messages carry no "/Delete" suffix; the parser already handled that.
+
 ### Added
 - **Gateway flow view**: the Gateway page gets a third view, **Flow** (`?view=flow`).
   - **The chart:** a Sankey from the Split-by values (apps, API keys or teams) on the left to models on the right, with each band sized by tokens or spend (toggle).
