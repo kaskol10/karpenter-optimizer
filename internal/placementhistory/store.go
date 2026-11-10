@@ -73,10 +73,23 @@ type Node struct {
 }
 
 // Snapshot is the cluster's placement at one moment.
+//
+// Gone holds the disruption reason of nodes that left since the previous
+// sample, read at the moment they left. It is needed because Karpenter marks
+// a node for deletion in the same instant it logs "Disrupting Node:
+// Underutilized", and a node marked for deletion is no longer listed, so no
+// earlier sample ever saw the reason on the node itself. Callers may pass
+// every reason they know; Add keeps only the nodes that actually just left.
 type Snapshot struct {
 	At    time.Time
-	Nodes map[string]Node // by name
-	Pods  map[string]Pod  // by namespace/name
+	Nodes map[string]Node   // by name
+	Pods  map[string]Pod    // by namespace/name
+	Gone  map[string]string // reason by name, for nodes that left at this sample
+
+	// Lifecycles are the steps read from Node events at this sample, by node
+	// name (see lifecycle.go). Input only: Add keeps those of nodes that
+	// left and stores them beside the sample, not in it.
+	Lifecycles map[string][]LifecycleStep
 }
 
 func (s *Snapshot) clone() *Snapshot {
@@ -87,6 +100,12 @@ func (s *Snapshot) clone() *Snapshot {
 	for k, v := range s.Pods {
 		c.Pods[k] = v
 	}
+	if len(s.Gone) > 0 {
+		c.Gone = make(map[string]string, len(s.Gone))
+		for k, v := range s.Gone {
+			c.Gone[k] = v
+		}
+	}
 	return c
 }
 
@@ -95,12 +114,18 @@ type delta struct {
 	nodesDel []string
 	podsSet  map[string]Pod
 	podsDel  []string
+	gone     map[string]string
 }
 
 type entry struct {
 	at  time.Time
 	key *Snapshot // a keyframe, or nil for a delta
 	d   *delta
+	// lc are node lifecycles saved with this entry: all tracked ones in a
+	// keyframe (so a restore needs nothing older), the changed ones in a
+	// delta.
+	lc       map[string][]LifecycleStep
+	departed map[string]time.Time // keyframes only
 }
 
 // Store is a concurrency-safe, delta-encoded ring of snapshots.
@@ -112,6 +137,10 @@ type Store struct {
 	last      *Snapshot
 	sinceKey  int
 	forceKey  bool
+	// departed is when each node left the samples, and lifecycles how it
+	// went, by name (see lifecycle.go).
+	departed   map[string]time.Time
+	lifecycles map[string][]LifecycleStep
 }
 
 // New returns a store keeping retention of history, with a full keyframe
@@ -133,16 +162,20 @@ func (s *Store) Add(snap *Snapshot) (rec Record, ok bool) {
 		return Record{}, false
 	}
 	c := snap.clone()
+	c.Gone = goneReasons(s.last, c)
+	s.trackDepartures(s.last, c)
+	changed := s.mergeLifecycles(snap.Lifecycles)
 	if s.last == nil || s.forceKey || s.sinceKey+1 >= s.keyEvery {
 		s.forceKey = false
-		s.entries = append(s.entries, entry{at: c.At, key: c})
+		s.entries = append(s.entries, entry{at: c.At, key: c, lc: copyLifecycles(s.lifecycles), departed: copyDeparted(s.departed)})
 		s.sinceKey = 0
 	} else {
-		s.entries = append(s.entries, entry{at: c.At, d: diff(s.last, c)})
+		s.entries = append(s.entries, entry{at: c.At, d: diff(s.last, c), lc: changed})
 		s.sinceKey++
 	}
 	s.last = c
 	s.prune(c.At)
+	s.pruneLifecycles(c.At.Add(-s.retention))
 	return encodeEntry(s.entries[len(s.entries)-1]), true
 }
 
@@ -170,8 +203,30 @@ func (s *Store) prune(now time.Time) {
 	}
 }
 
+// goneReasons keeps the reasons in next.Gone for nodes that were in prev
+// and are not in next, and drops the rest (nil when none is left).
+func goneReasons(prev, next *Snapshot) map[string]string {
+	if prev == nil || len(next.Gone) == 0 {
+		return nil
+	}
+	var out map[string]string
+	for name, reason := range next.Gone {
+		if _, was := prev.Nodes[name]; !was || reason == "" {
+			continue
+		}
+		if _, still := next.Nodes[name]; still {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[name] = reason
+	}
+	return out
+}
+
 func diff(prev, next *Snapshot) *delta {
-	d := &delta{nodesSet: map[string]Node{}, podsSet: map[string]Pod{}}
+	d := &delta{nodesSet: map[string]Node{}, podsSet: map[string]Pod{}, gone: next.Gone}
 	for k, n := range next.Nodes {
 		if old, ok := prev.Nodes[k]; !ok || old != n {
 			d.nodesSet[k] = n
@@ -222,6 +277,7 @@ func (d *delta) apply(s *Snapshot) {
 	for _, k := range d.podsDel {
 		delete(s.Pods, k)
 	}
+	s.Gone = d.gone // per sample, never carried forward
 }
 
 // At rebuilds the latest snapshot taken at or before t. ok is false when the
@@ -265,9 +321,15 @@ type Event struct {
 	CapacityType string    `json:"capacityType,omitempty"`
 	Reason       string    `json:"reason,omitempty"` // last Karpenter disruption reason seen (node-removed)
 	Pods         int       `json:"pods,omitempty"`   // pods on the node when it went (node-removed)
-	Pod          string    `json:"pod,omitempty"`    // pod-moved
-	From         string    `json:"from,omitempty"`
-	To           string    `json:"to,omitempty"`
+	// Lifecycle is how the node went, oldest step first (node-removed, when
+	// its events were seen); GoneAt is when its Node object was deleted.
+	// At is when it left the samples: usually when Karpenter marked it for
+	// deletion and it started draining.
+	Lifecycle []LifecycleStep `json:"lifecycle,omitempty"`
+	GoneAt    *time.Time      `json:"goneAt,omitempty"`
+	Pod       string          `json:"pod,omitempty"` // pod-moved
+	From      string          `json:"from,omitempty"`
+	To        string          `json:"to,omitempty"`
 }
 
 // Events lists node launches and terminations and pod moves (same pod name
@@ -288,14 +350,14 @@ func (s *Store) Events(since time.Time) []Event {
 		}
 		next.At = e.at
 		if state != nil && e.at.After(since) {
-			out = append(out, changes(state, next)...)
+			out = append(out, changes(state, next, s.lifecycles)...)
 		}
 		state = next
 	}
 	return out
 }
 
-func changes(prev, next *Snapshot) []Event {
+func changes(prev, next *Snapshot, lifecycles map[string][]LifecycleStep) []Event {
 	var out []Event
 	podsOn := map[string]int{}
 	for _, p := range prev.Pods {
@@ -310,8 +372,25 @@ func changes(prev, next *Snapshot) []Event {
 	for _, name := range sortedKeys(prev.Nodes) {
 		if _, ok := next.Nodes[name]; !ok {
 			n := prev.Nodes[name]
-			out = append(out, Event{At: next.At, Type: "node-removed", Node: name, NodePool: n.NodePool, InstanceType: n.InstanceType,
-				CapacityType: n.CapacityType, Reason: n.DisruptionReason, Pods: podsOn[name]})
+			reason := next.Gone[name] // read when it left: the usual case, see Snapshot
+			if reason == "" {
+				reason = n.DisruptionReason
+			}
+			ev := Event{At: next.At, Type: "node-removed", Node: name, NodePool: n.NodePool, InstanceType: n.InstanceType,
+				CapacityType: n.CapacityType, Reason: reason, Pods: podsOn[name]}
+			if steps := lifecycles[name]; len(steps) > 0 {
+				ev.Lifecycle = append([]LifecycleStep(nil), steps...)
+				for _, st := range steps {
+					switch {
+					case st.Kind == "removed":
+						goneAt := st.At
+						ev.GoneAt = &goneAt
+					case st.Kind == "disrupted" && ev.Reason == "" && st.Message != "":
+						ev.Reason = st.Message
+					}
+				}
+			}
+			out = append(out, ev)
 		}
 	}
 	for _, key := range sortedKeys(next.Pods) {

@@ -101,13 +101,15 @@ func (s *Server) samplePlacement(parent context.Context) {
 		debugLog(s.config.Debug, "[placement-history] sample skipped: %v\n", err)
 		return
 	}
-	reasons, err := s.k8sClient.NodeDisruptionReasons(ctx)
+	events, err := s.k8sClient.NodeEventSummary(ctx)
 	if err != nil {
 		s.placementReasonErr.Do(func() {
 			log.Printf("placement history: cannot read node events, terminations will have no reason: %v", err)
 		})
 	}
-	rec, ok := s.placementHistory.Add(snapshotFromTopology(time.Now(), nodes, reasons))
+	snap := snapshotFromTopology(time.Now(), nodes, events.Reasons)
+	snap.Lifecycles = lifecyclesFromEvents(events.Lifecycles)
+	rec, ok := s.placementHistory.Add(snap)
 	if ok && s.placementDurable != nil {
 		if err := s.placementDurable.Add(rec); err != nil {
 			// A lost delta would corrupt later rebuilds: start over from a
@@ -155,12 +157,21 @@ func restorePlacement(store placementdurable.Store, mem *placementhistory.Store,
 }
 
 // snapshotFromTopology converts topology nodes to a placement snapshot,
-// stamping each node with its latest Karpenter disruption reason.
+// stamping each node with its latest Karpenter disruption reason and
+// keeping the reasons of unlisted nodes in Gone: a node Karpenter disrupts
+// is marked for deletion at once and drops off the list, so its reason is
+// usually only known after it left.
 func snapshotFromTopology(at time.Time, nodes []TopologyNode, reasons map[string]string) *placementhistory.Snapshot {
 	snap := &placementhistory.Snapshot{
 		At:    at,
 		Nodes: make(map[string]placementhistory.Node, len(nodes)),
 		Pods:  map[string]placementhistory.Pod{},
+		Gone:  make(map[string]string, len(reasons)),
+	}
+	// Every known reason starts in Gone; listed nodes are removed below and
+	// the store keeps only the nodes that just left (see Snapshot.Gone).
+	for name, reason := range reasons {
+		snap.Gone[name] = reason
 	}
 	for _, n := range nodes {
 		hn := placementhistory.Node{
@@ -177,6 +188,7 @@ func snapshotFromTopology(at time.Time, nodes []TopologyNode, reasons map[string
 			hn.MemUsed, hn.MemCapacity, hn.MemAllocatable, hn.MemPercent = u.Used, u.Capacity, u.Allocatable, u.Percent
 		}
 		snap.Nodes[n.Name] = hn
+		delete(snap.Gone, n.Name)
 		for _, p := range n.Pods {
 			hp := placementhistory.Pod{
 				Namespace: p.Namespace, Name: p.Name, Node: n.Name, WorkloadName: p.WorkloadName,
@@ -341,4 +353,21 @@ func (s *Server) getTopologyEvents(c *gin.Context) {
 		events = []placementhistory.Event{}
 	}
 	c.JSON(200, gin.H{"history": s.placementRange(), "events": events})
+}
+
+// lifecyclesFromEvents converts the lifecycle steps read from Node events to
+// the history's own type.
+func lifecyclesFromEvents(in map[string][]kubernetes.LifecycleStep) map[string][]placementhistory.LifecycleStep {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]placementhistory.LifecycleStep, len(in))
+	for name, steps := range in {
+		conv := make([]placementhistory.LifecycleStep, len(steps))
+		for i, st := range steps {
+			conv[i] = placementhistory.LifecycleStep{Kind: st.Kind, At: st.At, Last: st.Last, Count: st.Count, Message: st.Message}
+		}
+		out[name] = conv
+	}
+	return out
 }

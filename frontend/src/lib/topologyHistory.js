@@ -34,6 +34,87 @@ export function formatAgo(at, now = Date.now()) {
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+const toUnix = (iso) => {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+};
+
+// formatDuration prints seconds as "40 s", "6 min" or "1 h 5 min".
+export function formatDuration(sec) {
+  if (sec < 60) return `${Math.max(0, Math.round(sec))} s`;
+  const mins = Math.round(sec / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+// Lifecycle step kinds (see placementhistory.LifecycleStep) in words.
+const STEP_LABELS = {
+  disrupted: 'disrupted',
+  'spot-interrupted': 'spot interruption',
+  unhealthy: 'instance unhealthy',
+  'drain-failed': 'drain failed',
+  'awaiting-volumes': 'waiting for volumes to detach',
+  'instance-stopping': 'instance stopping',
+  'instance-terminating': 'instance terminating',
+  'not-ready': 'not ready',
+  removed: 'removed from the cluster',
+};
+// Steps whose repeats mean something (each is a failed attempt). Others
+// repeat only because two controllers log the same thing.
+const COUNTED_KINDS = new Set(['drain-failed', 'awaiting-volumes']);
+// Steps that start a node's way out: the drain is timed from the first.
+const START_KINDS = new Set(['disrupted', 'spot-interrupted', 'unhealthy']);
+
+// lifecycleSteps turns a node-removed event's lifecycle into lines, oldest
+// first: "12:22 disrupted: Underutilized", "12:22–12:26 drain failed ×4:
+// Failed to drain node, 1 pods are waiting to be evicted".
+export function lifecycleSteps(e, now = Date.now()) {
+  return (e.lifecycle || []).map((st) => {
+    const at = toUnix(st.at);
+    const last = toUnix(st.last);
+    const when =
+      last && at && formatClock(last, now) !== formatClock(at, now)
+        ? `${formatClock(at, now)}–${formatClock(last, now)}`
+        : formatClock(at, now);
+    const label = STEP_LABELS[st.kind] || st.kind;
+    const times = st.count > 1 && COUNTED_KINDS.has(st.kind) ? ` ×${st.count}` : '';
+    const showMessage = st.message && st.kind !== 'removed' && st.kind !== 'not-ready' && st.kind !== 'instance-terminating';
+    return { kind: st.kind, when, text: `${label}${times}${showMessage ? `: ${st.message}` : ''}` };
+  });
+}
+
+// lifecycleSummary is the short story of how a node went: how long from
+// the disruption (or from leaving the samples) to its Node object being
+// deleted (took, seconds; null when the removal was not seen), and how many
+// drain attempts failed with the latest message.
+export function lifecycleSummary(e) {
+  const steps = e.lifecycle || [];
+  if (!steps.length) return null;
+  const start = steps.find((st) => START_KINDS.has(st.kind));
+  const from = toUnix(start ? start.at : e.at);
+  const gone = e.goneAt ? toUnix(e.goneAt) : null;
+  const drain = steps.find((st) => st.kind === 'drain-failed');
+  return {
+    took: gone && from ? Math.max(0, gone - from) : null,
+    failedDrains: drain ? drain.count || 1 : 0,
+    drainMessage: drain?.message || '',
+    volumes: steps.some((st) => st.kind === 'awaiting-volumes'),
+  };
+}
+
+// lifecycleBrief is lifecycleSummary in a few words: "gone after 6 min ·
+// drain failed ×4".
+export function lifecycleBrief(e) {
+  const sum = lifecycleSummary(e);
+  if (!sum) return '';
+  const parts = [sum.took !== null ? `gone after ${formatDuration(sum.took)}` : 'removal not seen yet'];
+  if (sum.failedDrains) parts.push(`drain failed ×${sum.failedDrains}`);
+  if (sum.volumes) parts.push('waited for volumes');
+  return parts.join(' · ');
+}
+
 // eventText is one line for an event, for marker tooltips and lists.
 export function eventText(e) {
   const kind = [e.instanceType, e.capacityType].filter(Boolean).join(', ');
@@ -41,7 +122,8 @@ export function eventText(e) {
   if (e.type === 'node-added') return `${e.node} launched${kind ? ` (${kind})` : ''}${where}`;
   if (e.type === 'node-removed') {
     const why = e.reason ? `: ${e.reason}` : '';
-    return `${e.node} removed${why}${e.pods ? ` · ${plural(e.pods, 'pod')}` : ''}${where}`;
+    const brief = lifecycleBrief(e);
+    return `${e.node} removed${why}${e.pods ? ` · ${plural(e.pods, 'pod')}` : ''}${where}${brief ? ` · ${brief}` : ''}`;
   }
   if (e.type === 'pod-moved') return `${e.pod} moved ${e.from} → ${e.to}`;
   return e.type;

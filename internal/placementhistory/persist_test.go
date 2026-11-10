@@ -56,8 +56,8 @@ func TestRecordsRestoreTheSameHistory(t *testing.T) {
 		if !ok {
 			t.Fatalf("min %d missing after restore", m)
 		}
-		wb, _ := json.Marshal(wireSnapshot{nodeList(want.Nodes), podList(want.Pods)})
-		gb, _ := json.Marshal(wireSnapshot{nodeList(got.Nodes), podList(got.Pods)})
+		wb, _ := json.Marshal(wireSnapshot{Nodes: nodeList(want.Nodes), Pods: podList(want.Pods)})
+		gb, _ := json.Marshal(wireSnapshot{Nodes: nodeList(got.Nodes), Pods: podList(got.Pods)})
 		if string(wb) != string(gb) {
 			t.Fatalf("min %d differs:\nwant %s\ngot  %s", m, wb, gb)
 		}

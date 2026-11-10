@@ -99,3 +99,59 @@ func TestNodeDisruptionReasonsPrefersTheDecision(t *testing.T) {
 		}
 	}
 }
+
+// The events a production Karpenter v1 cluster logged for one consolidated
+// node, from "Disrupting Node" to the node-controller removing it.
+func TestNodeEventSummaryLifecycle(t *testing.T) {
+	t0 := time.Date(2026, 11, 10, 12, 22, 1, 0, time.UTC)
+	ev := func(name, component, reason, msg string, first, last time.Duration, count int32) *corev1.Event {
+		return &corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "default", Name: name},
+			InvolvedObject: corev1.ObjectReference{Kind: "Node", Name: "n1"},
+			Source:         corev1.EventSource{Component: component},
+			Reason:         reason, Message: msg, Count: count,
+			FirstTimestamp: metav1.NewTime(t0.Add(first)), LastTimestamp: metav1.NewTime(t0.Add(last)),
+		}
+	}
+	c := NewClientWithClientset(fake.NewClientset(
+		ev("e1", "karpenter", "DisruptionTerminating", "Disrupting Node: Underutilized", 0, 0, 1),
+		ev("e2", "karpenter", "FailedDraining", "Failed to drain node, 10 pods are waiting to be evicted", 2*time.Second, 2*time.Second, 1),
+		ev("e3", "karpenter", "DisruptionBlocked", "Node is deleting or marked for deletion", time.Minute, 6*time.Minute, 4),
+		ev("e4", "karpenter", "FailedDraining", "Failed to drain node, 1 pods are waiting to be evicted", 2*time.Minute, 4*time.Minute, 3),
+		ev("e5", "karpenter", "InstanceTerminating", "Instance is terminating", 4*time.Minute+24*time.Second, 4*time.Minute+24*time.Second, 1),
+		ev("e6", "kubelet", "NodeNotReady", "status is now: NodeNotReady", 4*time.Minute+24*time.Second, 4*time.Minute+24*time.Second, 1),
+		ev("e7", "node-controller", "RemovingNode", "Removing Node n1 from Controller", 5*time.Minute+51*time.Second, 5*time.Minute+51*time.Second, 1),
+	))
+	got, err := c.NodeEventSummary(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reasons["n1"] != "Underutilized" {
+		t.Errorf("reason %q", got.Reasons["n1"])
+	}
+	steps := got.Lifecycles["n1"]
+	var kinds []string
+	for _, st := range steps {
+		kinds = append(kinds, st.Kind)
+	}
+	want := []string{"disrupted", "drain-failed", "instance-terminating", "not-ready", "removed"}
+	if len(kinds) != len(want) {
+		t.Fatalf("kinds %v, want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("kinds %v, want %v", kinds, want)
+		}
+	}
+	if steps[0].Message != "Underutilized" {
+		t.Errorf("disrupted message %q", steps[0].Message)
+	}
+	drain := steps[1]
+	if drain.Count != 4 || !drain.At.Equal(t0.Add(2*time.Second)) || !drain.Last.Equal(t0.Add(4*time.Minute)) ||
+		drain.Message != "Failed to drain node, 1 pods are waiting to be evicted" {
+		t.Errorf("drain step %+v", drain)
+	}
+	if !steps[4].At.Equal(t0.Add(5*time.Minute + 51*time.Second)) {
+		t.Errorf("removed at %v", steps[4].At)
+	}
+}
