@@ -33,7 +33,7 @@ jobs:
       - name: Generate changelog
         id: changelog
         continue-on-error: true
-        uses: metcalfc/changelog-generator@v4.4.0
+        uses: metcalfc/changelog-generator@v4.6.2
         with:
           myToken: ${{ secrets.GITHUB_TOKEN }}
       
