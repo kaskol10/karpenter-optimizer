@@ -6,6 +6,10 @@ import {
   eventText,
   formatAgo,
   formatClock,
+  formatDuration,
+  lifecycleBrief,
+  lifecycleSteps,
+  lifecycleSummary,
   markerTone,
   parseAtParam,
   withChanges,
@@ -147,5 +151,58 @@ describe('withChanges', () => {
       { name: 'n2', pods: [], change: 'removed' },
     ]);
     expect(withChanges(nodes, null)).toBe(nodes);
+  });
+});
+
+describe('node lifecycle', () => {
+  const local = (h, m, s = 0) => new Date(2026, 10, 10, h, m, s).toISOString();
+  const now = new Date(2026, 10, 10, 13, 0).getTime();
+  // The way out of a consolidated node, as /topology/events returns it.
+  const removed = {
+    type: 'node-removed',
+    at: local(12, 23, 40),
+    node: 'ip-10-207-166-178',
+    reason: 'Underutilized',
+    pods: 18,
+    goneAt: local(12, 27, 52),
+    lifecycle: [
+      { kind: 'disrupted', at: local(12, 22, 1), last: local(12, 22, 1), count: 1, message: 'Underutilized' },
+      { kind: 'drain-failed', at: local(12, 22, 3), last: local(12, 26, 1), count: 4, message: 'Failed to drain node, 1 pods are waiting to be evicted' },
+      { kind: 'instance-terminating', at: local(12, 26, 25), last: local(12, 26, 25), count: 1, message: 'Instance is terminating' },
+      { kind: 'removed', at: local(12, 27, 52), last: local(12, 27, 52), count: 2, message: 'Removing Node' },
+    ],
+  };
+
+  test('formatDuration', () => {
+    expect(formatDuration(40)).toBe('40 s');
+    expect(formatDuration(351)).toBe('6 min');
+    expect(formatDuration(3900)).toBe('1 h 5 min');
+  });
+
+  test('lifecycleSummary times the drain from the disruption to the Node object going', () => {
+    expect(lifecycleSummary(removed)).toEqual({
+      took: 351,
+      failedDrains: 4,
+      drainMessage: 'Failed to drain node, 1 pods are waiting to be evicted',
+      volumes: false,
+    });
+    expect(lifecycleBrief(removed)).toBe('gone after 6 min · drain failed ×4');
+    expect(lifecycleBrief({ ...removed, goneAt: undefined, lifecycle: removed.lifecycle.slice(0, 2) })).toBe(
+      'removal not seen yet · drain failed ×4',
+    );
+    expect(lifecycleSummary({ ...removed, lifecycle: undefined })).toBeNull();
+  });
+
+  test('lifecycleSteps prints each step with its time span', () => {
+    expect(lifecycleSteps(removed, now)).toEqual([
+      { kind: 'disrupted', when: '12:22', text: 'disrupted: Underutilized' },
+      { kind: 'drain-failed', when: '12:22–12:26', text: 'drain failed ×4: Failed to drain node, 1 pods are waiting to be evicted' },
+      { kind: 'instance-terminating', when: '12:26', text: 'instance terminating' },
+      { kind: 'removed', when: '12:27', text: 'removed from the cluster' },
+    ]);
+  });
+
+  test('eventText adds the brief to the marker tooltip', () => {
+    expect(eventText(removed)).toBe('ip-10-207-166-178 removed: Underutilized · 18 pods · gone after 6 min · drain failed ×4');
   });
 });

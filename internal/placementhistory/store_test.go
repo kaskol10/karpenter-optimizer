@@ -208,3 +208,38 @@ func TestConcurrentAccess(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+// Karpenter marks a node for deletion in the same instant it logs the
+// disruption, so the node is never listed with its reason: the reason must
+// come from the sample where the node is already gone.
+func TestEventsReasonReadWhenTheNodeLeft(t *testing.T) {
+	for _, keyEvery := range []int{1, 10} { // keyframes and deltas
+		st := New(24*time.Hour, keyEvery)
+		a := Node{Name: "a", NodePool: "arm"}
+		b := Node{Name: "b", NodePool: "arm"}
+		st.Add(snap(0, []Node{a, b}, nil))
+		gone := snap(1, []Node{b}, nil)
+		// Every known reason is passed; only "a" just left.
+		gone.Gone = map[string]string{"a": "Underutilized", "b": "Drifted", "old": "Empty"}
+		st.Add(gone)
+		st.Add(snap(2, nil, nil)) // b leaves with no reason: Gone is not carried forward
+
+		ev := st.Events(time.Time{})
+		if len(ev) != 2 || ev[0].Node != "a" || ev[0].Reason != "Underutilized" || ev[1].Node != "b" || ev[1].Reason != "" {
+			t.Fatalf("keyEvery=%d: %+v", keyEvery, ev)
+		}
+
+		// The reasons survive a restart from the durable records.
+		var recs []Record
+		src := New(24*time.Hour, keyEvery)
+		for _, s := range []*Snapshot{snap(0, []Node{a, b}, nil), gone, snap(2, nil, nil)} {
+			r, _ := src.Add(s)
+			recs = append(recs, r)
+		}
+		restored := New(24*time.Hour, keyEvery)
+		restored.Load(recs, t0.Add(5*time.Minute))
+		if ev := restored.Events(time.Time{}); len(ev) != 2 || ev[0].Reason != "Underutilized" || ev[1].Reason != "" {
+			t.Fatalf("keyEvery=%d restored: %+v", keyEvery, ev)
+		}
+	}
+}

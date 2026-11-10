@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Time travel showed "reason unknown" for almost every removed node**: Karpenter marks a node for deletion in the same instant it logs "Disrupting Node: Underutilized". Nodes marked for deletion are not listed, so the node dropped out of the next placement sample before any sample saw its reason. On a production cluster, 155 of 156 removals had no reason.
+  - **The fix:** each sample now also keeps the reasons of nodes that left since the previous sample (`Snapshot.Gone`). These are read from the Node events, which are still there when the node leaves. The reasons are saved in both keyframes and deltas, so they survive a restart.
+  - **The Changes panel:** removed nodes are now grouped under their reason, and each reason has a tooltip saying what it means (consolidated, drifted, spot reclaimed…). "Reason unknown" is now two cases: **not sampled yet** (the node left after the last sample) and **no disruption event** (no Karpenter event found).
 - **Time travel showed "InstanceTerminating" as the reason for consolidated nodes**: Karpenter logs "Disrupting Node: Underutilized" and then, a few minutes later, "Instance is terminating" on the same node. The latest event won, so the real reason was replaced. Reasons are now ranked:
   - a disruption decision (Underutilized, Empty, Drifted…) first;
   - then an interruption cause (SpotInterrupted, InstanceUnhealthy);
@@ -16,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The latest event only breaks ties within a rank. Checked against Node events from a production Karpenter v1 cluster, whose messages carry no "/Delete" suffix; the parser already handled that.
 
 ### Added
+- **How a removed node went, in time travel**: each node in the Changes panel opens to its way out, step by step. For example: `12:22 disrupted: Underutilized` → `12:22–12:26 drain failed ×4: Failed to drain node, 1 pods are waiting to be evicted` → `12:26 instance terminating` → `12:28 removed from the cluster`. The collapsed row summarizes it in a few words ("gone after 6 min · drain failed ×4"), and timeline marker tooltips add the same summary.
+  - **When the node really went:** a node leaves the samples as soon as Karpenter marks it for deletion. Its `removed` step now records when the Node object was actually deleted, and `goneAt` on the event carries that time.
+  - **How it's collected:** `kubernetes.Client.NodeEventSummary` reads the Node events once per placement sample, as before, and now also merges them into steps per kind (first and last seen, count, latest message). The store keeps steps only for nodes that left the samples. They are merged across samples, so they outlive the events (about an hour). Steps are saved with the history records, all of them in keyframes and only the changed ones in deltas, so a restart keeps them.
+  - **API:** `node-removed` events from `/topology/events` gain `lifecycle[]` (`kind`, `at`, `last`, `count`, `message`) and `goneAt`.
 - **Gateway flow view**: the Gateway page gets a third view, **Flow** (`?view=flow`).
   - **The chart:** a Sankey from the Split-by values (apps, API keys or teams) on the left to models on the right, with each band sized by tokens or spend (toggle).
   - **Reading it:** each node shows its total and share, and hovering a band highlights it and gives its exact value. The five largest flows are listed underneath, which is also what screen readers get.

@@ -302,7 +302,7 @@ make swagger
 - `GET /api/v1/topology` - Get nodes with scheduled pods and per-pod requests (topology view)
 - `GET /api/v1/alerts/status` - Whether alerting is on and which conditions are firing (`{enabled, firing: [{id, title, severity, since}]}`), for the header status strip
 - `GET /api/v1/topology/history?at=<unix|RFC3339>` - The topology as recorded at the latest placement sample at or before `at` (same node shape; cost at today's prices, no usage)
-- `GET /api/v1/topology/events?since=6h` - Node launches, terminations (with the last Karpenter disruption reason seen) and pod moves between placement samples, plus the recorded range
+- `GET /api/v1/topology/events?since=6h` - Node launches, terminations (with the Karpenter disruption reason, read when the node left, and how it went: `lifecycle[]` of disrupted → drain failed ×N → instance terminating → removed, plus `goneAt`, when the Node object was deleted) and pod moves between placement samples, plus the recorded range
 - `GET /api/v1/cluster/summary` - Get cluster-wide statistics
 - `GET /api/v1/serving` - Inference health for detected vLLM/sglang serving pods (model, KV cache %, running/waiting, TTFT, E2E latency, preemptions, throughput split into input/output, request rate, node/GPU placement, GPU neighbours, estimated hourly `cost` per replica, and the hosted `hostedPrice` for the same model when known)
 - `GET /api/v1/serving/history?window=6h` - Per-pod serving metric trends (sampled every 60s) + last time each pod was unhealthy; in-memory by default, durable Postgres/CNPG when `SERVING_HISTORY_DSN` is set (adds a `7d` window)

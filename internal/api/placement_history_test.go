@@ -68,9 +68,10 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 	}, {Name: "empty", NodePool: "cpu"}}
 	at := time.Unix(1762480800, 0)
-	snap := snapshotFromTopology(at, nodes, map[string]string{"gpu-1": "Underutilized"})
+	snap := snapshotFromTopology(at, nodes, map[string]string{"gpu-1": "Underutilized", "deleting": "Drifted"})
 	require.Len(t, snap.Pods, 2)
 	assert.Equal(t, "Underutilized", snap.Nodes["gpu-1"].DisruptionReason)
+	assert.Equal(t, map[string]string{"deleting": "Drifted"}, snap.Gone, "unlisted nodes keep their reason in Gone")
 
 	back := topologyFromSnapshot(snap)
 	require.Len(t, back, 2)
