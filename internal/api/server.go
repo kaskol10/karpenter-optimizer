@@ -53,6 +53,7 @@ import (
 	"github.com/karpenter-optimizer/internal/alerts"
 	"github.com/karpenter-optimizer/internal/awspricing"
 	"github.com/karpenter-optimizer/internal/config"
+	"github.com/karpenter-optimizer/internal/gatewaydash"
 	"github.com/karpenter-optimizer/internal/gatewayhistory"
 	"github.com/karpenter-optimizer/internal/history"
 	"github.com/karpenter-optimizer/internal/hostedprices"
@@ -127,6 +128,11 @@ type Server struct {
 	placementReasonErr sync.Once
 	placementDurable   placementdurable.Store
 	placementWriteErr  sync.Once
+
+	// gatewayProm answers the Gateway team dashboard from Prometheus (nil
+	// without PROMETHEUS_URL); gatewayDash caches its answers.
+	gatewayProm gatewaydash.Querier
+	gatewayDash gatewayDashCache
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -232,6 +238,7 @@ func NewServer(cfg *config.Config) *Server {
 		hostedPrices:            hostedprices.New(hostedprices.DefaultURL),
 		usage:                   newUsageCollector(cfg, k8sClient),
 		placementInterval:       placementIntervalFromEnv(),
+		gatewayProm:             newGatewayProm(cfg.PrometheusURL),
 		placementWindow:         placementWindowFromEnv(),
 	}
 	if k8sClient != nil && server.placementWindow > 0 {
@@ -458,6 +465,7 @@ func (s *Server) setupRoutes() {
 		protected.GET("/serving", s.getServing)
 		protected.GET("/serving/gateway", s.getServingGateway)
 		protected.GET("/serving/gateway/history", s.getServingGatewayHistory)
+		protected.GET("/serving/gateway/dashboard", s.getGatewayDashboard)
 		protected.GET("/serving/history", s.getServingHistory)
 		protected.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		protected.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)

@@ -205,7 +205,7 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 - `PLACEMENT_HISTORY_HOURS`: how much placement history the Topology time travel keeps (default 24, max 72, `0` turns the sampler off). In memory, and also in Postgres when a database is configured, so it survives restarts
 - `PLACEMENT_HISTORY_DSN`: Postgres for the placement history. Optional: without it the serving-history DSN is used, then the gateway's (the chart's `database.enabled: true` covers all three)
 - `PLACEMENT_HISTORY_INTERVAL_SECS`: how often placement is sampled (default 120, minimum 30). Each sample lists every node and pod once, like opening the Topology tab
-- `PROMETHEUS_URL`: in-cluster Prometheus to read actual usage from (optional, display only). The Topology tab then shows each pod's p95 CPU and memory over 24h next to its request (idle requests hatched) and GPU memory in use from the DCGM exporter. Without it, live usage comes from metrics-server when installed. Chart value `usage.prometheusUrl`
+- `PROMETHEUS_URL`: in-cluster Prometheus to read actual usage from (optional, display only). The Topology tab then shows each pod's p95 CPU and memory over 24h next to its request (idle requests hatched) and GPU memory in use from the DCGM exporter. Without it, live usage comes from metrics-server when installed. It also feeds the Gateway team dashboard from the LiteLLM metrics that Prometheus scrapes. Chart value `usage.prometheusUrl`
 - `METRICS_ENABLED`: enable the Prometheus `/metrics` exporter (`true`/`1`, default off → `/metrics` 404s). Chart value: `metrics.enabled`
 - Alerting is configured at runtime via the UI or `GET/PUT /api/v1/alerts/config` (persisted to `alerts.stateFile`), or chart values `alerts.enabled` / `alerts.urls` (comma-separated `type=url` channel entries — keep secrets out of git in prod)
 
@@ -300,6 +300,7 @@ make swagger
 - `GET /api/v1/nodepools/recommendations` - Get NodePool recommendations
 - `GET /api/v1/nodes` - Get nodes with usage data
 - `GET /api/v1/topology` - Get nodes with scheduled pods and per-pod requests (topology view)
+- `GET /api/v1/serving/gateway/dashboard?team=&model=&key=&range=month` - LiteLLM team dashboard (spend and budget, requests and errors, spend and tokens per day, one row per API key, latency per model), read from Prometheus (`PROMETHEUS_URL`)
 - `GET /api/v1/alerts/status` - Whether alerting is on and which conditions are firing (`{enabled, firing: [{id, title, severity, since}]}`), for the header status strip
 - `GET /api/v1/topology/history?at=<unix|RFC3339>` - The topology as recorded at the latest placement sample at or before `at` (same node shape; cost at today's prices, no usage)
 - `GET /api/v1/topology/events?since=6h` - Node launches, terminations (with the Karpenter disruption reason, read when the node left, and how it went: `lifecycle[]` of disrupted → drain failed ×N → instance terminating → removed, plus `goneAt`, when the Node object was deleted) and pod moves between placement samples, plus the recorded range
