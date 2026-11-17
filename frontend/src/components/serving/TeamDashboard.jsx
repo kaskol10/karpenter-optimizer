@@ -1,6 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import axios from 'axios';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, Users } from 'lucide-react';
+import { API_URL } from '../../lib/api';
+import { usePolling } from '../../hooks/usePolling';
+import { groupByModel } from '../../lib/servingModels';
+import { deploymentRows, fallbackShare } from '../../lib/gatewayOperator';
 import { cn } from '../../lib/utils';
 import { SimpleSelect } from '../ui/simple-select';
 import { SkeletonRows } from '../ui/skeleton';
@@ -67,6 +72,70 @@ function Panel({ title, note, children }) {
 
 function Empty({ children = 'No data in this window.' }) {
   return <p className="py-6 text-center text-xs text-muted-foreground">{children}</p>;
+}
+
+// Deployments lists the backends LiteLLM routes to with their state, next
+// to the vLLM/sglang replicas that serve each one in this cluster.
+function Deployments({ deployments }) {
+  const [pods, setPods] = useState(null);
+  const loadPods = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API_URL}/api/v1/serving`);
+      setPods(data.pods || []);
+    } catch {
+      setPods([]);
+    }
+  }, []);
+  usePolling(loadPods, 30000, deployments.length > 0);
+  const rows = useMemo(() => deploymentRows(deployments, pods ? groupByModel(pods) : []), [deployments, pods]);
+
+  return (
+    <Panel title="Deployments behind the gateway" note="All teams · state now">
+      {rows.length === 0 ? (
+        <Empty>LiteLLM reports no deployment state.</Empty>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3 font-normal">Deployment</th>
+                <th className="py-1 pr-3 font-normal">State</th>
+                <th className="py-1 pr-3 text-right font-normal">Replicas online</th>
+                <th className="py-1 pr-3 text-right font-normal">KV cache max</th>
+                <th className="py-1 text-right font-normal">Waiting</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={`${d.model}|${d.apiBase}`} className="border-t">
+                  <td className="py-1 pr-3">
+                    <div className="font-mono text-xs">{d.model}</div>
+                    {d.apiBase && <div className="text-xs text-muted-foreground">{d.apiBase}</div>}
+                  </td>
+                  <td className={cn('py-1 pr-3', TONE[d.tone])}>{d.label}</td>
+                  {d.serving ? (
+                    <>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {d.serving.online}/{d.serving.replicas.length}
+                      </td>
+                      <td className={cn('py-1 pr-3 text-right tabular-nums', d.serving.kvMax >= 85 && TONE.warn)}>
+                        {d.serving.kvMax == null ? '—' : `${d.serving.kvMax.toFixed(0)}%`}
+                      </td>
+                      <td className={cn('py-1 text-right tabular-nums', d.serving.waiting > 0 && TONE.warn)}>{d.serving.waiting}</td>
+                    </>
+                  ) : (
+                    <td colSpan={3} className="py-1 text-right text-xs text-muted-foreground">
+                      {pods ? 'Not served in this cluster' : '…'}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
 }
 
 // TeamDashboard is the per-team view of LiteLLM usage on the Gateway page:
@@ -151,7 +220,11 @@ export function TeamDashboard() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-            <Tile label={`Spend · ${rangeLabel}`} value={money(s.spend)} />
+            <Tile
+              label={`Spend · ${rangeLabel}`}
+              value={money(s.spend)}
+              detail={s.zeroCost > 0 ? `${count(s.zeroCost)} requests priced at $0` : null}
+            />
             {budget ? (
               <Tile label="Team budget left" value={budget.value} detail={budget.detail} tone={budget.tone} />
             ) : (
@@ -286,7 +359,10 @@ export function TeamDashboard() {
                       <th className="py-1 pr-3 font-normal">Model alias</th>
                       <th className="py-1 pr-3 text-right font-normal">Requests</th>
                       <th className="py-1 pr-3 text-right font-normal">p50</th>
-                      <th className="py-1 text-right font-normal">p95</th>
+                      <th className="py-1 pr-3 text-right font-normal">p95</th>
+                      <th className="py-1 text-right font-normal" title="Requests that needed a fallback deployment">
+                        Fallbacks
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -303,7 +379,13 @@ export function TeamDashboard() {
                         </td>
                         <td className="py-1 pr-3 text-right tabular-nums">{count(m.requests)}</td>
                         <td className="py-1 pr-3 text-right tabular-nums">{seconds(m.ttftP50Seconds)}</td>
-                        <td className="py-1 text-right tabular-nums">{seconds(m.ttftP95Seconds)}</td>
+                        <td className="py-1 pr-3 text-right tabular-nums">{seconds(m.ttftP95Seconds)}</td>
+                        <td
+                          className={cn('py-1 text-right tabular-nums', m.failedFallbacks > 0 && TONE.warn)}
+                          title={m.failedFallbacks > 0 ? `${count(m.failedFallbacks)} fallbacks failed too` : undefined}
+                        >
+                          {pct(fallbackShare(m))}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -327,6 +409,8 @@ export function TeamDashboard() {
               )}
             </Panel>
           </div>
+
+          <Deployments deployments={data.deployments || []} />
         </>
       )}
     </div>

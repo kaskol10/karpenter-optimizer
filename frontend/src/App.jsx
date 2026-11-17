@@ -604,6 +604,7 @@ function App() {
             <ServingHealth
               onOpenTopology={(focus) => navigate('topology', focus)}
               onOpenLogs={openLogs}
+              onOpenGateway={() => navigate('gateway', null, { view: 'models' })}
               focusPod={tabFocus?.pod}
             />
           )}

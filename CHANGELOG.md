@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **What sits behind the gateway**: the Gateway and Serving pages now show how LiteLLM and the model servers connect.
+  - **Deployments behind the gateway** (Team usage card): every backend LiteLLM routes to, with its state now (`litellm_deployment_state`: healthy, partial outage, outage). Next to each one are the vLLM/sglang replicas that serve it in this cluster: replicas online, fullest KV cache and waiting requests. Backends outside the cluster say so.
+  - **Fallbacks per model alias**: the share of requests that needed a fallback deployment (`litellm_deployment_successful_fallbacks`), amber when fallbacks failed too (`litellm_deployment_failed_fallbacks`).
+  - **Requests priced at $0** (`litellm_zero_cost_requests`) under the spend tile, a hint that a model has no price configured.
+  - **On Serving model rows**: a line for models reached through LiteLLM, with the teams and apps calling them, requests per second and error rate, and a link to the Gateway page.
+  - LiteLLM counters are matched with or without the `_total` suffix. Deployments and states cover every team, because LiteLLM labels them by backend only.
 - **Team usage on the Gateway page**: a second card under the live gateway shows LiteLLM usage per team from Prometheus. Everyone who can open the app sees every team; the team is a filter, not a login.
   - **Filters:** team, model alias, API key and range (this month, 24 h, 7 days, 30 days), kept in the URL (`?team=&model=&key=&range=`) so a view can be shared. Clicking an API key or a model in the tables filters by it.
   - **Tiles:** spend, team budget left (share, amount and time to reset; amber under 20%, red when spent), requests, active API keys, error rate and 429s.

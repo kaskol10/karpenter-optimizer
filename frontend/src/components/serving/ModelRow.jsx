@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Waypoints } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatSeconds } from '../../lib/servingLatency';
 import { comparison, costInputsText, formatMoney } from '../../lib/servingCost';
@@ -56,7 +56,33 @@ function costStat(cost) {
 // model healthy, and how loaded is it?" across all its replicas, expanding
 // into the replica cards. Each replica dot is a button that opens the row
 // and jumps to that replica's card.
-export function ModelRow({ group, cost, headroom, expanded, onToggle, onSelectReplica, children }) {
+const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+// GatewayLine says how this model is reached through LiteLLM: who calls it,
+// how much and how often it fails there, with a link to the Gateway page.
+function GatewayLine({ gateway, onOpenGateway }) {
+  const parts = [];
+  if (gateway.teams > 0) parts.push(plural(gateway.teams, 'team'));
+  if (gateway.apps > 0) parts.push(plural(gateway.apps, 'app'));
+  if (gateway.requestsPerSec != null) parts.push(`${gateway.requestsPerSec.toFixed(1)} req/s`);
+  if (gateway.errorRatePct != null) parts.push(`${gateway.errorRatePct.toFixed(1)}% errors`);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 border-t px-3 py-1.5 text-xs text-muted-foreground">
+      <Waypoints className="h-3.5 w-3.5" aria-hidden="true" />
+      <span>
+        Via LiteLLM as <span className="font-mono">{gateway.model}</span>
+        {parts.length > 0 && ` · ${parts.join(' · ')}`}
+      </span>
+      {onOpenGateway && (
+        <button type="button" className="text-primary hover:underline" onClick={onOpenGateway}>
+          Open gateway
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function ModelRow({ group, cost, headroom, gateway, onOpenGateway, expanded, onToggle, onSelectReplica, children }) {
   const costInfo = costStat(cost);
   const headroomInfo = headroom ? headroomText(headroom) : null;
   const worst = [...group.statuses.values()].reduce((a, b) => (b.severity < a.severity ? b : a));
@@ -117,6 +143,7 @@ export function ModelRow({ group, cost, headroom, expanded, onToggle, onSelectRe
           {headroomInfo && <Stat label="Headroom" value={headroomInfo.label} tip={headroomInfo.title} />}
         </div>
       </div>
+      {gateway && <GatewayLine gateway={gateway} onOpenGateway={onOpenGateway} />}
       {expanded && (
         <div id={panelId} className="border-t bg-muted/20 p-3">
           {children}

@@ -18,6 +18,7 @@ import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { ModelRow } from './ModelRow';
+import { gatewayLineFor } from '../../lib/gatewayOperator';
 import { ServingCard, servingCardId } from './ServingCard';
 import { TriageList } from './TriageList';
 
@@ -32,7 +33,7 @@ const podKeyOf = (p) => `${p.namespace}/${p.name}`;
 // ServingHealth lists LLM serving pods (vLLM/sglang) and their inference
 // health: a triage list of what needs a human, then one row per model
 // (expanding into its replica cards), or the flat replica grid (?view=replicas).
-function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
+function ServingHealth({ onOpenTopology, onOpenLogs, onOpenGateway, focusPod }) {
   const [pods, setPods] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -87,6 +88,19 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
   }, [pods]);
 
   usePolling(fetchServing, 30000);
+
+  // The live LiteLLM gateway, for the "via gateway" line on model rows.
+  // No gateway (or an error) just hides the line.
+  const [gateway, setGateway] = useState(null);
+  const fetchGateway = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/v1/serving/gateway`);
+      setGateway(response.data.gateway || null);
+    } catch {
+      setGateway(null);
+    }
+  }, []);
+  usePolling(fetchGateway, 30000);
 
   // Trend history is sampled server-side on the 60s cluster interval, so a
   // slower refresh (60s) keeps sparklines current without hammering the API.
@@ -285,6 +299,8 @@ function ServingHealth({ onOpenTopology, onOpenLogs, focusPod }) {
                         expanded={isExpanded(group)}
                         onToggle={() => toggleModel(group)}
                         onSelectReplica={focusCard}
+                        gateway={gatewayLineFor(group.model, gateway)}
+                        onOpenGateway={onOpenGateway}
                       >
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           {sortedPods.filter((p) => group.replicas.includes(p)).map(renderCard)}

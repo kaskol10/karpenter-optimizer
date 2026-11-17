@@ -121,4 +121,32 @@ describe('ServingHealth', () => {
     });
     expect(card.className).toMatch(/ring-primary/);
   });
+
+  test('a model behind LiteLLM shows the gateway line and opens the Gateway page', async () => {
+    axios.get.mockImplementation((url) => {
+      const path = url.replace(/^.*?(\/api\/)/, '$1').split('?')[0];
+      if (path === '/api/v1/serving/gateway') {
+        return Promise.resolve({
+          data: { gateway: { models: [{ model: 'hosted_vllm/meta-llama/Llama-3.3-70B', teams: [{ name: 'search' }], requestsPerSec: 2 }] } },
+        });
+      }
+      return Promise.resolve({ data: RESPONSES[path] ?? {} });
+    });
+    const onOpenGateway = vi.fn();
+    render(<ServingHealth onOpenTopology={vi.fn()} onOpenLogs={vi.fn()} onOpenGateway={onOpenGateway} />);
+    expect(await screen.findByText(/1 team · 2.0 req\/s/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open gateway' }));
+    expect(onOpenGateway).toHaveBeenCalled();
+  });
+
+  test('a gateway that fails to answer hides the line', async () => {
+    axios.get.mockImplementation((url) => {
+      const path = url.replace(/^.*?(\/api\/)/, '$1').split('?')[0];
+      if (path === '/api/v1/serving/gateway') return Promise.reject(new Error('down'));
+      return Promise.resolve({ data: RESPONSES[path] ?? {} });
+    });
+    render(<ServingHealth onOpenTopology={vi.fn()} onOpenLogs={vi.fn()} />);
+    expect((await screen.findAllByText(/llama-3.3-70b/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Via LiteLLM/)).not.toBeInTheDocument();
+  });
 });

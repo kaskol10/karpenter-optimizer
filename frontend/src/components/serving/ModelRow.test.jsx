@@ -59,4 +59,24 @@ describe('ModelRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'What is Headroom?' }));
     expect(screen.getByText('Needs 30 minutes of serving history.')).toBeInTheDocument();
   });
+
+  test('a gateway line says who reaches the model through LiteLLM', () => {
+    const onOpenGateway = vi.fn();
+    renderRow({
+      gateway: { model: 'meta-llama/llama-3.3-70b-instruct', teams: 2, apps: 1, requestsPerSec: 4.25, errorRatePct: 0.3 },
+      onOpenGateway,
+    });
+    expect(screen.getByText(/· 2 teams · 1 app · 4.3 req\/s · 0.3% errors/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open gateway' }));
+    expect(onOpenGateway).toHaveBeenCalled();
+  });
+
+  test('no gateway, no line; a bare match shows just the alias', () => {
+    const { unmount } = renderRow();
+    expect(screen.queryByText(/Via LiteLLM/)).not.toBeInTheDocument();
+    unmount();
+    renderRow({ gateway: { model: 'x', teams: 0, apps: 0, requestsPerSec: null, errorRatePct: null } });
+    expect(screen.getByText('Via LiteLLM as')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open gateway' })).not.toBeInTheDocument();
+  });
 });
