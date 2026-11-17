@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Gateway team dashboard API**: `GET /api/v1/serving/gateway/dashboard?team=&model=&key=&range=24h|7d|30d|month` builds a per-team view of the LiteLLM gateway from the LiteLLM metrics in Prometheus (`PROMETHEUS_URL`, chart value `usage.prometheusUrl`). This is the backend for the coming team view on the Gateway page.
+  - **Summary:** spend, requests, failures, error rate, active developers (API keys with traffic) and 429s.
+  - **Budget:** the team's remaining budget, its share and the hours to reset.
+  - **Per day:** spend by model alias and input/cached/output tokens, as closed UTC days plus today so far.
+  - **Per API key:** spend, tokens, requests, failures, key budget left and p95 time to first token.
+  - **Per model alias:** requests, spend and p50/p95 time to first token.
+  - **Output speed** per model group, plus the teams, models and keys the filters can pick.
+  - **How it runs:** filter values are escaped into label matchers, never pasted into queries. About twenty queries run in parallel and answers are cached for 30 s per filter. A failed or unexported metric leaves its panel empty and is named in `errors`, so the page still shows the rest. Answers 503 without `PROMETHEUS_URL`.
+
 ### Fixed
 - **Time travel showed "reason unknown" for almost every removed node**: Karpenter marks a node for deletion in the same instant it logs "Disrupting Node: Underutilized". Nodes marked for deletion are not listed, so the node dropped out of the next placement sample before any sample saw its reason. On a production cluster, 155 of 156 removals had no reason.
   - **The fix:** each sample now also keeps the reasons of nodes that left since the previous sample (`Snapshot.Gone`). These are read from the Node events, which are still there when the node leaves. The reasons are saved in both keyframes and deltas, so they survive a restart.
