@@ -24,6 +24,7 @@ type Summary struct {
 	ErrorRatePct     *float64 `json:"errorRatePct"`
 	ActiveDevelopers *float64 `json:"activeDevelopers"`
 	Throttled        *float64 `json:"throttled"` // HTTP 429s
+	ZeroCost         *float64 `json:"zeroCost"`  // requests LiteLLM priced at $0
 }
 
 // Budget is a team's LiteLLM budget (only when a team is picked).
@@ -67,6 +68,20 @@ type ModelStat struct {
 	Spend          *float64 `json:"spend"`
 	TTFTP50Seconds *float64 `json:"ttftP50Seconds"`
 	TTFTP95Seconds *float64 `json:"ttftP95Seconds"`
+	// Fallbacks LiteLLM took for requests to this alias in the window,
+	// and the ones that failed too.
+	Fallbacks       *float64 `json:"fallbacks"`
+	FailedFallbacks *float64 `json:"failedFallbacks"`
+}
+
+// Deployment is one LiteLLM deployment (a backend behind a model alias)
+// and its state now: 0 healthy, 1 partial outage, 2 complete outage.
+// LiteLLM labels it by backend only, so it covers every team.
+type Deployment struct {
+	Model    string  `json:"model"` // litellm_model_name, e.g. hosted_vllm/meta-llama/Llama-3.3-70B-Instruct
+	APIBase  string  `json:"apiBase"`
+	Provider string  `json:"provider"`
+	State    float64 `json:"state"`
 }
 
 // ModelSpeed is a model group's output speed. LiteLLM labels it by model
@@ -99,6 +114,7 @@ type Dashboard struct {
 	Developers  []Developer       `json:"developers"`
 	Models      []ModelStat       `json:"models"`
 	OutputSpeed []ModelSpeed      `json:"outputSpeed"`
+	Deployments []Deployment      `json:"deployments"`
 	Options     Options           `json:"options"`
 	Errors      map[string]string `json:"errors,omitempty"`
 }
@@ -206,6 +222,7 @@ func (b *builder) plan() {
 	b.add("failed", "summary", "sum("+inc("litellm_proxy_failed_requests_metric", all)+")")
 	b.add("active", "summary", fmt.Sprintf("count(sum by (%s) (%s) > 0)", LabelKey, inc("litellm_proxy_total_requests_metric", all)))
 	b.add("throttled", "summary", "sum("+inc("litellm_proxy_total_requests_metric", f.matchers(nil, `status_code="429"`))+")")
+	b.add("zeroCost", "summary", "sum("+inc("", f.matchers(nil, counterName("litellm_zero_cost_requests")))+")")
 
 	// Budget: team-level gauges, labelled by team only.
 	if f.Team != "" {
@@ -241,6 +258,11 @@ func (b *builder) plan() {
 	b.add("modelSpend", "models", byModel("litellm_spend_metric"))
 	b.add("modelTTFT50", "models", quantile(0.5, LabelModel, all, rng))
 	b.add("modelTTFT95", "models", quantile(0.95, LabelModel, all, rng))
+	b.add("modelFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("", f.matchers(nil, counterName("litellm_deployment_successful_fallbacks")))))
+	b.add("modelFailedFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("", f.matchers(nil, counterName("litellm_deployment_failed_fallbacks")))))
+
+	// Deployment state now: labelled by backend only, so not filtered.
+	b.add("deployments", "deployments", "max by (litellm_model_name, api_base, api_provider) (litellm_deployment_state)")
 
 	// Output speed: labelled by model group only, so not filtered.
 	b.add("speed", "outputSpeed", fmt.Sprintf(
@@ -263,6 +285,12 @@ var tokenMetrics = []struct{ kind, metric string }{
 	{"input", "litellm_input_tokens_metric"},
 	{"cached", "litellm_input_cached_tokens_metric"},
 	{"output", "litellm_output_tokens_metric"},
+}
+
+// counterName matches a LiteLLM counter with or without the _total suffix
+// the Prometheus client adds, as a __name__ matcher for Filter.matchers.
+func counterName(name string) string {
+	return fmt.Sprintf(`__name__=~"%s(_total)?"`, name)
 }
 
 func quantile(q float64, by, m, rng string) string {
@@ -345,7 +373,7 @@ func (b *builder) assemble() *Dashboard {
 
 	d.Summary = Summary{
 		Spend: scalar(r["spend"]), Requests: scalar(r["requests"]), Failed: scalar(r["failed"]),
-		ActiveDevelopers: scalar(r["active"]), Throttled: scalar(r["throttled"]),
+		ActiveDevelopers: scalar(r["active"]), Throttled: scalar(r["throttled"]), ZeroCost: scalar(r["zeroCost"]),
 	}
 	// Prometheus returns no series for count() of nothing: zero developers.
 	if d.Summary.ActiveDevelopers == nil && d.Summary.Requests != nil {
@@ -441,9 +469,13 @@ func (b *builder) assemble() *Dashboard {
 	// Models, most requests first.
 	mReq, mSpend := byLabel(r["modelRequests"], LabelModel), byLabel(r["modelSpend"], LabelModel)
 	m50, m95 := byLabel(r["modelTTFT50"], LabelModel), byLabel(r["modelTTFT95"], LabelModel)
+	mFb, mFbFail := byLabel(r["modelFallbacks"], LabelModel), byLabel(r["modelFailedFallbacks"], LabelModel)
 	d.Models = []ModelStat{}
 	for _, m := range sortedKeys(mReq, mSpend) {
-		d.Models = append(d.Models, ModelStat{Model: m, Requests: lookup(mReq, m), Spend: lookup(mSpend, m), TTFTP50Seconds: lookup(m50, m), TTFTP95Seconds: lookup(m95, m)})
+		d.Models = append(d.Models, ModelStat{
+			Model: m, Requests: lookup(mReq, m), Spend: lookup(mSpend, m), TTFTP50Seconds: lookup(m50, m), TTFTP95Seconds: lookup(m95, m),
+			Fallbacks: lookup(mFb, m), FailedFallbacks: lookup(mFbFail, m),
+		})
 	}
 	sort.SliceStable(d.Models, func(i, j int) bool { return val(d.Models[i].Requests) > val(d.Models[j].Requests) })
 
@@ -455,6 +487,24 @@ func (b *builder) assemble() *Dashboard {
 		}
 	}
 	sort.Slice(d.OutputSpeed, func(i, j int) bool { return d.OutputSpeed[i].ModelGroup < d.OutputSpeed[j].ModelGroup })
+
+	// Deployments, worst state first.
+	d.Deployments = []Deployment{}
+	for _, s := range r["deployments"] {
+		if m := s.Metric["litellm_model_name"]; m != "" {
+			d.Deployments = append(d.Deployments, Deployment{Model: m, APIBase: s.Metric["api_base"], Provider: s.Metric["api_provider"], State: s.Value})
+		}
+	}
+	sort.Slice(d.Deployments, func(i, j int) bool {
+		a, c := d.Deployments[i], d.Deployments[j]
+		if a.State != c.State {
+			return a.State > c.State
+		}
+		if a.Model != c.Model {
+			return a.Model < c.Model
+		}
+		return a.APIBase < c.APIBase
+	})
 
 	d.Options = Options{
 		Teams:  sortedKeys(byLabel(r["optTeams"], LabelTeam)),

@@ -230,3 +230,53 @@ func TestBuildRecordsFirstErrorPerPanel(t *testing.T) {
 		t.Fatalf("errors: %v", d.Errors)
 	}
 }
+
+func TestBuildOperatorPanels(t *testing.T) {
+	dep := func(model, base string, state float64) Sample {
+		return Sample{Metric: map[string]string{"litellm_model_name": model, "api_base": base, "api_provider": "hosted_vllm"}, Value: state}
+	}
+	f := &fakeProm{instant: []rule{
+		{contains: "litellm_deployment_successful_fallbacks", samples: by(LabelModel, "llama", 7.0)},
+		{contains: "litellm_deployment_failed_fallbacks", samples: by(LabelModel, "llama", 1.0)},
+		{contains: "litellm_zero_cost_requests", samples: one(3)},
+		{contains: "litellm_deployment_state", samples: []Sample{
+			dep("hosted_vllm/b", "http://b", 0), dep("hosted_vllm/a", "http://a2", 2), dep("hosted_vllm/a", "http://a1", 2),
+			{Metric: map[string]string{}, Value: 1}}},
+		{contains: "sum by (requested_model) (increase(litellm_proxy_total_requests_metric", samples: by(LabelModel, "llama", 70.0, "qwen", 5.0)},
+	}}
+	d, err := Build(context.Background(), f, Filter{Model: "llama", Range: "24h"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *d.Summary.ZeroCost != 3 {
+		t.Errorf("zero cost: %+v", d.Summary.ZeroCost)
+	}
+	if *d.Models[0].Fallbacks != 7 || *d.Models[0].FailedFallbacks != 1 || d.Models[1].Fallbacks != nil {
+		t.Errorf("fallbacks: %+v", d.Models)
+	}
+	want := []Deployment{
+		{Model: "hosted_vllm/a", APIBase: "http://a1", Provider: "hosted_vllm", State: 2},
+		{Model: "hosted_vllm/a", APIBase: "http://a2", Provider: "hosted_vllm", State: 2},
+		{Model: "hosted_vllm/b", APIBase: "http://b", Provider: "hosted_vllm", State: 0},
+	}
+	if len(d.Deployments) != len(want) {
+		t.Fatalf("deployments: %+v", d.Deployments)
+	}
+	for i := range want {
+		if d.Deployments[i] != want[i] {
+			t.Errorf("deployment %d: %+v, want %+v", i, d.Deployments[i], want[i])
+		}
+	}
+	for _, q := range f.seen {
+		switch {
+		case strings.Contains(q, "fallbacks"):
+			if !strings.Contains(q, `{__name__=~"litellm_deployment_`) || !strings.Contains(q, `(_total)?",requested_model="llama"}`) {
+				t.Errorf("fallback query: %s", q)
+			}
+		case strings.Contains(q, "litellm_deployment_state"):
+			if strings.Contains(q, "llama") {
+				t.Errorf("deployment state is not filterable: %s", q)
+			}
+		}
+	}
+}
