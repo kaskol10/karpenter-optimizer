@@ -29,7 +29,10 @@ test('ChangesPanel lists removed nodes under their reason with an explanation', 
 });
 
 test('a removed node opens to how it went', () => {
-  const local = (h, m) => new Date(2026, 10, 10, h, m).toISOString();
+  // Times today: the panel prints the weekday for other days, so a fixed
+  // date only passed on the day it was written.
+  const today = new Date();
+  const local = (h, m) => new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m).toISOString();
   const event = {
     ...gone('a', 'Underutilized'),
     at: local(12, 23),
