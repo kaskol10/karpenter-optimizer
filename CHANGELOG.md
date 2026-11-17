@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Gateway team dashboard API**: `GET /api/v1/serving/gateway/dashboard?team=&model=&key=&range=24h|7d|30d|month` builds a per-team view of the LiteLLM gateway from the LiteLLM metrics in Prometheus (`PROMETHEUS_URL`, chart value `usage.prometheusUrl`). This is the backend for the coming team view on the Gateway page.
+- **Team usage on the Gateway page**: a second card under the live gateway shows LiteLLM usage per team from Prometheus. Everyone who can open the app sees every team; the team is a filter, not a login.
+  - **Filters:** team, model alias, API key and range (this month, 24 h, 7 days, 30 days), kept in the URL (`?team=&model=&key=&range=`) so a view can be shared. Clicking an API key or a model in the tables filters by it.
+  - **Tiles:** spend, team budget left (share, amount and time to reset; amber under 20%, red when spent), requests, active API keys, error rate and 429s.
+  - **Charts:** spend per day stacked by model (six models, then "Other models") and input, cached and output tokens per day. A LiteLLM that does not export cached tokens shows two lines, not a flat third.
+  - **Tables:** one row per API key (spend, tokens, requests, error share, key budget left, p95 time to first token), time to first token per model, and output speed per model group, labelled as covering all teams.
+  - **When something is missing:** without `PROMETHEUS_URL` the card says how to set it and the live gateway card is unaffected. Panels Prometheus did not answer are named in one quiet line; a failed refresh keeps the last answer on screen.
+- **Gateway team dashboard API**: `GET /api/v1/serving/gateway/dashboard?team=&model=&key=&range=24h|7d|30d|month` builds a per-team view of the LiteLLM gateway from the LiteLLM metrics in Prometheus (`PROMETHEUS_URL`, chart value `usage.prometheusUrl`). It feeds the team usage card on the Gateway page.
   - **Summary:** spend, requests, failures, error rate, active developers (API keys with traffic) and 429s.
   - **Budget:** the team's remaining budget, its share and the hours to reset.
   - **Per day:** spend by model alias and input/cached/output tokens, as closed UTC days plus today so far.
