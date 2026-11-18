@@ -70,3 +70,24 @@ func TestPromQueryAndRange(t *testing.T) {
 		t.Error("bad url should fail")
 	}
 }
+
+func TestPromTenantHeader(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("X-Scope-OrgID"))
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	defer srv.Close()
+
+	p := NewProm(srv.URL)
+	if _, err := p.Query(context.Background(), "up", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	p.Tenant = "prod"
+	if _, err := p.Query(context.Background(), "up", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "" || got[1] != "prod" {
+		t.Errorf("X-Scope-OrgID = %q, want none then prod", got)
+	}
+}

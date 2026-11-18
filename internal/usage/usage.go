@@ -65,6 +65,8 @@ const (
 type Prometheus struct {
 	URL    string
 	Client *http.Client
+	// Tenant, when set, is sent as X-Scope-OrgID (Grafana Mimir, Cortex).
+	Tenant string
 }
 
 // NewPrometheus returns a provider for the Prometheus at baseURL.
@@ -128,6 +130,9 @@ func (p *Prometheus) query(ctx context.Context, q string) ([]promSample, error) 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
+	}
+	if p.Tenant != "" {
+		req.Header.Set("X-Scope-OrgID", p.Tenant)
 	}
 	resp, err := p.Client.Do(req)
 	if err != nil {

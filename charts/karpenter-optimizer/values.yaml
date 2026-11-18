@@ -291,6 +291,11 @@ metrics:
 # p95 over 24h instead, plus GPU memory per card from the DCGM exporter.
 usage:
   prometheusUrl: ""
+  # Tenant for a multi-tenant Prometheus API such as Grafana Mimir, sent as
+  # the X-Scope-OrgID header on every query. With Mimir, prometheusUrl is the
+  # query-frontend plus /prometheus, e.g.
+  # http://mimir-query-frontend.mimir.svc:8080/prometheus
+  prometheusTenant: ""
 
 # Frontend configuration (deployed as sidecar container)
 frontend:
