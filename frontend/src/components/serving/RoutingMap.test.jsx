@@ -99,11 +99,19 @@ describe('RoutingMap', () => {
     expect(within(details).getByText('Aliases routed here')).toBeInTheDocument();
   });
 
-  test('a crowded column folds into "N more"', () => {
-    const many = Array.from({ length: 15 }, (_, i) => route({ team: `team-${i}`, requests: 100 - i }));
+  test('"N more" names what it holds and expands the column', () => {
+    const many = Array.from({ length: 15 }, (_, i) => route({ deployment: `dep-${i}`, requests: 100 - i }));
     render(<RoutingMap data={{ routes: many }} groups={[]} filtered onFilter={vi.fn()} />);
-    fireEvent.click(node('4 more'));
-    expect(screen.getByText(/4 smaller nodes, folded/)).toBeInTheDocument();
+    const more = screen.getByRole('button', { name: /^4 more: dep-11 · vllm.example.internal, dep-12/ });
+    expect(screen.getByText('dep-11, dep-12, …')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^dep-14 \(/ })).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(screen.getByRole('button', { name: /^dep-14 \(/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^4 more/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer deployments' }));
+    expect(screen.queryByRole('button', { name: /^dep-14 \(/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('button', { name: /^4 more/ }), { key: 'Enter' });
+    expect(screen.getByRole('button', { name: /^dep-14 \(/ })).toBeInTheDocument();
   });
 
   test('no routes', () => {

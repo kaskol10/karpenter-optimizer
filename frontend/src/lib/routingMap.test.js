@@ -128,7 +128,9 @@ describe('buildRoutingMap', () => {
     const m = buildRoutingMap({ routes: many });
     expect(m.columns[0]).toHaveLength(MAX_PER_COLUMN);
     const other = m.columns[0].at(-1);
-    expect(other).toEqual(expect.objectContaining({ id: 'o:0', kind: 'other', label: '4 more' }));
+    expect(other).toEqual(expect.objectContaining({ id: 'o:0', kind: 'other', label: '4 more', sub: 't11, t12, …' }));
+    expect(other.members.map((x) => x.name)).toEqual(['t11', 't12', 't13', 't14']);
+    expect(other.members[0].requests).toBe(89);
     expect(other.requests).toBe(89 + 88 + 87 + 86);
     expect(m.routes.at(-1).path[0]).toBe('o:0');
   });
@@ -207,5 +209,34 @@ describe('several companies', () => {
     expect(m.owners).toEqual(['acme', 'globex']);
     expect(k.get('a:globex/meta-llama/Llama-3.3-70B')).toEqual(expect.objectContaining({ owner: 'globex', label: 'meta-llama/Llama-3.3-70B' }));
     expect(k.get('a:gpt-4o')).toEqual(expect.objectContaining({ owner: '', label: 'gpt-4o', sub: null }));
+  });
+});
+
+describe('folded columns', () => {
+  const many = (n, f) => Array.from({ length: n }, (_, i) => route(f(i)));
+
+  test('names what each kind of folded node holds', () => {
+    const deps = buildRoutingMap({ routes: many(14, (i) => ({ deployment: `m${i}`, apiBase: `http://h${i}:8000/v1`, requests: 100 - i })) });
+    const d = deps.columns[2].at(-1);
+    expect(d.members.map((x) => x.name)).toEqual(['m11 · h11:8000', 'm12 · h12:8000', 'm13 · h13:8000']);
+    expect(d.sub).toBe('m11, m12, …');
+    const hosts = deps.columns[3].at(-1);
+    expect(hosts.members[0].name).toBe('h11:8000');
+    const aliases = buildRoutingMap({ routes: many(13, (i) => ({ alias: `org/m${i}`, requests: 100 - i })) });
+    expect(aliases.columns[1].at(-1)).toEqual(expect.objectContaining({ label: '2 more', sub: 'org/m11, org/m12' }));
+    const pods = buildRoutingMap(
+      { routes: many(13, (i) => ({ deployment: `Qwen/m${i}`, requests: 100 - i })), groups: Array.from({ length: 13 }, (_, i) => ({ model: `Qwen/m${i}`, online: 1, replicas: [{}], kvMax: 10, waiting: 0 })) },
+    );
+    expect(pods.columns[3].at(-1).members[0].name).toBe('Qwen/m11 (this cluster)');
+    const keys = buildRoutingMap({ routes: many(13, (i) => ({ key: `k${i}`, requests: 100 - i })) }, { byKey: true });
+    expect(keys.columns[0].at(-1).members[0].name).toBe('k11 · Backend');
+  });
+
+  test('an expanded column keeps every node', () => {
+    const routes = many(15, (i) => ({ deployment: `m${i}`, requests: 100 - i }));
+    expect(buildRoutingMap({ routes }).columns[2]).toHaveLength(MAX_PER_COLUMN);
+    const open = buildRoutingMap({ routes }, { expanded: [2] });
+    expect(open.columns[2]).toHaveLength(15);
+    expect(open.columns[2].some((n) => n.kind === 'other')).toBe(false);
   });
 });

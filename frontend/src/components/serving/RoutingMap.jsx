@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { COLUMNS, breakdown, buildRoutingMap, highlight, hostOf, layout } from '../../lib/routingMap';
+import { COLUMNS, MAX_PER_COLUMN, breakdown, buildRoutingMap, highlight, hostOf, layout } from '../../lib/routingMap';
 import { copyText } from './shared';
 
 const NODE_CLASS = {
@@ -38,7 +38,7 @@ const mid = (s, n) => {
 const pct = (v) => `${v < 10 ? v.toFixed(1) : Math.round(v)}%`;
 const num = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : `${Math.round(v)}`);
 
-function Node({ n, box, dimmed, selected, onSelect }) {
+function Node({ n, box, dimmed, selected, onSelect, onExpand }) {
   const flag = n.flags[0];
   const name = n.label;
   const lines = [
@@ -50,18 +50,27 @@ function Node({ n, box, dimmed, selected, onSelect }) {
     <g
       role="button"
       tabIndex={0}
-      aria-pressed={selected}
-      aria-label={`${name}${n.sub ? ` (${n.sub})` : ''}: ${n.fact}${n.flags.length ? `, ${n.flags.map((f) => f.text).join(', ')}` : ''}`}
+      aria-label={
+        n.kind === 'other'
+          ? `${name}: ${n.members.map((m) => m.name).join(', ')}. Show them all`
+          : `${name}${n.sub ? ` (${n.sub})` : ''}: ${n.fact}${n.flags.length ? `, ${n.flags.map((f) => f.text).join(', ')}` : ''}`
+      }
+      aria-pressed={n.kind === 'other' ? undefined : selected}
       className={cn('cursor-pointer outline-none transition-opacity', dimmed && 'opacity-20')}
-      onClick={() => onSelect(selected ? null : n.id)}
+      onClick={() => (n.kind === 'other' ? onExpand(n.col) : onSelect(selected ? null : n.id))}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onSelect(selected ? null : n.id);
+          if (n.kind === 'other') onExpand(n.col);
+          else onSelect(selected ? null : n.id);
         }
       }}
     >
-      <title>{[n.alias || name, n.kind === 'alias' ? null : n.sub, n.fact, ...n.flags.map((f) => f.text)].filter(Boolean).join('\n')}</title>
+      <title>
+        {n.kind === 'other'
+          ? [`${n.label}, click to show them all:`, ...n.members.slice(0, 20).map((m) => m.name), n.members.length > 20 ? '…' : null].filter(Boolean).join('\n')
+          : [n.alias || name, n.kind === 'alias' ? null : n.sub, n.fact, ...n.flags.map((f) => f.text)].filter(Boolean).join('\n')}
+      </title>
       <rect
         x={box.x}
         y={box.y}
@@ -250,7 +259,6 @@ function Details({ map, node, data, onClose, onFilter }) {
             <Rows title="Aliases routed here" rows={col(1)} render={aliasName} />
           </>
         )}
-        {node.kind === 'other' && <p className="text-sm text-muted-foreground">{node.members.length} smaller nodes, folded to keep the map readable. Filter the card to see them.</p>}
       </div>
 
       {node.kind === 'alias' && (
@@ -278,10 +286,11 @@ function Details({ map, node, data, onClose, onFilter }) {
 // every path through it and opens its details.
 export function RoutingMap({ data, groups, filtered, onFilter }) {
   const [byKey, setByKey] = useState(false);
+  const [expanded, setExpanded] = useState([]);
   const [selected, setSelected] = useState(null);
   const map = useMemo(
-    () => buildRoutingMap({ routes: data.routes, deployments: data.deployments, teams: data.teams, groups }, { byKey, idle: !filtered }),
-    [data, groups, byKey, filtered],
+    () => buildRoutingMap({ routes: data.routes, deployments: data.deployments, teams: data.teams, groups }, { byKey, idle: !filtered, expanded }),
+    [data, groups, byKey, filtered, expanded],
   );
   const lay = useMemo(() => layout(map), [map]);
   const nodes = map.columns.flat();
@@ -324,6 +333,18 @@ export function RoutingMap({ data, groups, filtered, onFilter }) {
           fallback
         </span>
         <span>Click a node to follow its paths.</span>
+        {expanded
+          .filter((c) => map.columns[c].length > MAX_PER_COLUMN)
+          .map((c) => (
+            <button
+              key={c}
+              type="button"
+              className="rounded-md border px-2 py-0.5 hover:text-foreground"
+              onClick={() => setExpanded((e) => e.filter((x) => x !== c))}
+            >
+              Show fewer {COLUMNS[c].toLowerCase()}
+            </button>
+          ))}
       </div>
       <div className="overflow-x-auto">
         <svg viewBox={`0 0 ${lay.width} ${lay.height}`} className="min-w-[760px]" role="group" aria-label="Routing map">
@@ -353,6 +374,10 @@ export function RoutingMap({ data, groups, filtered, onFilter }) {
               dimmed={Boolean(lit) && !lit.nodes.has(n.id)}
               selected={n.id === current?.id}
               onSelect={setSelected}
+              onExpand={(c) => {
+                setSelected(null);
+                setExpanded((e) => (e.includes(c) ? e : [...e, c]));
+              }}
             />
           ))}
         </svg>
