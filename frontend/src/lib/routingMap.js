@@ -100,11 +100,22 @@ function runsOnFor(route, groups) {
 
 const deploymentId = (dep, base) => `d:${dep}|${base || ''}`;
 
+// foldedName names a node folded into "N more", before the flag pass sets
+// display labels.
+function foldedName(n) {
+  if (n.kind === 'alias') return n.alias;
+  if (n.kind === 'deployment') return n.sub ? `${n.deployment} · ${n.sub}` : n.deployment;
+  if (n.kind === 'cluster') return `${n.group.model} (this cluster)`;
+  if (n.kind === 'outside' || n.kind === 'external') return n.host;
+  return n.sub ? `${n.label} · ${n.sub}` : n.label;
+}
+
 // buildRoutingMap returns {columns: [[node…]×4], links, routes, owners}.
 // Each route carries `path`, its four node ids, so a selection can light up
 // every path through a node. byKey splits callers into API keys; idle adds
-// deployments with no traffic (only meaningful without filters).
-export function buildRoutingMap({ routes = [], deployments = [], teams = [], groups = [] }, { byKey = false, idle = false } = {}) {
+// deployments with no traffic (only meaningful without filters); expanded
+// lists the columns shown in full instead of folding past MAX_PER_COLUMN.
+export function buildRoutingMap({ routes = [], deployments = [], teams = [], groups = [] }, { byKey = false, idle = false, expanded = [] } = {}) {
   const nodes = new Map();
   const node = (id, col, init) => {
     if (!nodes.has(id)) nodes.set(id, { id, col, requests: 0, failures: 0, flags: [], ...init });
@@ -141,13 +152,26 @@ export function buildRoutingMap({ routes = [], deployments = [], teams = [], gro
     });
   });
 
-  // Fold the smallest nodes of a crowded column into one "N more" node.
+  // Fold the smallest nodes of a crowded column into one "N more" node that
+  // names what it holds; an expanded column keeps them all.
   const columns = [0, 1, 2, 3].map((c) => [...nodes.values()].filter((n) => n.col === c).sort((a, b) => b.requests + b.failures - (a.requests + a.failures) || a.id.localeCompare(b.id)));
   const remap = new Map();
   columns.forEach((list, c) => {
-    if (list.length <= MAX_PER_COLUMN) return;
+    if (list.length <= MAX_PER_COLUMN || expanded.includes(c)) return;
     const rest = list.splice(MAX_PER_COLUMN - 1);
-    const other = { id: `o:${c}`, col: c, kind: 'other', label: `${rest.length} more`, requests: 0, failures: 0, flags: [], members: rest.map((n) => n.id) };
+    const members = rest.map((n) => ({ id: n.id, name: foldedName(n), requests: n.requests + n.failures }));
+    const preview = members.slice(0, 2).map((m) => m.name.split(' · ')[0]);
+    const other = {
+      id: `o:${c}`,
+      col: c,
+      kind: 'other',
+      label: `${rest.length} more`,
+      sub: `${preview.join(', ')}${members.length > 2 ? ', …' : ''}`,
+      requests: 0,
+      failures: 0,
+      flags: [],
+      members,
+    };
     rest.forEach((n) => {
       other.requests += n.requests;
       other.failures += n.failures;
