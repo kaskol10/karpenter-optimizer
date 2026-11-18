@@ -21,7 +21,9 @@ func newUsageCollector(cfg *config.Config, k8s *kubernetes.Client) *usage.Collec
 	}
 	var providers []usage.Provider
 	if cfg.PrometheusURL != "" {
-		providers = append(providers, usage.NewPrometheus(cfg.PrometheusURL))
+		prom := usage.NewPrometheus(cfg.PrometheusURL)
+		prom.Tenant = cfg.PrometheusTenant
+		providers = append(providers, prom)
 	}
 	providers = append(providers, &usage.MetricsServer{Get: k8s.RawGet})
 	return usage.NewCollector(usageCacheTTL, providers...)

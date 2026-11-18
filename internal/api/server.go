@@ -238,7 +238,7 @@ func NewServer(cfg *config.Config) *Server {
 		hostedPrices:            hostedprices.New(hostedprices.DefaultURL),
 		usage:                   newUsageCollector(cfg, k8sClient),
 		placementInterval:       placementIntervalFromEnv(),
-		gatewayProm:             newGatewayProm(cfg.PrometheusURL),
+		gatewayProm:             newGatewayProm(cfg.PrometheusURL, cfg.PrometheusTenant),
 		placementWindow:         placementWindowFromEnv(),
 	}
 	if k8sClient != nil && server.placementWindow > 0 {

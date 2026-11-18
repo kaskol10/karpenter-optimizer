@@ -14,11 +14,14 @@ import (
 
 // newGatewayProm returns the Prometheus client for the team dashboard, or
 // nil (an untyped nil interface, so the handler can test it) without a URL.
-func newGatewayProm(url string) gatewaydash.Querier {
+// tenant is the X-Scope-OrgID for Grafana Mimir ("" = none).
+func newGatewayProm(url, tenant string) gatewaydash.Querier {
 	if url == "" {
 		return nil
 	}
-	return gatewaydash.NewProm(url)
+	p := gatewaydash.NewProm(url)
+	p.Tenant = tenant
+	return p
 }
 
 // gatewayDashTTL is how long a dashboard answer is reused for the same

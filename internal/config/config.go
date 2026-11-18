@@ -40,6 +40,9 @@ type Config struct {
 	// 24h and DCGM GPU memory; metrics-server is tried otherwise. Never used
 	// for recommendations.
 	PrometheusURL string
+	// PrometheusTenant, when set, is sent as X-Scope-OrgID with every query
+	// to PrometheusURL, for multi-tenant APIs such as Grafana Mimir.
+	PrometheusTenant string
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -123,6 +126,7 @@ func Load() *Config {
 		ServingHistoryDSN:    resolveServingHistoryDSN(),
 		PlacementHistoryDSN:  resolvePlacementHistoryDSN(),
 		PrometheusURL:        getEnv("PROMETHEUS_URL", ""),
+		PrometheusTenant:     getEnv("PROMETHEUS_TENANT", ""),
 		OllamaURL:            ollamaURL, // Keep for backward compatibility
 		OllamaModel:          ollamaModel,
 		AWSRegion:            getEnv("AWS_REGION", "eu-west-1"),

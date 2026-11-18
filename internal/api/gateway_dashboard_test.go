@@ -90,6 +90,9 @@ func TestGatewayDashCacheExpires(t *testing.T) {
 	assert.False(t, ok)
 	c.put("b", &gatewaydash.Dashboard{}, now.Add(2*gatewayDashTTL))
 	assert.NotContains(t, c.entries, "a", "stale entries are dropped")
-	assert.Nil(t, newGatewayProm(""))
-	assert.NotNil(t, newGatewayProm("http://prometheus:9090"))
+	assert.Nil(t, newGatewayProm("", "tenant"))
+	assert.NotNil(t, newGatewayProm("http://prometheus:9090", ""))
+	p, ok := newGatewayProm("http://mimir/prometheus", "prod").(*gatewaydash.Prom)
+	assert.True(t, ok)
+	assert.Equal(t, "prod", p.Tenant)
 }

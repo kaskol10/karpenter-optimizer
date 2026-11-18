@@ -17,6 +17,9 @@ import (
 type Prom struct {
 	URL    string
 	Client *http.Client
+	// Tenant, when set, is sent as X-Scope-OrgID on every query (Grafana
+	// Mimir, Cortex and Loki-style multi-tenant Prometheus APIs).
+	Tenant string
 }
 
 // NewProm returns a client for the Prometheus at baseURL.
@@ -59,6 +62,9 @@ func (p *Prom) get(ctx context.Context, path string, params url.Values) (*apiRes
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
+	}
+	if p.Tenant != "" {
+		req.Header.Set("X-Scope-OrgID", p.Tenant)
 	}
 	resp, err := p.Client.Do(req)
 	if err != nil {

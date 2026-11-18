@@ -149,6 +149,11 @@ spec:
             - name: PROMETHEUS_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.usage.prometheusTenant }}
+            # Sent as X-Scope-OrgID (Grafana Mimir / Cortex tenant).
+            - name: PROMETHEUS_TENANT
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             # Prometheus /metrics exporter (opt-in).
             - name: METRICS_ENABLED

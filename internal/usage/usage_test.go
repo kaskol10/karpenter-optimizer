@@ -227,3 +227,27 @@ func TestCollector(t *testing.T) {
 		t.Error("nil collector must return nil")
 	}
 }
+
+func TestPrometheusTenantHeader(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-Scope-OrgID"))
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	defer srv.Close()
+
+	p := NewPrometheus(srv.URL)
+	p.Tenant = "prod"
+	if _, err := p.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("no query reached the server")
+	}
+	for _, h := range seen {
+		if h != "prod" {
+			t.Errorf("X-Scope-OrgID = %q, want prod on every query", h)
+		}
+	}
+}
