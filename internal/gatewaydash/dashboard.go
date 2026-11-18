@@ -84,6 +84,32 @@ type Deployment struct {
 	State    float64 `json:"state"`
 }
 
+// Route is one path a request took through LiteLLM over the window: the
+// caller (team, API key), the alias it asked for, the model group that
+// served it (another group than the alias = a fallback) and the deployment.
+// From litellm_deployment_success_responses / _failure_responses, which
+// carry all of these labels on one series.
+type Route struct {
+	Team       string  `json:"team"`
+	Key        string  `json:"key"`
+	Alias      string  `json:"alias"`
+	ModelGroup string  `json:"modelGroup"`
+	Deployment string  `json:"deployment"` // litellm_model_name
+	APIBase    string  `json:"apiBase"`
+	Provider   string  `json:"provider"`
+	Requests   float64 `json:"requests"` // successful responses
+	Failures   float64 `json:"failures"`
+}
+
+// TeamStat is what the routing map flags on a caller: 429s over the window
+// and the team budget now (nil when not exported or not set).
+type TeamStat struct {
+	Team            string   `json:"team"`
+	Throttled       *float64 `json:"throttled"`
+	BudgetRemaining *float64 `json:"budgetRemaining"`
+	BudgetMax       *float64 `json:"budgetMax"`
+}
+
 // ModelSpeed is a model group's output speed. LiteLLM labels it by model
 // group only, so it covers every team.
 type ModelSpeed struct {
@@ -115,6 +141,8 @@ type Dashboard struct {
 	Models      []ModelStat       `json:"models"`
 	OutputSpeed []ModelSpeed      `json:"outputSpeed"`
 	Deployments []Deployment      `json:"deployments"`
+	Routes      []Route           `json:"routes"`
+	Teams       []TeamStat        `json:"teams"`
 	Options     Options           `json:"options"`
 	Errors      map[string]string `json:"errors,omitempty"`
 }
@@ -264,6 +292,15 @@ func (b *builder) plan() {
 	// Deployment state now: labelled by backend only, so not filtered.
 	b.add("deployments", "deployments", "max by (litellm_model_name, api_base, api_provider) (litellm_deployment_state)")
 
+	// Routes: caller → alias → model group → deployment, and per team the
+	// 429s and budget the map flags.
+	b.add("routeOK", "routes", fmt.Sprintf("sum by (%s) (%s)", routeLabels, inc("litellm_deployment_success_responses", all)))
+	b.add("routeFail", "routes", fmt.Sprintf("sum by (%s) (%s)", routeLabels, inc("litellm_deployment_failure_responses", all)))
+	b.add("teamThrottled", "routes", fmt.Sprintf("sum by (%s) (%s)", LabelTeam, inc("litellm_proxy_total_requests_metric", f.matchers(nil, `status_code="429"`))))
+	teamOnly := Filter{Team: f.Team}.matchers(nil)
+	b.add("teamBudgetLeft", "routes", fmt.Sprintf("max by (%s) (litellm_remaining_team_budget_metric%s)", LabelTeam, teamOnly))
+	b.add("teamBudgetMax", "routes", fmt.Sprintf("max by (%s) (litellm_team_max_budget_metric%s)", LabelTeam, teamOnly))
+
 	// Output speed: labelled by model group only, so not filtered.
 	b.add("speed", "outputSpeed", fmt.Sprintf(
 		"sum by (model_group) (rate(litellm_deployment_latency_per_output_token_sum%[1]s)) / sum by (model_group) (rate(litellm_deployment_latency_per_output_token_count%[1]s))", rng))
@@ -285,6 +322,60 @@ var tokenMetrics = []struct{ kind, metric string }{
 	{"input", "litellm_input_tokens_metric"},
 	{"cached", "litellm_input_cached_tokens_metric"},
 	{"output", "litellm_output_tokens_metric"},
+}
+
+// routeLabels are the labels one route is keyed by.
+const routeLabels = "team_alias, api_key_alias, requested_model, model_group, litellm_model_name, api_base, api_provider"
+
+// buildRoutes joins success and failure responses on the path. Failure
+// series may lack model_group; they join on the rest of the path.
+func buildRoutes(ok, fail []Sample) []Route {
+	type pathKey struct{ team, key, alias, dep, base string }
+	pk := func(m map[string]string) pathKey {
+		return pathKey{m[LabelTeam], m[LabelKey], m[LabelModel], m["litellm_model_name"], m["api_base"]}
+	}
+	byPath := map[pathKey]*Route{}
+	var order []pathKey
+	get := func(m map[string]string) *Route {
+		k := pk(m)
+		r, seen := byPath[k]
+		if !seen {
+			r = &Route{Team: k.team, Key: k.key, Alias: k.alias, Deployment: k.dep, APIBase: k.base}
+			byPath[k] = r
+			order = append(order, k)
+		}
+		if r.ModelGroup == "" {
+			r.ModelGroup = m["model_group"]
+		}
+		if r.Provider == "" {
+			r.Provider = m["api_provider"]
+		}
+		return r
+	}
+	for _, s := range ok {
+		if s.Metric["litellm_model_name"] != "" {
+			get(s.Metric).Requests += s.Value
+		}
+	}
+	for _, s := range fail {
+		if s.Metric["litellm_model_name"] != "" {
+			get(s.Metric).Failures += s.Value
+		}
+	}
+	out := make([]Route, 0, len(order))
+	for _, k := range order {
+		if r := byPath[k]; r.Requests > 0 || r.Failures > 0 {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, c := out[i], out[j]
+		if a.Requests+a.Failures != c.Requests+c.Failures {
+			return a.Requests+a.Failures > c.Requests+c.Failures
+		}
+		return fmt.Sprint(a) < fmt.Sprint(c)
+	})
+	return out
 }
 
 // counter selects a LiteLLM counter with or without the _total suffix
@@ -511,6 +602,13 @@ func (b *builder) assemble() *Dashboard {
 		}
 		return a.APIBase < c.APIBase
 	})
+
+	d.Routes = buildRoutes(r["routeOK"], r["routeFail"])
+	thr, left, bmax := byLabel(r["teamThrottled"], LabelTeam), byLabel(r["teamBudgetLeft"], LabelTeam), byLabel(r["teamBudgetMax"], LabelTeam)
+	d.Teams = []TeamStat{}
+	for _, t := range sortedKeys(thr, left, bmax) {
+		d.Teams = append(d.Teams, TeamStat{Team: t, Throttled: lookup(thr, t), BudgetRemaining: lookup(left, t), BudgetMax: lookup(bmax, t)})
+	}
 
 	d.Options = Options{
 		Teams:  sortedKeys(byLabel(r["optTeams"], LabelTeam)),
