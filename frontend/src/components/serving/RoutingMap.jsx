@@ -51,7 +51,7 @@ function Node({ n, box, dimmed, selected, onSelect }) {
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`${n.prefix || ''}${name}${n.sub ? ` (${n.sub})` : ''}: ${n.fact}${n.flags.length ? `, ${n.flags.map((f) => f.text).join(', ')}` : ''}`}
+      aria-label={`${name}${n.sub ? ` (${n.sub})` : ''}: ${n.fact}${n.flags.length ? `, ${n.flags.map((f) => f.text).join(', ')}` : ''}`}
       className={cn('cursor-pointer outline-none transition-opacity', dimmed && 'opacity-20')}
       onClick={() => onSelect(selected ? null : n.id)}
       onKeyDown={(e) => {
@@ -61,7 +61,7 @@ function Node({ n, box, dimmed, selected, onSelect }) {
         }
       }}
     >
-      <title>{[`${n.prefix || ''}${name}`, n.sub, n.fact, ...n.flags.map((f) => f.text)].filter(Boolean).join('\n')}</title>
+      <title>{[n.alias || name, n.kind === 'alias' ? null : n.sub, n.fact, ...n.flags.map((f) => f.text)].filter(Boolean).join('\n')}</title>
       <rect
         x={box.x}
         y={box.y}
@@ -125,7 +125,13 @@ function Details({ map, node, data, onClose, onFilter }) {
             }, {}),
         ).sort((a, b) => b.requests + b.failures - (a.requests + a.failures))
       : [];
-  const fullName = `${node.prefix || ''}${node.label}`;
+  const fullName = node.alias || node.label;
+  const aliasName = (r) => (
+    <>
+      {r.node?.owner && <span className="text-muted-foreground">{r.node.owner}/</span>}
+      {r.node?.label}
+    </>
+  );
   const fallbackMark = (r) => (r.fallback > 0 ? <span className="text-orange-600 dark:text-orange-400">fallback</span> : null);
   const marks = (r) => (
     <>
@@ -196,7 +202,7 @@ function Details({ map, node, data, onClose, onFilter }) {
         )}
         {node.kind === 'deployment' && (
           <>
-            <Rows title="Who reaches it" rows={col(1)} render={(r) => (<>{r.node?.prefix}{r.node?.label}</>)} extra={fallbackMark} />
+            <Rows title="Who reaches it" rows={col(1)} render={aliasName} extra={fallbackMark} />
             <Rows title="Teams behind them" rows={col(0)} />
             <div className="space-y-1 text-sm">
               <h4 className="text-xs font-medium text-muted-foreground">Runs on</h4>
@@ -213,7 +219,7 @@ function Details({ map, node, data, onClose, onFilter }) {
         )}
         {(node.kind === 'team' || node.kind === 'key') && (
           <>
-            <Rows title="What it uses" rows={col(1)} render={(r) => (<>{r.node?.prefix}{r.node?.label}</>)} />
+            <Rows title="What it uses" rows={col(1)} render={aliasName} />
             {keys.length > 0 && (
               <div>
                 <h4 className="mb-1 text-xs font-medium text-muted-foreground">Its API keys</h4>
@@ -241,7 +247,7 @@ function Details({ map, node, data, onClose, onFilter }) {
         {(node.kind === 'cluster' || node.kind === 'outside' || node.kind === 'external') && (
           <>
             <Rows title="Deployments here" rows={col(2)} render={withHost} extra={marks} />
-            <Rows title="Aliases routed here" rows={col(1)} render={(r) => (<>{r.node?.prefix}{r.node?.label}</>)} />
+            <Rows title="Aliases routed here" rows={col(1)} render={aliasName} />
           </>
         )}
         {node.kind === 'other' && <p className="text-sm text-muted-foreground">{node.members.length} smaller nodes, folded to keep the map readable. Filter the card to see them.</p>}
@@ -323,7 +329,7 @@ export function RoutingMap({ data, groups, filtered, onFilter }) {
         <svg viewBox={`0 0 ${lay.width} ${lay.height}`} className="min-w-[760px]" role="group" aria-label="Routing map">
           {COLUMNS.map((c, i) => (
             <text key={c} x={lay.colX[i] + lay.nodeW / 2} y={14} textAnchor="middle" className="fill-muted-foreground text-[12px]">
-              {i === 1 && map.prefix ? `${c} (${map.prefix}…)` : c}
+              {c}
             </text>
           ))}
           {lay.links.map((l) => (

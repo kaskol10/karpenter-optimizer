@@ -36,11 +36,10 @@ describe('RoutingMap', () => {
 
   test('draws the four columns with facts and flags', () => {
     render(<RoutingMap data={data} groups={groups} filtered={false} onFilter={vi.fn()} />);
-    ['Callers', 'Deployments', 'Runs on'].forEach((c) => expect(screen.getByText(c)).toBeInTheDocument());
-    expect(screen.getByText('Aliases (empathyai/…)')).toBeInTheDocument();
+    ['Callers', 'Aliases', 'Deployments', 'Runs on'].forEach((c) => expect(screen.getByText(c)).toBeInTheDocument());
     expect(node('Backend')).toHaveAccessibleName('Backend: 118 req, 2 throttled');
-    expect(node('empathyai/Qwen/Qwen3.5-9B')).toHaveAccessibleName(/12% fallbacks/);
-    expect(node('Qwen/Qwen3.5-9B')).toHaveAccessibleName(/Outage, still receiving traffic/);
+    expect(node('Qwen/Qwen3.5-9B (empathyai)')).toHaveAccessibleName(/12% fallbacks/);
+    expect(node('Qwen/Qwen3.5-9B (vllm.office-prod.empathy.ai)')).toHaveAccessibleName(/Outage, still receiving traffic/);
     expect(node('2/2 vLLM pods')).toBeInTheDocument();
     expect(node('api.together.xyz')).toHaveAccessibleName(/external API/);
   });
@@ -48,8 +47,8 @@ describe('RoutingMap', () => {
   test('clicking an alias lights its paths and shows where its traffic goes', () => {
     const onFilter = vi.fn();
     render(<RoutingMap data={data} groups={groups} filtered={false} onFilter={onFilter} />);
-    fireEvent.click(node('empathyai/Qwen/Qwen3.5-9B'));
-    expect(node('empathyai/Qwen/Qwen3.5-9B')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(node('Qwen/Qwen3.5-9B (empathyai)'));
+    expect(node('Qwen/Qwen3.5-9B (empathyai)')).toHaveAttribute('aria-pressed', 'true');
     expect(node('Search').getAttribute('class')).toMatch(/opacity-20/);
     const details = screen.getByRole('region', { name: /Details for empathyai\/Qwen\/Qwen3.5-9B/ });
     expect(within(details).getByText('Where its traffic goes')).toBeInTheDocument();

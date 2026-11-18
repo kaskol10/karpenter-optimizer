@@ -49,15 +49,31 @@ const isExternal = (provider, apiBase) => {
   return EXTERNAL.has(provider) || provider === 'openai';
 };
 
-// sharedPrefix is the first path segment every alias starts with
-// ("empathyai/"), so the map can dim it; '' when they differ.
-export function sharedPrefix(aliases) {
+// aliasOwners finds the companies aliases are namespaced under
+// ("empathyai/Qwen/Qwen3.5-9B" → empathyai). An owner is the first segment
+// of an alias with three or more segments (company/org/model), or a first
+// segment every alias shares; a two-segment alias like "Qwen/Qwen3.5-9B"
+// is a Hugging Face org/model and has no owner unless its first segment is
+// a known owner.
+export function aliasOwners(aliases) {
   const list = aliases.filter(Boolean);
-  if (list.length < 2) return '';
-  const first = list[0].indexOf('/');
-  if (first <= 0) return '';
-  const p = list[0].slice(0, first + 1);
-  return list.every((a) => a.startsWith(p) && a.length > p.length) ? p : '';
+  const owners = new Set();
+  list.forEach((a) => {
+    const parts = a.split('/');
+    if (parts.length >= 3 && parts[0]) owners.add(parts[0]);
+  });
+  if (list.length >= 2) {
+    const first = list[0].split('/')[0];
+    if (list.every((a) => a.includes('/') && a.split('/')[0] === first && a.length > first.length + 1)) owners.add(first);
+  }
+  return owners;
+}
+
+// splitAlias returns {owner, model} for an alias given the known owners.
+export function splitAlias(alias, owners) {
+  const i = alias.indexOf('/');
+  if (i > 0 && owners.has(alias.slice(0, i))) return { owner: alias.slice(0, i), model: alias.slice(i + 1) };
+  return { owner: '', model: alias };
 }
 
 const errorShare = (ok, fail) => (ok + fail > 0 ? (fail / (ok + fail)) * 100 : null);
@@ -84,7 +100,7 @@ function runsOnFor(route, groups) {
 
 const deploymentId = (dep, base) => `d:${dep}|${base || ''}`;
 
-// buildRoutingMap returns {columns: [[node…]×4], links, routes, prefix}.
+// buildRoutingMap returns {columns: [[node…]×4], links, routes, owners}.
 // Each route carries `path`, its four node ids, so a selection can light up
 // every path through a node. byKey splits callers into API keys; idle adds
 // deployments with no traffic (only meaningful without filters).
@@ -157,15 +173,17 @@ export function buildRoutingMap({ routes = [], deployments = [], teams = [], gro
   });
 
   // Facts and flags.
-  const prefix = sharedPrefix(columns[1].filter((n) => n.kind === 'alias').map((n) => n.alias));
+  const owners = aliasOwners(columns[1].filter((n) => n.kind === 'alias').map((n) => n.alias));
   columns.flat().forEach((n) => {
     const err = errorShare(n.requests, n.failures);
     n.fact = n.idle ? 'No traffic in range' : fact(n.requests, n.failures);
     n.tone = errTone(err);
     if (n.kind === 'team' || n.kind === 'key') flagCaller(n, err, teamStat.get(n.team));
     if (n.kind === 'alias') {
-      n.prefix = prefix;
-      n.label = prefix ? n.alias.slice(prefix.length) : n.alias;
+      const { owner, model } = splitAlias(n.alias, owners);
+      n.owner = owner;
+      n.label = model;
+      n.sub = owner || null;
       flagAlias(n, paths);
     }
     if (n.kind === 'deployment') flagDeployment(n, paths, stateOf, columns[2]);
@@ -181,7 +199,7 @@ export function buildRoutingMap({ routes = [], deployments = [], teams = [], gro
     }
   });
 
-  return { columns, links: [...links.values()], routes: paths, prefix };
+  return { columns, links: [...links.values()], routes: paths, owners: [...owners].sort() };
 }
 
 function flagCaller(n, err, stat) {

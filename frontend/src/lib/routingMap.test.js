@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { MAX_PER_COLUMN, breakdown, buildRoutingMap, highlight, hostOf, isNoTeam, layout, sharedPrefix } from './routingMap';
+import { MAX_PER_COLUMN, aliasOwners, breakdown, buildRoutingMap, highlight, hostOf, isNoTeam, layout, splitAlias } from './routingMap';
 
 const route = (over) => ({
   team: 'Backend',
@@ -39,18 +39,27 @@ const data = {
 const byId = (map) => new Map(map.columns.flat().map((n) => [n.id, n]));
 
 describe('helpers', () => {
-  test('hostOf, isNoTeam, sharedPrefix', () => {
+  test('hostOf, isNoTeam', () => {
     expect(hostOf('https://vllm.office-prod.empathy.ai/v1')).toBe('vllm.office-prod.empathy.ai');
     expect(hostOf('qwen:8000/v1')).toBe('qwen:8000');
     expect(hostOf('')).toBe('');
     expect(isNoTeam('None')).toBe(true);
     expect(isNoTeam(undefined)).toBe(true);
     expect(isNoTeam('Backend')).toBe(false);
-    expect(sharedPrefix(['empathyai/a', 'empathyai/b'])).toBe('empathyai/');
-    expect(sharedPrefix(['empathyai/a', 'other/b'])).toBe('');
-    expect(sharedPrefix(['a', 'b'])).toBe('');
-    expect(sharedPrefix(['empathyai/a'])).toBe('');
-    expect(sharedPrefix(['empathyai/', 'empathyai/b'])).toBe('');
+  });
+
+  test('aliasOwners: company/org/model, or a first segment every alias shares', () => {
+    const own = (list) => [...aliasOwners(list)].sort();
+    expect(own(['empathyai/Qwen/Qwen3.5-9B', 'empathyai/Qwen2.5-7B-Instruct', 'acme/meta-llama/Llama-3.3-70B'])).toEqual(['acme', 'empathyai']);
+    expect(own(['empathyai/a', 'empathyai/b'])).toEqual(['empathyai']);
+    expect(own(['Qwen/Qwen3.5-9B', 'meta-llama/Llama-3.3-70B'])).toEqual([]);
+    expect(own(['empathyai/a'])).toEqual([]);
+    expect(own(['empathyai/', 'empathyai/b'])).toEqual([]);
+    expect(own(['plain', 'other'])).toEqual([]);
+    const owners = new Set(['empathyai']);
+    expect(splitAlias('empathyai/Qwen2.5-7B-Instruct', owners)).toEqual({ owner: 'empathyai', model: 'Qwen2.5-7B-Instruct' });
+    expect(splitAlias('Qwen/Qwen3.5-9B', owners)).toEqual({ owner: '', model: 'Qwen/Qwen3.5-9B' });
+    expect(splitAlias('gpt-4o', owners)).toEqual({ owner: '', model: 'gpt-4o' });
   });
 });
 
@@ -58,10 +67,10 @@ describe('buildRoutingMap', () => {
   const map = buildRoutingMap(data);
   const n = byId(map);
 
-  test('four columns, the dimmed alias prefix, runs-on kinds', () => {
+  test('four columns, the company on each alias, runs-on kinds', () => {
     expect(map.columns.map((c) => c.length)).toEqual([3, 2, 4, 3]);
-    expect(map.prefix).toBe('empathyai/');
-    expect(n.get('a:empathyai/Qwen/Qwen3.5-9B')).toEqual(expect.objectContaining({ label: 'Qwen/Qwen3.5-9B', prefix: 'empathyai/' }));
+    expect(map.owners).toEqual(['empathyai']);
+    expect(n.get('a:empathyai/Qwen/Qwen3.5-9B')).toEqual(expect.objectContaining({ label: 'Qwen/Qwen3.5-9B', owner: 'empathyai', sub: 'empathyai' }));
     expect(n.get('c:None').label).toBe('No team');
     const cluster = n.get('r:s:Qwen/Qwen3.5-2B');
     expect(cluster).toEqual(expect.objectContaining({ kind: 'cluster', label: '1/2 vLLM pods', sub: 'KV 91% · 3 waiting' }));
@@ -186,5 +195,17 @@ describe('layout', () => {
       expect(k.width).toBeLessThanOrEqual(16);
     });
     expect(layout(buildRoutingMap({})).height).toBe(28 + 86);
+  });
+});
+
+describe('several companies', () => {
+  test('each alias keeps its own company', () => {
+    const m = buildRoutingMap({
+      routes: [route({}), route({ team: 'Acme', alias: 'acme/meta-llama/Llama-3.3-70B', deployment: 'meta-llama/Llama-3.3-70B' }), route({ team: 'x', alias: 'gpt-4o', deployment: 'gpt-4o', provider: 'openai', apiBase: '' })],
+    });
+    const k = byId(m);
+    expect(m.owners).toEqual(['acme', 'empathyai']);
+    expect(k.get('a:acme/meta-llama/Llama-3.3-70B')).toEqual(expect.objectContaining({ owner: 'acme', label: 'meta-llama/Llama-3.3-70B' }));
+    expect(k.get('a:gpt-4o')).toEqual(expect.objectContaining({ owner: '', label: 'gpt-4o', sub: null }));
   });
 });
