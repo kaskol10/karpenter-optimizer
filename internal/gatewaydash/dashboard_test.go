@@ -292,3 +292,54 @@ func TestCounterSelector(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRoutes(t *testing.T) {
+	path := func(team, key, alias, group, dep, base string) map[string]string {
+		m := map[string]string{LabelTeam: team, LabelKey: key, LabelModel: alias, "litellm_model_name": dep, "api_base": base, "api_provider": "hosted_vllm"}
+		if group != "" {
+			m["model_group"] = group
+		}
+		return m
+	}
+	f := &fakeProm{instant: []rule{
+		{contains: "litellm_deployment_success_responses", samples: []Sample{
+			{Metric: path("Backend", "q", "e/9B", "e/9B", "Qwen/9B", "http://a"), Value: 100},
+			{Metric: path("Backend", "q", "e/9B", "together/9B", "together/9B", "https://t"), Value: 14},
+			{Metric: path("Search", "s", "e/2B", "e/2B", "Qwen/2B", "http://a"), Value: 40},
+			{Metric: map[string]string{LabelModel: "no-deployment"}, Value: 5},
+		}},
+		{contains: "litellm_deployment_failure_responses", samples: []Sample{
+			{Metric: path("Backend", "q", "e/9B", "", "Qwen/9B", "http://a"), Value: 3},
+			{Metric: path("Data", "d", "e/9B", "", "Qwen/9B", "http://a"), Value: 2},
+		}},
+		{contains: `status_code="429"`, samples: by(LabelTeam, "Backend", 7.0)},
+		{contains: "litellm_remaining_team_budget_metric", samples: by(LabelTeam, "Backend", 40.0)},
+		{contains: "litellm_team_max_budget_metric", samples: by(LabelTeam, "Backend", 100.0, "Search", 50.0)},
+	}}
+	d, err := Build(context.Background(), f, Filter{Range: "24h"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Team: "Backend", Key: "q", Alias: "e/9B", ModelGroup: "e/9B", Deployment: "Qwen/9B", APIBase: "http://a", Provider: "hosted_vllm", Requests: 100, Failures: 3},
+		{Team: "Search", Key: "s", Alias: "e/2B", ModelGroup: "e/2B", Deployment: "Qwen/2B", APIBase: "http://a", Provider: "hosted_vllm", Requests: 40},
+		{Team: "Backend", Key: "q", Alias: "e/9B", ModelGroup: "together/9B", Deployment: "together/9B", APIBase: "https://t", Provider: "hosted_vllm", Requests: 14},
+		{Team: "Data", Key: "d", Alias: "e/9B", Deployment: "Qwen/9B", APIBase: "http://a", Provider: "hosted_vllm", Failures: 2},
+	}
+	if len(d.Routes) != len(want) {
+		t.Fatalf("routes: %+v", d.Routes)
+	}
+	for i := range want {
+		if d.Routes[i] != want[i] {
+			t.Errorf("route %d = %+v, want %+v", i, d.Routes[i], want[i])
+		}
+	}
+	if len(d.Teams) != 2 || *d.Teams[0].Throttled != 7 || *d.Teams[0].BudgetRemaining != 40 || *d.Teams[1].BudgetMax != 50 || d.Teams[1].Throttled != nil {
+		t.Errorf("teams: %+v", d.Teams)
+	}
+	for _, q := range f.seen {
+		if strings.Contains(q, "litellm_deployment_success_responses") && !strings.Contains(q, "model_group, litellm_model_name, api_base") {
+			t.Errorf("route query must keep the whole path: %s", q)
+		}
+	}
+}

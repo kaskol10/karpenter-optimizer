@@ -6,6 +6,7 @@ import { API_URL } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import { groupByModel } from '../../lib/servingModels';
 import { deploymentRows, fallbackShare } from '../../lib/gatewayOperator';
+import { RoutingMap } from './RoutingMap';
 import { cn } from '../../lib/utils';
 import { SimpleSelect } from '../ui/simple-select';
 import { SkeletonRows } from '../ui/skeleton';
@@ -76,18 +77,26 @@ function Empty({ children = 'No data in this window.' }) {
 
 // Deployments lists the backends LiteLLM routes to with their state, next
 // to the vLLM/sglang replicas that serve each one in this cluster.
-function Deployments({ deployments }) {
-  const [pods, setPods] = useState(null);
-  const loadPods = useCallback(async () => {
+// useServingGroups polls /serving (only when enabled) and groups the
+// replicas by model, for the panels that join LiteLLM to the model servers.
+// null until the first answer; [] on an error.
+function useServingGroups(enabled) {
+  const [groups, setGroups] = useState(null);
+  const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API_URL}/api/v1/serving`);
-      setPods(data.pods || []);
+      setGroups(groupByModel(data.pods || []));
     } catch {
-      setPods([]);
+      setGroups([]);
     }
   }, []);
-  usePolling(loadPods, 30000, deployments.length > 0);
-  const rows = useMemo(() => deploymentRows(deployments, pods ? groupByModel(pods) : []), [deployments, pods]);
+  usePolling(load, 30000, enabled);
+  return groups;
+}
+
+function Deployments({ deployments, groups }) {
+  const pods = groups;
+  const rows = useMemo(() => deploymentRows(deployments, groups || []), [deployments, groups]);
 
   return (
     <Panel title="Deployments behind the gateway" note="All teams · state now">
@@ -149,6 +158,7 @@ export function TeamDashboard() {
   const [key, setKey] = useUrlParam('key', '');
   const [range, setRange] = useUrlParam('range', 'month', RANGE_VALUES);
   const { status, data, error } = useGatewayDashboard({ team, model, key, range });
+  const groups = useServingGroups(Boolean(data?.deployments?.length || data?.routes?.length));
 
   const spend = useMemo(() => spendChart(data?.spendByDay), [data]);
   const tokens = useMemo(() => tokenChart(data?.tokensByDay), [data]);
@@ -410,7 +420,20 @@ export function TeamDashboard() {
             </Panel>
           </div>
 
-          <Deployments deployments={data.deployments || []} />
+          <Panel title="Routing map" note="Who calls which alias, which deployment serves it, where that runs">
+            <RoutingMap
+              data={data}
+              groups={groups || []}
+              filtered={Boolean(team || model || key)}
+              onFilter={(f) => {
+                if (f.team !== undefined) setTeam(f.team);
+                if (f.model !== undefined) setModel(f.model);
+                if (f.key !== undefined) setKey(f.key);
+              }}
+            />
+          </Panel>
+
+          <Deployments deployments={data.deployments || []} groups={groups} />
         </>
       )}
     </div>
