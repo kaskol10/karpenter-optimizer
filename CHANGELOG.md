@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Team usage panels empty with real LiteLLM metrics**: LiteLLM's Prometheus client exports its counters with a `_total` suffix (`litellm_spend_metric_total`, `litellm_proxy_total_requests_metric_total`, the token counters), but the dashboard queried the bare names. Spend, requests, errors, 429s, API keys, spend and tokens per day and the filter choices were empty while output speed and deployments (a histogram and a gauge) worked. Every counter query now matches the name with or without the suffix. Checked against LiteLLM chart 1.109.0.
+
 ### Added
 - **What sits behind the gateway**: the Gateway and Serving pages now show how LiteLLM and the model servers connect.
   - **Deployments behind the gateway** (Team usage card): every backend LiteLLM routes to, with its state now (`litellm_deployment_state`: healthy, partial outage, outage). Next to each one are the vLLM/sglang replicas that serve it in this cluster: replicas online, fullest KV cache and waiting requests. Backends outside the cluster say so.
