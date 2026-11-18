@@ -78,17 +78,17 @@ func TestBuildDashboard(t *testing.T) {
 			{contains: "litellm_remaining_team_budget_metric", samples: one(250)},
 			{contains: "litellm_team_max_budget_metric", samples: one(1000)},
 			{contains: "litellm_team_budget_remaining_hours_metric", samples: one(36)},
-			{contains: "sum by (requested_model) (increase(litellm_spend_metric{team_alias=\"search\"}[43200s]))", samples: by(LabelModel, "llama", 5.0, "qwen", 0.0)},
-			{contains: "litellm_input_tokens_metric{team_alias=\"search\"}[43200s]", samples: one(1000)},
-			{contains: "litellm_output_tokens_metric{team_alias=\"search\"}[43200s]", samples: one(300)},
-			{contains: "sum by (api_key_alias) (increase(litellm_spend_metric", samples: by(LabelKey, "dev-a", 3.0, "dev-b", 9.0)},
-			{contains: "sum by (api_key_alias) (increase(litellm_total_tokens_metric", samples: by(LabelKey, "dev-a", 100.0, "dev-b", 900.0)},
-			{contains: "sum by (api_key_alias) (increase(litellm_proxy_total_requests_metric", samples: by(LabelKey, "dev-a", 10.0, "dev-b", 30.0, "dev-c", 1.0)},
-			{contains: "sum by (api_key_alias) (increase(litellm_proxy_failed_requests_metric", samples: by(LabelKey, "dev-b", 2.0)},
+			{contains: "sum by (requested_model) (increase({__name__=~\"litellm_spend_metric(_total)?\",team_alias=\"search\"}[43200s]))", samples: by(LabelModel, "llama", 5.0, "qwen", 0.0)},
+			{contains: "litellm_input_tokens_metric(_total)?\",team_alias=\"search\"}[43200s]", samples: one(1000)},
+			{contains: "litellm_output_tokens_metric(_total)?\",team_alias=\"search\"}[43200s]", samples: one(300)},
+			{contains: "sum by (api_key_alias) (increase({__name__=~\"litellm_spend_metric(_total)?\"", samples: by(LabelKey, "dev-a", 3.0, "dev-b", 9.0)},
+			{contains: "sum by (api_key_alias) (increase({__name__=~\"litellm_total_tokens_metric(_total)?\"", samples: by(LabelKey, "dev-a", 100.0, "dev-b", 900.0)},
+			{contains: "sum by (api_key_alias) (increase({__name__=~\"litellm_proxy_total_requests_metric(_total)?\"", samples: by(LabelKey, "dev-a", 10.0, "dev-b", 30.0, "dev-c", 1.0)},
+			{contains: "sum by (api_key_alias) (increase({__name__=~\"litellm_proxy_failed_requests_metric(_total)?\"", samples: by(LabelKey, "dev-b", 2.0)},
 			{contains: "litellm_remaining_api_key_budget_metric", samples: by(LabelKey, "dev-a", 40.0)},
 			{contains: "histogram_quantile(0.95, sum by (le, api_key_alias)", samples: by(LabelKey, "dev-b", 0.8)},
-			{contains: "sum by (requested_model) (increase(litellm_proxy_total_requests_metric", samples: by(LabelModel, "llama", 30.0, "qwen", 11.0)},
-			{contains: "sum by (requested_model) (increase(litellm_spend_metric", samples: by(LabelModel, "llama", 10.0, "qwen", 2.0)},
+			{contains: "sum by (requested_model) (increase({__name__=~\"litellm_proxy_total_requests_metric(_total)?\"", samples: by(LabelModel, "llama", 30.0, "qwen", 11.0)},
+			{contains: "sum by (requested_model) (increase({__name__=~\"litellm_spend_metric(_total)?\"", samples: by(LabelModel, "llama", 10.0, "qwen", 2.0)},
 			{contains: "histogram_quantile(0.5, sum by (le, requested_model)", samples: by(LabelModel, "llama", 0.2)},
 			{contains: "histogram_quantile(0.95, sum by (le, requested_model)", samples: by(LabelModel, "llama", 0.9)},
 			{contains: "litellm_deployment_latency_per_output_token", samples: []Sample{
@@ -242,7 +242,7 @@ func TestBuildOperatorPanels(t *testing.T) {
 		{contains: "litellm_deployment_state", samples: []Sample{
 			dep("hosted_vllm/b", "http://b", 0), dep("hosted_vllm/a", "http://a2", 2), dep("hosted_vllm/a", "http://a1", 2),
 			{Metric: map[string]string{}, Value: 1}}},
-		{contains: "sum by (requested_model) (increase(litellm_proxy_total_requests_metric", samples: by(LabelModel, "llama", 70.0, "qwen", 5.0)},
+		{contains: "sum by (requested_model) (increase({__name__=~\"litellm_proxy_total_requests_metric(_total)?\"", samples: by(LabelModel, "llama", 70.0, "qwen", 5.0)},
 	}}
 	d, err := Build(context.Background(), f, Filter{Model: "llama", Range: "24h"}, now)
 	if err != nil {
@@ -277,6 +277,18 @@ func TestBuildOperatorPanels(t *testing.T) {
 			if strings.Contains(q, "llama") {
 				t.Errorf("deployment state is not filterable: %s", q)
 			}
+		}
+	}
+}
+
+func TestCounterSelector(t *testing.T) {
+	for _, c := range []struct{ m, want string }{
+		{"", `{__name__=~"x(_total)?"}`},
+		{"{}", `{__name__=~"x(_total)?"}`},
+		{`{team_alias="a"}`, `{__name__=~"x(_total)?",team_alias="a"}`},
+	} {
+		if got := counter("x", c.m); got != c.want {
+			t.Errorf("counter(x, %q) = %s, want %s", c.m, got, c.want)
 		}
 	}
 }

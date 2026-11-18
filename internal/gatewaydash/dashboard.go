@@ -214,7 +214,7 @@ func (b *builder) plan() {
 	f, w := b.f, b.w
 	all := f.matchers(nil)
 	rng := fmt.Sprintf("[%ds]", w.Seconds())
-	inc := func(metric, m string) string { return fmt.Sprintf("increase(%s%s%s)", metric, m, rng) }
+	inc := func(metric, m string) string { return fmt.Sprintf("increase(%s%s)", counter(metric, m), rng) }
 
 	// Summary.
 	b.add("spend", "summary", "sum("+inc("litellm_spend_metric", all)+")")
@@ -222,7 +222,7 @@ func (b *builder) plan() {
 	b.add("failed", "summary", "sum("+inc("litellm_proxy_failed_requests_metric", all)+")")
 	b.add("active", "summary", fmt.Sprintf("count(sum by (%s) (%s) > 0)", LabelKey, inc("litellm_proxy_total_requests_metric", all)))
 	b.add("throttled", "summary", "sum("+inc("litellm_proxy_total_requests_metric", f.matchers(nil, `status_code="429"`))+")")
-	b.add("zeroCost", "summary", "sum("+inc("", f.matchers(nil, counterName("litellm_zero_cost_requests")))+")")
+	b.add("zeroCost", "summary", "sum("+inc("litellm_zero_cost_requests", all)+")")
 
 	// Budget: team-level gauges, labelled by team only.
 	if f.Team != "" {
@@ -234,9 +234,9 @@ func (b *builder) plan() {
 
 	// Today so far (closed days come from the range queries).
 	today := fmt.Sprintf("[%ds]", maxInt64(60, int64(w.To.Sub(midnight(w.To)).Seconds())))
-	b.add("spendToday", "spendByDay", fmt.Sprintf("sum by (%s) (increase(litellm_spend_metric%s%s))", LabelModel, all, today))
+	b.add("spendToday", "spendByDay", fmt.Sprintf("sum by (%s) (increase(%s%s))", LabelModel, counter("litellm_spend_metric", all), today))
 	for _, t := range tokenMetrics {
-		b.add("tokensToday:"+t.kind, "tokensByDay", fmt.Sprintf("sum(increase(%s%s%s))", t.metric, all, today))
+		b.add("tokensToday:"+t.kind, "tokensByDay", fmt.Sprintf("sum(increase(%s%s))", counter(t.metric, all), today))
 	}
 
 	// One row per API key.
@@ -258,8 +258,8 @@ func (b *builder) plan() {
 	b.add("modelSpend", "models", byModel("litellm_spend_metric"))
 	b.add("modelTTFT50", "models", quantile(0.5, LabelModel, all, rng))
 	b.add("modelTTFT95", "models", quantile(0.95, LabelModel, all, rng))
-	b.add("modelFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("", f.matchers(nil, counterName("litellm_deployment_successful_fallbacks")))))
-	b.add("modelFailedFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("", f.matchers(nil, counterName("litellm_deployment_failed_fallbacks")))))
+	b.add("modelFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("litellm_deployment_successful_fallbacks", all)))
+	b.add("modelFailedFallbacks", "models", fmt.Sprintf("sum by (%s) (%s)", LabelModel, inc("litellm_deployment_failed_fallbacks", all)))
 
 	// Deployment state now: labelled by backend only, so not filtered.
 	b.add("deployments", "deployments", "max by (litellm_model_name, api_base, api_provider) (litellm_deployment_state)")
@@ -275,9 +275,9 @@ func (b *builder) plan() {
 
 	// Closed UTC days in the window, each evaluated at the following midnight.
 	b.ranged = append(b.ranged,
-		namedQuery{name: "spendDays", panel: "spendByDay", query: fmt.Sprintf("sum by (%s) (increase(litellm_spend_metric%s[1d]))", LabelModel, all)})
+		namedQuery{name: "spendDays", panel: "spendByDay", query: fmt.Sprintf("sum by (%s) (increase(%s[1d]))", LabelModel, counter("litellm_spend_metric", all))})
 	for _, t := range tokenMetrics {
-		b.ranged = append(b.ranged, namedQuery{name: "tokenDays:" + t.kind, panel: "tokensByDay", query: fmt.Sprintf("sum(increase(%s%s[1d]))", t.metric, all)})
+		b.ranged = append(b.ranged, namedQuery{name: "tokenDays:" + t.kind, panel: "tokensByDay", query: fmt.Sprintf("sum(increase(%s[1d]))", counter(t.metric, all))})
 	}
 }
 
@@ -287,10 +287,16 @@ var tokenMetrics = []struct{ kind, metric string }{
 	{"output", "litellm_output_tokens_metric"},
 }
 
-// counterName matches a LiteLLM counter with or without the _total suffix
-// the Prometheus client adds, as a __name__ matcher for Filter.matchers.
-func counterName(name string) string {
-	return fmt.Sprintf(`__name__=~"%s(_total)?"`, name)
+// counter selects a LiteLLM counter with or without the _total suffix
+// (LiteLLM's Prometheus client exports litellm_spend_metric as
+// litellm_spend_metric_total), adding the name matcher to the matchers m
+// ("" or "{a=\"b\",…}" from Filter.matchers).
+func counter(name, m string) string {
+	sel := fmt.Sprintf(`__name__=~"%s(_total)?"`, name)
+	if m == "" || m == "{}" {
+		return "{" + sel + "}"
+	}
+	return "{" + sel + "," + m[1:]
 }
 
 func quantile(q float64, by, m, rng string) string {
