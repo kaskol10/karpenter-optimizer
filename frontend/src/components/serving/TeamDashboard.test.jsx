@@ -94,4 +94,47 @@ describe('TeamDashboard', () => {
     render(<TeamDashboard />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load team usage: boom.');
   });
+
+  test('fallbacks, $0 requests and the deployments behind the gateway', async () => {
+    axios.get.mockImplementation((url) => {
+      if (url.endsWith('/api/v1/serving')) {
+        return Promise.resolve({
+          data: { pods: [{ namespace: 'llm', name: 'v1', model: 'meta-llama/Llama-3.3-70B', online: true, kvCachePercent: 91, waiting: 3 }] },
+        });
+      }
+      return Promise.resolve({
+        data: {
+          ...dashboard,
+          summary: { ...dashboard.summary, zeroCost: 12 },
+          models: [{ model: 'llama-70b', requests: 200, fallbacks: 5, failedFallbacks: 1, ttftP95Seconds: 1 }],
+          deployments: [
+            { model: 'hosted_vllm/meta-llama/Llama-3.3-70B', apiBase: 'http://vllm:8000', provider: 'hosted_vllm', state: 2 },
+            { model: 'openai/gpt-4o', apiBase: '', provider: 'openai', state: 0 },
+          ],
+        },
+      });
+    });
+    render(<TeamDashboard />);
+    expect(await screen.findByText('12 requests priced at $0')).toBeInTheDocument();
+    expect(screen.getByText('2.5%')).toHaveAttribute('title', '1 fallbacks failed too');
+    const deployments = screen.getByText('Deployments behind the gateway').closest('section');
+    expect(within(deployments).getByText('Outage')).toBeInTheDocument();
+    expect(await within(deployments).findByText('91%')).toBeInTheDocument();
+    expect(within(deployments).getByText('1/1')).toBeInTheDocument();
+    expect(within(deployments).getByText('Not served in this cluster')).toBeInTheDocument();
+  });
+
+  test('deployments: none reported, and /serving failing', async () => {
+    axios.get.mockImplementation((url) =>
+      url.endsWith('/api/v1/serving')
+        ? Promise.reject(new Error('x'))
+        : Promise.resolve({ data: { ...dashboard, deployments: [{ model: 'a', apiBase: '', state: 0 }] } }),
+    );
+    const { unmount } = render(<TeamDashboard />);
+    expect(await screen.findByText('Not served in this cluster')).toBeInTheDocument();
+    unmount();
+    axios.get.mockResolvedValue({ data: dashboard });
+    render(<TeamDashboard />);
+    expect(await screen.findByText('LiteLLM reports no deployment state.')).toBeInTheDocument();
+  });
 });
