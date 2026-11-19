@@ -47,8 +47,14 @@ describe('RoutingMap', () => {
   test('clicking an alias lights its paths and shows where its traffic goes', () => {
     const onFilter = vi.fn();
     render(<RoutingMap data={data} groups={groups} filtered={false} onFilter={onFilter} />);
+    expect(screen.queryAllByTestId('ants')).toHaveLength(0);
     fireEvent.click(node('Qwen/Qwen3.5-9B (acme)'));
     expect(node('Qwen/Qwen3.5-9B (acme)')).toHaveAttribute('aria-pressed', 'true');
+    // Marching ants on every link of its paths: Backend → alias, alias → two
+    // deployments (one a fallback), each deployment → where it runs.
+    const ants = screen.getAllByTestId('ants');
+    expect(ants).toHaveLength(5);
+    ants.forEach((a) => expect(a).toHaveClass('marching-ants'));
     expect(node('Search').getAttribute('class')).toMatch(/opacity-20/);
     const details = screen.getByRole('region', { name: /Details for acme\/Qwen\/Qwen3.5-9B/ });
     expect(within(details).getByText('Where its traffic goes')).toBeInTheDocument();

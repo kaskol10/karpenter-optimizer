@@ -36,6 +36,8 @@ const mid = (s, n) => {
   return `${s.slice(0, head)}…${s.slice(s.length - (n - 1 - head))}`;
 };
 const pct = (v) => `${v < 10 ? v.toFixed(1) : Math.round(v)}%`;
+// antWidth sizes the marching-ants overlay to sit inside its link.
+const antWidth = (l) => Math.max(1.25, Math.min((l.fallback ? Math.min(l.width, 3) : l.width) * 0.45, 4));
 const num = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : `${Math.round(v)}`);
 
 function Node({ n, box, dimmed, selected, onSelect, onExpand }) {
@@ -366,6 +368,10 @@ export function RoutingMap({ data, groups, filtered, onFilter }) {
               <title>{`${num(l.requests + l.failures)} requests${l.fallback ? ' (fallback)' : ''}`}</title>
             </path>
           ))}
+          {lit &&
+            lay.links
+              .filter((l) => lit.links.has(l.key))
+              .map((l) => <path key={`ants-${l.key}`} d={l.d} fill="none" stroke="white" strokeOpacity={0.85} strokeWidth={antWidth(l)} className="marching-ants" data-testid="ants" />)}
           {nodes.map((n) => (
             <Node
               key={n.id}

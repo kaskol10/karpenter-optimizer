@@ -54,20 +54,27 @@ function FlowNode({ x, y, width, height, index, payload, metric, total }) {
   );
 }
 
-// FlowLink draws a link in its source's colour, stronger when hovered.
+// FlowLink draws a link in its source's colour, stronger when hovered, with
+// marching ants running along it towards the model.
 function FlowLink({ sourceX, targetX, sourceY, targetY, sourceControlX, targetControlX, linkWidth, index, payload, active, onHover }) {
   const color = nodeColor(payload.source, payload.source.sourceRank ?? 0);
+  const d = `M${sourceX},${sourceY} C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`;
+  const width = Math.max(1, linkWidth);
   return (
-    <path
-      key={`link-${index}`}
-      d={`M${sourceX},${sourceY} C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`}
-      fill="none"
-      stroke={color}
-      strokeWidth={Math.max(1, linkWidth)}
-      strokeOpacity={active === null ? 0.35 : active === index ? 0.75 : 0.12}
-      onMouseEnter={() => onHover(index)}
-      onMouseLeave={() => onHover(null)}
-    />
+    <g key={`link-${index}`}>
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={width}
+        strokeOpacity={active === null ? 0.35 : active === index ? 0.75 : 0.12}
+        onMouseEnter={() => onHover(index)}
+        onMouseLeave={() => onHover(null)}
+      />
+      {active === index && (
+        <path d={d} fill="none" stroke="white" strokeOpacity={0.85} strokeWidth={Math.max(1.25, Math.min(width * 0.45, 4))} className="marching-ants" data-testid="ants" />
+      )}
+    </g>
   );
 }
 

@@ -42,11 +42,16 @@ describe('GatewayFlow', () => {
   test('hovering a link highlights it and dims the others', () => {
     const { container } = render(<GatewayFlow gateway={gateway} width={800} />);
     const [first, second] = container.querySelectorAll('path[stroke]');
+    expect(container.querySelectorAll('.marching-ants')).toHaveLength(0);
     fireEvent.mouseEnter(first);
     expect(first).toHaveAttribute('stroke-opacity', '0.75');
     expect(second).toHaveAttribute('stroke-opacity', '0.12');
+    const ants = container.querySelectorAll('.marching-ants');
+    expect(ants).toHaveLength(1);
+    expect(ants[0]).toHaveAttribute('d', first.getAttribute('d'));
     fireEvent.mouseLeave(first);
     expect(second).toHaveAttribute('stroke-opacity', '0.35');
+    expect(container.querySelectorAll('.marching-ants')).toHaveLength(0);
   });
 
   test('switches to spend; zero spend drops out', async () => {

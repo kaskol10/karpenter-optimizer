@@ -67,3 +67,22 @@
   }
 }
 
+
+/* Marching ants: a dashed overlay that runs along a selected link, in the
+   direction of the traffic. Still for people who ask for reduced motion. */
+@keyframes marching-ants {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+.marching-ants {
+  stroke-dasharray: 6 12;
+  stroke-linecap: round;
+  animation: marching-ants 0.9s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .marching-ants {
+    animation: none;
+  }
+}
