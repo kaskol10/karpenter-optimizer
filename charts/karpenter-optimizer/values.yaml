@@ -297,6 +297,17 @@ usage:
   # http://mimir-query-frontend.mimir.svc:8080/prometheus
   prometheusTenant: ""
 
+# The LiteLLM proxy config, for the Gateway page's fallback map: which model
+# groups exist, their aliases, the fallbacks between them and the retry and
+# cooldown settings. Name the ConfigMap that holds the proxy's config.yaml;
+# it may live in another namespace. Only the routing is read: API keys and
+# prices never leave the ConfigMap. The chart adds a Role in that namespace
+# allowing get on that one ConfigMap, nothing else.
+litellmConfig:
+  namespace: ""
+  configMapName: ""
+  key: config.yaml
+
 # Frontend configuration (deployed as sidecar container)
 frontend:
   enabled: true

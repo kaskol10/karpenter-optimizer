@@ -192,3 +192,20 @@ func (c *Client) GetPodLogs(ctx context.Context, namespace, podName, container s
 
 	return logs, nil
 }
+
+// IsForbidden reports whether err is a Kubernetes 403: the service account
+// lacks the RBAC rule for the call.
+func IsForbidden(err error) bool {
+	return k8serrors.IsForbidden(err)
+}
+
+// GetConfigMapData returns the data of one ConfigMap. It is a single
+// namespaced get, so a Role naming that ConfigMap is all the access it
+// needs (see the chart's litellmConfig values).
+func (c *Client) GetConfigMapData(ctx context.Context, namespace, name string) (map[string]string, error) {
+	cm, err := c.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return cm.Data, nil
+}

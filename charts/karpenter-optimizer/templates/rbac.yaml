@@ -70,5 +70,36 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "karpenter-optimizer.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- if and .Values.litellmConfig.namespace .Values.litellmConfig.configMapName }}
+---
+# Read the LiteLLM proxy config, and only that ConfigMap, in its namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "karpenter-optimizer.fullname" . }}-litellm-config
+  namespace: {{ .Values.litellmConfig.namespace }}
+  labels:
+    {{- include "karpenter-optimizer.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ .Values.litellmConfig.configMapName | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "karpenter-optimizer.fullname" . }}-litellm-config
+  namespace: {{ .Values.litellmConfig.namespace }}
+  labels:
+    {{- include "karpenter-optimizer.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "karpenter-optimizer.fullname" . }}-litellm-config
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "karpenter-optimizer.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}
-
+{{- end }}

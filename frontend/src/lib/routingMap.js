@@ -43,7 +43,7 @@ export function hostOf(apiBase) {
   }
 }
 
-const isExternal = (provider, apiBase) => {
+export const isExternal = (provider, apiBase) => {
   const host = hostOf(apiBase);
   if (host) return PUBLIC_HOSTS.test(host) || EXTERNAL.has(provider);
   return EXTERNAL.has(provider) || provider === 'openai';

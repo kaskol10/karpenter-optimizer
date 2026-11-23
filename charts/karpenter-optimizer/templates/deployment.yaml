@@ -154,6 +154,15 @@ spec:
             - name: PROMETHEUS_TENANT
               value: {{ . | quote }}
             {{- end }}
+            {{- if and .Values.litellmConfig.namespace .Values.litellmConfig.configMapName }}
+            # LiteLLM proxy config to read the routing and fallbacks from.
+            - name: LITELLM_CONFIGMAP_NAMESPACE
+              value: {{ .Values.litellmConfig.namespace | quote }}
+            - name: LITELLM_CONFIGMAP_NAME
+              value: {{ .Values.litellmConfig.configMapName | quote }}
+            - name: LITELLM_CONFIGMAP_KEY
+              value: {{ .Values.litellmConfig.key | default "config.yaml" | quote }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             # Prometheus /metrics exporter (opt-in).
             - name: METRICS_ENABLED
