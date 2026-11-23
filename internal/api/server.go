@@ -133,6 +133,9 @@ type Server struct {
 	// without PROMETHEUS_URL); gatewayDash caches its answers.
 	gatewayProm gatewaydash.Querier
 	gatewayDash gatewayDashCache
+	// gatewayRouting caches the LiteLLM routing config and the fallbacks
+	// taken, for the Gateway page's fallback map.
+	gatewayRouting gatewayRoutingCache
 }
 
 // learningAgent returns the process-wide LearningAgent, constructing it (once)
@@ -466,6 +469,7 @@ func (s *Server) setupRoutes() {
 		protected.GET("/serving/gateway", s.getServingGateway)
 		protected.GET("/serving/gateway/history", s.getServingGatewayHistory)
 		protected.GET("/serving/gateway/dashboard", s.getGatewayDashboard)
+		protected.GET("/serving/gateway/routing", s.getGatewayRouting)
 		protected.GET("/serving/history", s.getServingHistory)
 		protected.GET("/recommendations/cluster-summary", s.getRecommendationsFromClusterSummary)
 		protected.GET("/recommendations/cluster-summary/stream", s.getRecommendationsFromClusterSummarySSE)

@@ -9,6 +9,7 @@ import { usePolling } from '../../hooks/usePolling';
 import { useUrlParam } from '../../hooks/useUrlParam';
 import { GatewayCard } from './GatewayCard';
 import { TeamDashboard } from './TeamDashboard';
+import { FallbackCard } from './FallbackCard';
 
 const VIEWS = ['apps', 'models', 'flow'];
 const SPLITS = ['app', 'apikey', 'team'];
@@ -17,7 +18,8 @@ const SPLITS = ['app', 'apikey', 'team'];
 // usage split by app / API key / team, and cost by day. It used to sit at
 // the top of the Serving tab; on its own page it no longer pushes the model
 // servers down. View and split are URL params (?view=models&split=team).
-// Below the live card, the team dashboard reads LiteLLM's metrics from
+// Below the live card, the fallback map draws the proxy's routing config
+// (?fallbacks=7d) and the team dashboard reads LiteLLM's metrics from
 // Prometheus (?team=&model=&key=&range=).
 export default function GatewayPage() {
   const [gateway, setGateway] = useState(undefined); // undefined = loading, null = none found
@@ -64,6 +66,7 @@ export default function GatewayPage() {
           )}
         </CardContent>
       </Card>
+      <FallbackCard />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

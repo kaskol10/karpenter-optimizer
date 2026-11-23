@@ -43,6 +43,12 @@ type Config struct {
 	// PrometheusTenant, when set, is sent as X-Scope-OrgID with every query
 	// to PrometheusURL, for multi-tenant APIs such as Grafana Mimir.
 	PrometheusTenant string
+	// LiteLLMConfigMap* name the ConfigMap holding the LiteLLM proxy's
+	// config.yaml, read (routing only: model groups, aliases, fallbacks) for
+	// the Gateway page's fallback map. Empty name or namespace = off.
+	LiteLLMConfigMapNamespace string
+	LiteLLMConfigMapName      string
+	LiteLLMConfigMapKey       string
 	// Legacy Ollama configuration (for backward compatibility)
 	OllamaURL   string
 	OllamaModel string
@@ -127,15 +133,19 @@ func Load() *Config {
 		PlacementHistoryDSN:  resolvePlacementHistoryDSN(),
 		PrometheusURL:        getEnv("PROMETHEUS_URL", ""),
 		PrometheusTenant:     getEnv("PROMETHEUS_TENANT", ""),
-		OllamaURL:            ollamaURL, // Keep for backward compatibility
-		OllamaModel:          ollamaModel,
-		AWSRegion:            getEnv("AWS_REGION", "eu-west-1"),
-		AWSAccessKeyID:       getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretAccessKey:   getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		AWSSessionToken:      getEnv("AWS_SESSION_TOKEN", ""),
-		AgentHistoryFile:     getEnv("AGENT_HISTORY_FILE", "/tmp/karpenter-optimizer-history.json"),
-		Debug:                getEnvBool("DEBUG", false),
-		APIAuthToken:         getEnv("API_AUTH_TOKEN", ""),
+
+		LiteLLMConfigMapNamespace: getEnv("LITELLM_CONFIGMAP_NAMESPACE", ""),
+		LiteLLMConfigMapName:      getEnv("LITELLM_CONFIGMAP_NAME", ""),
+		LiteLLMConfigMapKey:       getEnv("LITELLM_CONFIGMAP_KEY", "config.yaml"),
+		OllamaURL:                 ollamaURL, // Keep for backward compatibility
+		OllamaModel:               ollamaModel,
+		AWSRegion:                 getEnv("AWS_REGION", "eu-west-1"),
+		AWSAccessKeyID:            getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:        getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSSessionToken:           getEnv("AWS_SESSION_TOKEN", ""),
+		AgentHistoryFile:          getEnv("AGENT_HISTORY_FILE", "/tmp/karpenter-optimizer-history.json"),
+		Debug:                     getEnvBool("DEBUG", false),
+		APIAuthToken:              getEnv("API_AUTH_TOKEN", ""),
 	}
 }
 

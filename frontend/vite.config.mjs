@@ -32,13 +32,13 @@ export default defineConfig({
       // Serving and Topology logic; CI fails if any one of them drops.
       thresholds: {
         perFile: true,
-        'src/lib/{api,gatewayFlow,gatewayOperator,routingMap,teamDashboard,blastRadius,drainSim,gpuFit,nodeActions,placementPlanner,pollingClock,servingCost,servingHeadroom,servingLatency,servingModels,servingPlacement,servingStatus,servingTriage,routes,commandPalette,topologyHistory,topologyLenses}.js': {
+        'src/lib/{api,fallbackMap,gatewayFlow,gatewayOperator,routingMap,teamDashboard,blastRadius,drainSim,gpuFit,nodeActions,placementPlanner,pollingClock,servingCost,servingHeadroom,servingLatency,servingModels,servingPlacement,servingStatus,servingTriage,routes,commandPalette,topologyHistory,topologyLenses}.js': {
           statements: 90,
           lines: 90,
           functions: 90,
           branches: 75,
         },
-        'src/hooks/{useGatewayDashboard,useDrainPlan,usePolling,useTopologyData,useTopologyHistory,useTopologyZoom,useUrlParam}.js': {
+        'src/hooks/{useGatewayDashboard,useGatewayRouting,useDrainPlan,usePolling,useTopologyData,useTopologyHistory,useTopologyZoom,useUrlParam}.js': {
           statements: 90,
           lines: 90,
           functions: 90,
